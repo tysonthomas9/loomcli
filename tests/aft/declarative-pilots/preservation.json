@@ -35247,7 +35247,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -35256,10 +35256,21 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2916,
                 "sourceFunction": "reasoning_receipts",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical saved/retained evidence interfaces alone do not prove both sealed Thinking checkpoints or final dynamic checker predicates. Exact YAML composition/typed raw-text projection remains unvalidated; geometryfc is unreviewed/unconsumed.",
+                "missingObservation": "Retain same first-turn saved raw reasoning EventIDs/text/null facts,immutable stage snapshots/digests/exact tuple/window,actual DOM folded+expanded and source preview semantics. Both final checks must run and require actual nonempty provider reasoning text; no synthetic Thinking or empty-state pass."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Recovered final callback requires nonempty saved reasoning set and EVERY actual EventID with string nonwhitespace text,unique IDs. Null/empty presentation does NOT discharge original final text prerequisite.",
+                "recoveredDynamicCallback": true,
+                "acceptance": "Source recovery only; coverage unresolved. No YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -35272,7 +35283,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -35281,10 +35292,21 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2918,
                 "sourceFunction": "reasoning_receipts",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical saved/retained evidence interfaces alone do not prove both sealed Thinking checkpoints or final dynamic checker predicates. Exact YAML composition/typed raw-text projection remains unvalidated; geometryfc is unreviewed/unconsumed.",
+                "missingObservation": "Retain same first-turn saved raw reasoning EventIDs/text/null facts,immutable stage snapshots/digests/exact tuple/window,actual DOM folded+expanded and source preview semantics. Both final checks must run and require actual nonempty provider reasoning text; no synthetic Thinking or empty-state pass."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Recovered final callback requires nonempty saved reasoning set and EVERY actual EventID with string nonwhitespace text,unique IDs. Null/empty presentation does NOT discharge original final text prerequisite.",
+                "recoveredDynamicCallback": true,
+                "acceptance": "Source recovery only; coverage unresolved. No YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -35297,7 +35319,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -35306,10 +35328,21 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2958,
                 "sourceFunction": "assert_reasoning_rows",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical saved/retained evidence interfaces alone do not prove both sealed Thinking checkpoints or final dynamic checker predicates. Exact YAML composition/typed raw-text projection remains unvalidated; geometryfc is unreviewed/unconsumed.",
+                "missingObservation": "Retain same first-turn saved raw reasoning EventIDs/text/null facts,immutable stage snapshots/digests/exact tuple/window,actual DOM folded+expanded and source preview semantics. Both final checks must run and require actual nonempty provider reasoning text; no synthetic Thinking or empty-state pass."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Recovered final callback BOTH checkpoints/collapsed+expanded: same saved order/count,Thinking completed,source first-line Markdown stripping/Python120char preview,exact expandedstate andrawbody==actualtext orNone.",
+                "recoveredDynamicCallback": true,
+                "acceptance": "Source recovery only; coverage unresolved. No YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -35322,7 +35355,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -35331,10 +35364,21 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2969,
                 "sourceFunction": "assert_reasoning_saved_after_reload",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical saved/retained evidence interfaces alone do not prove both sealed Thinking checkpoints or final dynamic checker predicates. Exact YAML composition/typed raw-text projection remains unvalidated; geometryfc is unreviewed/unconsumed.",
+                "missingObservation": "Retain same first-turn saved raw reasoning EventIDs/text/null facts,immutable stage snapshots/digests/exact tuple/window,actual DOM folded+expanded and source preview semantics. Both final checks must run and require actual nonempty provider reasoning text; no synthetic Thinking or empty-state pass."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Recovered selected callback compares ENTIRE delivered/turn/items plus derived EventID/text lists across snapshots,not just EventIDs or lengths.",
+                "recoveredDynamicCallback": true,
+                "acceptance": "Source recovery only; coverage unresolved. No YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -35347,7 +35391,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -35356,13 +35400,23 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2975,
                 "sourceFunction": "save_reasoning_capture",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical saved/retained evidence interfaces alone do not prove both sealed Thinking checkpoints or final dynamic checker predicates. Exact YAML composition/typed raw-text projection remains unvalidated; geometryfc is unreviewed/unconsumed.",
+                "missingObservation": "Retain same first-turn saved raw reasoning EventIDs/text/null facts,immutable stage snapshots/digests/exact tuple/window,actual DOM folded+expanded and source preview semantics. Both final checks must run and require actual nonempty provider reasoning text; no synthetic Thinking or empty-state pass."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35"
+                ],
+                "sourceReason": "Both explicit selected stages first-capture-only: neither capture norseal mayexist orbesymlink before write; binds same original sourceRUN/ws/agent/stage/case.",
+                "recoveredDynamicCallback": false,
+                "acceptance": "Source recovery only; coverage unresolved. No YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -35375,7 +35429,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -35384,10 +35438,21 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2983,
                 "sourceFunction": "load_reasoning_capture",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical saved/retained evidence interfaces alone do not prove both sealed Thinking checkpoints or final dynamic checker predicates. Exact YAML composition/typed raw-text projection remains unvalidated; geometryfc is unreviewed/unconsumed.",
+                "missingObservation": "Retain same first-turn saved raw reasoning EventIDs/text/null facts,immutable stage snapshots/digests/exact tuple/window,actual DOM folded+expanded and source preview semantics. Both final checks must run and require actual nonempty provider reasoning text; no synthetic Thinking or empty-state pass."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Recovered dynamic callback: final_visual_assert passes reasoning_assert as checker then invokes check(); reasoning_assert loads BOTH before-reload/reloaded sealed checkpoints,never re-captures after secondturn.",
+                "recoveredDynamicCallback": true,
+                "acceptance": "Source recovery only; coverage unresolved. No YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -35400,7 +35465,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -35409,10 +35474,21 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2986,
                 "sourceFunction": "load_reasoning_capture",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical saved/retained evidence interfaces alone do not prove both sealed Thinking checkpoints or final dynamic checker predicates. Exact YAML composition/typed raw-text projection remains unvalidated; geometryfc is unreviewed/unconsumed.",
+                "missingObservation": "Retain same first-turn saved raw reasoning EventIDs/text/null facts,immutable stage snapshots/digests/exact tuple/window,actual DOM folded+expanded and source preview semantics. Both final checks must run and require actual nonempty provider reasoning text; no synthetic Thinking or empty-state pass."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Recovered dynamic callback: final_visual_assert passes reasoning_assert as checker then invokes check(); reasoning_assert loads BOTH before-reload/reloaded sealed checkpoints,never re-captures after secondturn.",
+                "recoveredDynamicCallback": true,
+                "acceptance": "Source recovery only; coverage unresolved. No YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -35425,7 +35501,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -35434,10 +35510,21 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2992,
                 "sourceFunction": "load_reasoning_capture",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical saved/retained evidence interfaces alone do not prove both sealed Thinking checkpoints or final dynamic checker predicates. Exact YAML composition/typed raw-text projection remains unvalidated; geometryfc is unreviewed/unconsumed.",
+                "missingObservation": "Retain same first-turn saved raw reasoning EventIDs/text/null facts,immutable stage snapshots/digests/exact tuple/window,actual DOM folded+expanded and source preview semantics. Both final checks must run and require actual nonempty provider reasoning text; no synthetic Thinking or empty-state pass."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Recovered dynamic callback: final_visual_assert passes reasoning_assert as checker then invokes check(); reasoning_assert loads BOTH before-reload/reloaded sealed checkpoints,never re-captures after secondturn.",
+                "recoveredDynamicCallback": true,
+                "acceptance": "Source recovery only; coverage unresolved. No YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -35450,7 +35537,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -35459,10 +35546,21 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2995,
                 "sourceFunction": "load_reasoning_capture",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical saved/retained evidence interfaces alone do not prove both sealed Thinking checkpoints or final dynamic checker predicates. Exact YAML composition/typed raw-text projection remains unvalidated; geometryfc is unreviewed/unconsumed.",
+                "missingObservation": "Retain same first-turn saved raw reasoning EventIDs/text/null facts,immutable stage snapshots/digests/exact tuple/window,actual DOM folded+expanded and source preview semantics. Both final checks must run and require actual nonempty provider reasoning text; no synthetic Thinking or empty-state pass."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Recovered dynamic callback: final_visual_assert passes reasoning_assert as checker then invokes check(); reasoning_assert loads BOTH before-reload/reloaded sealed checkpoints,never re-captures after secondturn.",
+                "recoveredDynamicCallback": true,
+                "acceptance": "Source recovery only; coverage unresolved. No YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -35475,7 +35573,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -35484,10 +35582,21 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2996,
                 "sourceFunction": "load_reasoning_capture",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical saved/retained evidence interfaces alone do not prove both sealed Thinking checkpoints or final dynamic checker predicates. Exact YAML composition/typed raw-text projection remains unvalidated; geometryfc is unreviewed/unconsumed.",
+                "missingObservation": "Retain same first-turn saved raw reasoning EventIDs/text/null facts,immutable stage snapshots/digests/exact tuple/window,actual DOM folded+expanded and source preview semantics. Both final checks must run and require actual nonempty provider reasoning text; no synthetic Thinking or empty-state pass."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Recovered dynamic callback: final_visual_assert passes reasoning_assert as checker then invokes check(); reasoning_assert loads BOTH before-reload/reloaded sealed checkpoints,never re-captures after secondturn.",
+                "recoveredDynamicCallback": true,
+                "acceptance": "Source recovery only; coverage unresolved. No YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -35500,7 +35609,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -35509,10 +35618,21 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2998,
                 "sourceFunction": "load_reasoning_capture",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical saved/retained evidence interfaces alone do not prove both sealed Thinking checkpoints or final dynamic checker predicates. Exact YAML composition/typed raw-text projection remains unvalidated; geometryfc is unreviewed/unconsumed.",
+                "missingObservation": "Retain same first-turn saved raw reasoning EventIDs/text/null facts,immutable stage snapshots/digests/exact tuple/window,actual DOM folded+expanded and source preview semantics. Both final checks must run and require actual nonempty provider reasoning text; no synthetic Thinking or empty-state pass."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Recovered dynamic callback: final_visual_assert passes reasoning_assert as checker then invokes check(); reasoning_assert loads BOTH before-reload/reloaded sealed checkpoints,never re-captures after secondturn.",
+                "recoveredDynamicCallback": true,
+                "acceptance": "Source recovery only; coverage unresolved. No YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -35525,7 +35645,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -35534,10 +35654,21 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 3000,
                 "sourceFunction": "load_reasoning_capture",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical saved/retained evidence interfaces alone do not prove both sealed Thinking checkpoints or final dynamic checker predicates. Exact YAML composition/typed raw-text projection remains unvalidated; geometryfc is unreviewed/unconsumed.",
+                "missingObservation": "Retain same first-turn saved raw reasoning EventIDs/text/null facts,immutable stage snapshots/digests/exact tuple/window,actual DOM folded+expanded and source preview semantics. Both final checks must run and require actual nonempty provider reasoning text; no synthetic Thinking or empty-state pass."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Recovered dynamic callback: final_visual_assert passes reasoning_assert as checker then invokes check(); reasoning_assert loads BOTH before-reload/reloaded sealed checkpoints,never re-captures after secondturn.",
+                "recoveredDynamicCallback": true,
+                "acceptance": "Source recovery only; coverage unresolved. No YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -35550,7 +35681,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -35559,13 +35690,23 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 3007,
                 "sourceFunction": "reasoning_capture",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical saved/retained evidence interfaces alone do not prove both sealed Thinking checkpoints or final dynamic checker predicates. Exact YAML composition/typed raw-text projection remains unvalidated; geometryfc is unreviewed/unconsumed.",
+                "missingObservation": "Retain same first-turn saved raw reasoning EventIDs/text/null facts,immutable stage snapshots/digests/exact tuple/window,actual DOM folded+expanded and source preview semantics. Both final checks must run and require actual nonempty provider reasoning text; no synthetic Thinking or empty-state pass."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35"
+                ],
+                "sourceReason": "Explicit selected stages before-reload22/reloaded35,actual first rendering window: saved items/collapsed+expanded DOM frozen with equal final saved tuple,not validated yet.",
+                "recoveredDynamicCallback": false,
+                "acceptance": "Source recovery only; coverage unresolved. No YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -35578,7 +35719,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -35587,13 +35728,23 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 3034,
                 "sourceFunction": "reasoning_capture",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical saved/retained evidence interfaces alone do not prove both sealed Thinking checkpoints or final dynamic checker predicates. Exact YAML composition/typed raw-text projection remains unvalidated; geometryfc is unreviewed/unconsumed.",
+                "missingObservation": "Retain same first-turn saved raw reasoning EventIDs/text/null facts,immutable stage snapshots/digests/exact tuple/window,actual DOM folded+expanded and source preview semantics. Both final checks must run and require actual nonempty provider reasoning text; no synthetic Thinking or empty-state pass."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35"
+                ],
+                "sourceReason": "Explicit selected stages before-reload22/reloaded35,actual first rendering window: saved items/collapsed+expanded DOM frozen with equal final saved tuple,not validated yet.",
+                "recoveredDynamicCallback": false,
+                "acceptance": "Source recovery only; coverage unresolved. No YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -35606,7 +35757,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -35615,12 +35766,21 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 3052,
                 "sourceFunction": "reasoning_presentation_grid",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical saved/retained evidence interfaces alone do not prove both sealed Thinking checkpoints or final dynamic checker predicates. Exact YAML composition/typed raw-text projection remains unvalidated; geometryfc is unreviewed/unconsumed.",
+                "missingObservation": "Retain same first-turn saved raw reasoning EventIDs/text/null facts,immutable stage snapshots/digests/exact tuple/window,actual DOM folded+expanded and source preview semantics. Both final checks must run and require actual nonempty provider reasoning text; no synthetic Thinking or empty-state pass."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+                ],
+                "sourceReason": "Actual saved reasoning items REQUIRED for source presentation grid.800/390x844light/dark,realexpand and FIRST expanded toggle focus+Enter for every actualtoggle,emptyrowsnonexpandable. Originalviewport/theme restore in finally.",
+                "recoveredDynamicCallback": false,
+                "acceptance": "Source recovery only; coverage unresolved. No YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -35633,7 +35793,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -35642,10 +35802,21 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 3117,
                 "sourceFunction": "reasoning_assert",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical saved/retained evidence interfaces alone do not prove both sealed Thinking checkpoints or final dynamic checker predicates. Exact YAML composition/typed raw-text projection remains unvalidated; geometryfc is unreviewed/unconsumed.",
+                "missingObservation": "Retain same first-turn saved raw reasoning EventIDs/text/null facts,immutable stage snapshots/digests/exact tuple/window,actual DOM folded+expanded and source preview semantics. Both final checks must run and require actual nonempty provider reasoning text; no synthetic Thinking or empty-state pass."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Recovered actual reasoning checker callback executed independently alongside motion even when motion fails; first saved delivered/turn tuple must equal first motion capture tuple.",
+                "recoveredDynamicCallback": true,
+                "acceptance": "Source recovery only; coverage unresolved. No YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -38957,7 +39128,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -38966,10 +39137,21 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2960,
                 "sourceFunction": "assert_reasoning_rows",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical saved/retained evidence interfaces alone do not prove both sealed Thinking checkpoints or final dynamic checker predicates. Exact YAML composition/typed raw-text projection remains unvalidated; geometryfc is unreviewed/unconsumed.",
+                "missingObservation": "Retain same first-turn saved raw reasoning EventIDs/text/null facts,immutable stage snapshots/digests/exact tuple/window,actual DOM folded+expanded and source preview semantics. Both final checks must run and require actual nonempty provider reasoning text; no synthetic Thinking or empty-state pass."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Recovered final callback BOTH checkpoints/collapsed+expanded: same saved order/count,Thinking completed,source first-line Markdown stripping/Python120char preview,exact expandedstate andrawbody==actualtext orNone.",
+                "recoveredDynamicCallback": true,
+                "acceptance": "Source recovery only; coverage unresolved. No YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -38982,7 +39164,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -38991,10 +39173,21 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2961,
                 "sourceFunction": "assert_reasoning_rows",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical saved/retained evidence interfaces alone do not prove both sealed Thinking checkpoints or final dynamic checker predicates. Exact YAML composition/typed raw-text projection remains unvalidated; geometryfc is unreviewed/unconsumed.",
+                "missingObservation": "Retain same first-turn saved raw reasoning EventIDs/text/null facts,immutable stage snapshots/digests/exact tuple/window,actual DOM folded+expanded and source preview semantics. Both final checks must run and require actual nonempty provider reasoning text; no synthetic Thinking or empty-state pass."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Recovered final callback BOTH checkpoints/collapsed+expanded: same saved order/count,Thinking completed,source first-line Markdown stripping/Python120char preview,exact expandedstate andrawbody==actualtext orNone.",
+                "recoveredDynamicCallback": true,
+                "acceptance": "Source recovery only; coverage unresolved. No YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -39007,7 +39200,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -39016,10 +39209,21 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2963,
                 "sourceFunction": "assert_reasoning_rows",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical saved/retained evidence interfaces alone do not prove both sealed Thinking checkpoints or final dynamic checker predicates. Exact YAML composition/typed raw-text projection remains unvalidated; geometryfc is unreviewed/unconsumed.",
+                "missingObservation": "Retain same first-turn saved raw reasoning EventIDs/text/null facts,immutable stage snapshots/digests/exact tuple/window,actual DOM folded+expanded and source preview semantics. Both final checks must run and require actual nonempty provider reasoning text; no synthetic Thinking or empty-state pass."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Recovered final callback BOTH checkpoints/collapsed+expanded: same saved order/count,Thinking completed,source first-line Markdown stripping/Python120char preview,exact expandedstate andrawbody==actualtext orNone.",
+                "recoveredDynamicCallback": true,
+                "acceptance": "Source recovery only; coverage unresolved. No YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -39032,7 +39236,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -39041,10 +39245,21 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2964,
                 "sourceFunction": "assert_reasoning_rows",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical saved/retained evidence interfaces alone do not prove both sealed Thinking checkpoints or final dynamic checker predicates. Exact YAML composition/typed raw-text projection remains unvalidated; geometryfc is unreviewed/unconsumed.",
+                "missingObservation": "Retain same first-turn saved raw reasoning EventIDs/text/null facts,immutable stage snapshots/digests/exact tuple/window,actual DOM folded+expanded and source preview semantics. Both final checks must run and require actual nonempty provider reasoning text; no synthetic Thinking or empty-state pass."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Recovered final callback BOTH checkpoints/collapsed+expanded: same saved order/count,Thinking completed,source first-line Markdown stripping/Python120char preview,exact expandedstate andrawbody==actualtext orNone.",
+                "recoveredDynamicCallback": true,
+                "acceptance": "Source recovery only; coverage unresolved. No YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -39057,7 +39272,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -39066,10 +39281,21 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 3002,
                 "sourceFunction": "load_reasoning_capture",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical saved/retained evidence interfaces alone do not prove both sealed Thinking checkpoints or final dynamic checker predicates. Exact YAML composition/typed raw-text projection remains unvalidated; geometryfc is unreviewed/unconsumed.",
+                "missingObservation": "Retain same first-turn saved raw reasoning EventIDs/text/null facts,immutable stage snapshots/digests/exact tuple/window,actual DOM folded+expanded and source preview semantics. Both final checks must run and require actual nonempty provider reasoning text; no synthetic Thinking or empty-state pass."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Recovered dynamic callback: final_visual_assert passes reasoning_assert as checker then invokes check(); reasoning_assert loads BOTH before-reload/reloaded sealed checkpoints,never re-captures after secondturn.",
+                "recoveredDynamicCallback": true,
+                "acceptance": "Source recovery only; coverage unresolved. No YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -39082,7 +39308,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -39091,12 +39317,21 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 3076,
                 "sourceFunction": "reasoning_presentation_grid",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical saved/retained evidence interfaces alone do not prove both sealed Thinking checkpoints or final dynamic checker predicates. Exact YAML composition/typed raw-text projection remains unvalidated; geometryfc is unreviewed/unconsumed.",
+                "missingObservation": "Retain same first-turn saved raw reasoning EventIDs/text/null facts,immutable stage snapshots/digests/exact tuple/window,actual DOM folded+expanded and source preview semantics. Both final checks must run and require actual nonempty provider reasoning text; no synthetic Thinking or empty-state pass."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+                ],
+                "sourceReason": "Actual saved reasoning items REQUIRED for source presentation grid.800/390x844light/dark,realexpand and FIRST expanded toggle focus+Enter for every actualtoggle,emptyrowsnonexpandable. Originalviewport/theme restore in finally.",
+                "recoveredDynamicCallback": false,
+                "acceptance": "Source recovery only; coverage unresolved. No YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -39109,7 +39344,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -39118,10 +39353,21 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 3088,
                 "sourceFunction": "assert_reasoning_captures",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical saved/retained evidence interfaces alone do not prove both sealed Thinking checkpoints or final dynamic checker predicates. Exact YAML composition/typed raw-text projection remains unvalidated; geometryfc is unreviewed/unconsumed.",
+                "missingObservation": "Retain same first-turn saved raw reasoning EventIDs/text/null facts,immutable stage snapshots/digests/exact tuple/window,actual DOM folded+expanded and source preview semantics. Both final checks must run and require actual nonempty provider reasoning text; no synthetic Thinking or empty-state pass."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Recovered reasoning_assert -> validate BOTH checkpoint stage/item windows,exact reload saved tuples/order,then require actual nonempty text and collapsed/expanded body comparisons.",
+                "recoveredDynamicCallback": true,
+                "acceptance": "Source recovery only; coverage unresolved. No YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -39134,7 +39380,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -39143,10 +39389,21 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 3090,
                 "sourceFunction": "assert_reasoning_captures",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical saved/retained evidence interfaces alone do not prove both sealed Thinking checkpoints or final dynamic checker predicates. Exact YAML composition/typed raw-text projection remains unvalidated; geometryfc is unreviewed/unconsumed.",
+                "missingObservation": "Retain same first-turn saved raw reasoning EventIDs/text/null facts,immutable stage snapshots/digests/exact tuple/window,actual DOM folded+expanded and source preview semantics. Both final checks must run and require actual nonempty provider reasoning text; no synthetic Thinking or empty-state pass."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Recovered reasoning_assert -> validate BOTH checkpoint stage/item windows,exact reload saved tuples/order,then require actual nonempty text and collapsed/expanded body comparisons.",
+                "recoveredDynamicCallback": true,
+                "acceptance": "Source recovery only; coverage unresolved. No YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -39159,7 +39416,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -39168,10 +39425,21 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 3092,
                 "sourceFunction": "assert_reasoning_captures",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical saved/retained evidence interfaces alone do not prove both sealed Thinking checkpoints or final dynamic checker predicates. Exact YAML composition/typed raw-text projection remains unvalidated; geometryfc is unreviewed/unconsumed.",
+                "missingObservation": "Retain same first-turn saved raw reasoning EventIDs/text/null facts,immutable stage snapshots/digests/exact tuple/window,actual DOM folded+expanded and source preview semantics. Both final checks must run and require actual nonempty provider reasoning text; no synthetic Thinking or empty-state pass."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Recovered reasoning_assert -> validate BOTH checkpoint stage/item windows,exact reload saved tuples/order,then require actual nonempty text and collapsed/expanded body comparisons.",
+                "recoveredDynamicCallback": true,
+                "acceptance": "Source recovery only; coverage unresolved. No YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -39184,7 +39452,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -39193,10 +39461,21 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 3093,
                 "sourceFunction": "assert_reasoning_captures",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical saved/retained evidence interfaces alone do not prove both sealed Thinking checkpoints or final dynamic checker predicates. Exact YAML composition/typed raw-text projection remains unvalidated; geometryfc is unreviewed/unconsumed.",
+                "missingObservation": "Retain same first-turn saved raw reasoning EventIDs/text/null facts,immutable stage snapshots/digests/exact tuple/window,actual DOM folded+expanded and source preview semantics. Both final checks must run and require actual nonempty provider reasoning text; no synthetic Thinking or empty-state pass."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Recovered reasoning_assert -> validate BOTH checkpoint stage/item windows,exact reload saved tuples/order,then require actual nonempty text and collapsed/expanded body comparisons.",
+                "recoveredDynamicCallback": true,
+                "acceptance": "Source recovery only; coverage unresolved. No YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -39209,7 +39488,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -39218,10 +39497,21 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 3097,
                 "sourceFunction": "assert_reasoning_captures",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical saved/retained evidence interfaces alone do not prove both sealed Thinking checkpoints or final dynamic checker predicates. Exact YAML composition/typed raw-text projection remains unvalidated; geometryfc is unreviewed/unconsumed.",
+                "missingObservation": "Retain same first-turn saved raw reasoning EventIDs/text/null facts,immutable stage snapshots/digests/exact tuple/window,actual DOM folded+expanded and source preview semantics. Both final checks must run and require actual nonempty provider reasoning text; no synthetic Thinking or empty-state pass."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+                ],
+                "sourceReason": "Recovered reasoning_assert -> validate BOTH checkpoint stage/item windows,exact reload saved tuples/order,then require actual nonempty text and collapsed/expanded body comparisons.",
+                "recoveredDynamicCallback": true,
+                "acceptance": "Source recovery only; coverage unresolved. No YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -42368,7 +42658,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -42377,12 +42667,21 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 3069,
                 "sourceFunction": "reasoning_presentation_grid",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Canonical saved/retained evidence interfaces alone do not prove both sealed Thinking checkpoints or final dynamic checker predicates. Exact YAML composition/typed raw-text projection remains unvalidated; geometryfc is unreviewed/unconsumed.",
+                "missingObservation": "Retain same first-turn saved raw reasoning EventIDs/text/null facts,immutable stage snapshots/digests/exact tuple/window,actual DOM folded+expanded and source preview semantics. Both final checks must run and require actual nonempty provider reasoning text; no synthetic Thinking or empty-state pass."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+                ],
+                "sourceReason": "Actual saved reasoning items REQUIRED for source presentation grid.800/390x844light/dark,realexpand and FIRST expanded toggle focus+Enter for every actualtoggle,emptyrowsnonexpandable. Originalviewport/theme restore in finally. Focus assertion executes ONLY actual available expandedtoggle loop;absent/null-text rows have no toggle,never synthesize a keyboard pass.",
+                "recoveredDynamicCallback": false,
+                "acceptance": "Source recovery only; coverage unresolved. No YAML/preservation/runtime credit."
+              }
             },
             {
               "source": {
@@ -43748,7 +44047,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -43757,14 +44056,24 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-disclosures.py",
                 "sourceLine": 23,
                 "sourceFunction": "assert_thinking_presentation",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Unreviewed geometryfc candidate mayoffer samecallback facts; exact savedtext availability branches and real expansion/keyboard action assertions unvalidated.",
+                "missingObservation": "Actual same-source items+DOMorderedrows,heading/status/fullbody/aria/tabIndex/row-parent-chevron boxes andoriginalthresholds,with None distinctfrommissing/rawtext unavailable;keep realactorandfinalprerequisite."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+                ],
+                "sourceReason": "Presentation22/35 collapsed+expanded andactualgrid37: saved item order/count/exactidentity/kind,text None-or-string,Thinking completed androw geometry. Emptyitem22/35 can vacuouslyhave0rows,butgrid37 blocks absentitems and final46 separatelyrequiresactualnonemptyreasoningtext.",
+                "acceptance": "Source branch only;coverage unresolved,presentation andfinaltext criteria distinct."
+              }
             },
             {
               "source": {
@@ -44052,7 +44361,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -44061,14 +44370,24 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-disclosures.py",
                 "sourceLine": 25,
                 "sourceFunction": "assert_thinking_presentation",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Unreviewed geometryfc candidate mayoffer samecallback facts; exact savedtext availability branches and real expansion/keyboard action assertions unvalidated.",
+                "missingObservation": "Actual same-source items+DOMorderedrows,heading/status/fullbody/aria/tabIndex/row-parent-chevron boxes andoriginalthresholds,with None distinctfrommissing/rawtext unavailable;keep realactorandfinalprerequisite."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+                ],
+                "sourceReason": "Presentation22/35 collapsed+expanded andactualgrid37: saved item order/count/exactidentity/kind,text None-or-string,Thinking completed androw geometry. Emptyitem22/35 can vacuouslyhave0rows,butgrid37 blocks absentitems and final46 separatelyrequiresactualnonemptyreasoningtext.",
+                "acceptance": "Source branch only;coverage unresolved,presentation andfinaltext criteria distinct."
+              }
             },
             {
               "source": {
@@ -44081,7 +44400,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -44090,14 +44409,24 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-disclosures.py",
                 "sourceLine": 28,
                 "sourceFunction": "assert_thinking_presentation",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Unreviewed geometryfc candidate mayoffer samecallback facts; exact savedtext availability branches and real expansion/keyboard action assertions unvalidated.",
+                "missingObservation": "Actual same-source items+DOMorderedrows,heading/status/fullbody/aria/tabIndex/row-parent-chevron boxes andoriginalthresholds,with None distinctfrommissing/rawtext unavailable;keep realactorandfinalprerequisite."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+                ],
+                "sourceReason": "Presentation22/35 collapsed+expanded andactualgrid37: saved item order/count/exactidentity/kind,text None-or-string,Thinking completed androw geometry. Emptyitem22/35 can vacuouslyhave0rows,butgrid37 blocks absentitems and final46 separatelyrequiresactualnonemptyreasoningtext.",
+                "acceptance": "Source branch only;coverage unresolved,presentation andfinaltext criteria distinct."
+              }
             },
             {
               "source": {
@@ -44110,7 +44439,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -44119,14 +44448,24 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-disclosures.py",
                 "sourceLine": 30,
                 "sourceFunction": "assert_thinking_presentation",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Unreviewed geometryfc candidate mayoffer samecallback facts; exact savedtext availability branches and real expansion/keyboard action assertions unvalidated.",
+                "missingObservation": "Actual same-source items+DOMorderedrows,heading/status/fullbody/aria/tabIndex/row-parent-chevron boxes andoriginalthresholds,with None distinctfrommissing/rawtext unavailable;keep realactorandfinalprerequisite."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+                ],
+                "sourceReason": "Presentation22/35 collapsed+expanded andactualgrid37: saved item order/count/exactidentity/kind,text None-or-string,Thinking completed androw geometry. Emptyitem22/35 can vacuouslyhave0rows,butgrid37 blocks absentitems and final46 separatelyrequiresactualnonemptyreasoningtext.",
+                "acceptance": "Source branch only;coverage unresolved,presentation andfinaltext criteria distinct."
+              }
             },
             {
               "source": {
@@ -44139,7 +44478,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -44148,14 +44487,24 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-disclosures.py",
                 "sourceLine": 39,
                 "sourceFunction": "assert_thinking_presentation",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Unreviewed geometryfc candidate mayoffer samecallback facts; exact savedtext availability branches and real expansion/keyboard action assertions unvalidated.",
+                "missingObservation": "Actual same-source items+DOMorderedrows,heading/status/fullbody/aria/tabIndex/row-parent-chevron boxes andoriginalthresholds,with None distinctfrommissing/rawtext unavailable;keep realactorandfinalprerequisite."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+                ],
+                "sourceReason": "Presentation22/35 collapsed+expanded andactualgrid37: saved item order/count/exactidentity/kind,text None-or-string,Thinking completed androw geometry. Emptyitem22/35 can vacuouslyhave0rows,butgrid37 blocks absentitems and final46 separatelyrequiresactualnonemptyreasoningtext.",
+                "acceptance": "Source branch only;coverage unresolved,presentation andfinaltext criteria distinct."
+              }
             },
             {
               "source": {
@@ -44382,7 +44731,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -44391,14 +44740,24 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-disclosures.py",
                 "sourceLine": 32,
                 "sourceFunction": "assert_thinking_presentation",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Unreviewed geometryfc candidate mayoffer samecallback facts; exact savedtext availability branches and real expansion/keyboard action assertions unvalidated.",
+                "missingObservation": "Actual same-source items+DOMorderedrows,heading/status/fullbody/aria/tabIndex/row-parent-chevron boxes andoriginalthresholds,with None distinctfrommissing/rawtext unavailable;keep realactorandfinalprerequisite."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+                ],
+                "sourceReason": "Presentation22/35 collapsed+expanded andactualgrid37: saved item order/count/exactidentity/kind,text None-or-string,Thinking completed androw geometry. Emptyitem22/35 can vacuouslyhave0rows,butgrid37 blocks absentitems and final46 separatelyrequiresactualnonemptyreasoningtext. ONLY text available (truthy afterstrip): exact togglestate/body,chevron containment/gap0..12/tabIndex0.",
+                "acceptance": "Source branch only;coverage unresolved,presentation andfinaltext criteria distinct."
+              }
             },
             {
               "source": {
@@ -44411,7 +44770,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -44420,14 +44779,24 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-disclosures.py",
                 "sourceLine": 33,
                 "sourceFunction": "assert_thinking_presentation",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Unreviewed geometryfc candidate mayoffer samecallback facts; exact savedtext availability branches and real expansion/keyboard action assertions unvalidated.",
+                "missingObservation": "Actual same-source items+DOMorderedrows,heading/status/fullbody/aria/tabIndex/row-parent-chevron boxes andoriginalthresholds,with None distinctfrommissing/rawtext unavailable;keep realactorandfinalprerequisite."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+                ],
+                "sourceReason": "Presentation22/35 collapsed+expanded andactualgrid37: saved item order/count/exactidentity/kind,text None-or-string,Thinking completed androw geometry. Emptyitem22/35 can vacuouslyhave0rows,butgrid37 blocks absentitems and final46 separatelyrequiresactualnonemptyreasoningtext. ONLY text available (truthy afterstrip): exact togglestate/body,chevron containment/gap0..12/tabIndex0.",
+                "acceptance": "Source branch only;coverage unresolved,presentation andfinaltext criteria distinct."
+              }
             },
             {
               "source": {
@@ -44440,7 +44809,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -44449,14 +44818,24 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-disclosures.py",
                 "sourceLine": 35,
                 "sourceFunction": "assert_thinking_presentation",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Unreviewed geometryfc candidate mayoffer samecallback facts; exact savedtext availability branches and real expansion/keyboard action assertions unvalidated.",
+                "missingObservation": "Actual same-source items+DOMorderedrows,heading/status/fullbody/aria/tabIndex/row-parent-chevron boxes andoriginalthresholds,with None distinctfrommissing/rawtext unavailable;keep realactorandfinalprerequisite."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+                ],
+                "sourceReason": "Presentation22/35 collapsed+expanded andactualgrid37: saved item order/count/exactidentity/kind,text None-or-string,Thinking completed androw geometry. Emptyitem22/35 can vacuouslyhave0rows,butgrid37 blocks absentitems and final46 separatelyrequiresactualnonemptyreasoningtext. ONLY text unavailable(None/empty/whitespace): explicit No reasoning text available,expanded/bodyNone; this is presentation only,not finalreasoning acceptance.",
+                "acceptance": "Source branch only;coverage unresolved,presentation andfinaltext criteria distinct."
+              }
             },
             {
               "source": {
@@ -44469,7 +44848,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -44478,14 +44857,24 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-disclosures.py",
                 "sourceLine": 36,
                 "sourceFunction": "assert_thinking_presentation",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Unreviewed geometryfc candidate mayoffer samecallback facts; exact savedtext availability branches and real expansion/keyboard action assertions unvalidated.",
+                "missingObservation": "Actual same-source items+DOMorderedrows,heading/status/fullbody/aria/tabIndex/row-parent-chevron boxes andoriginalthresholds,with None distinctfrommissing/rawtext unavailable;keep realactorandfinalprerequisite."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+                ],
+                "sourceReason": "Presentation22/35 collapsed+expanded andactualgrid37: saved item order/count/exactidentity/kind,text None-or-string,Thinking completed androw geometry. Emptyitem22/35 can vacuouslyhave0rows,butgrid37 blocks absentitems and final46 separatelyrequiresactualnonemptyreasoningtext. ONLY text unavailable(None/empty/whitespace): explicit No reasoning text available,expanded/bodyNone; this is presentation only,not finalreasoning acceptance.",
+                "acceptance": "Source branch only;coverage unresolved,presentation andfinaltext criteria distinct."
+              }
             },
             {
               "source": {
@@ -44498,7 +44887,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -44507,14 +44896,24 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-disclosures.py",
                 "sourceLine": 44,
                 "sourceFunction": "assert_thinking_presentation",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Unreviewed geometryfc candidate mayoffer samecallback facts; exact savedtext availability branches and real expansion/keyboard action assertions unvalidated.",
+                "missingObservation": "Actual same-source items+DOMorderedrows,heading/status/fullbody/aria/tabIndex/row-parent-chevron boxes andoriginalthresholds,with None distinctfrommissing/rawtext unavailable;keep realactorandfinalprerequisite."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+                ],
+                "sourceReason": "Presentation22/35 collapsed+expanded andactualgrid37: saved item order/count/exactidentity/kind,text None-or-string,Thinking completed androw geometry. Emptyitem22/35 can vacuouslyhave0rows,butgrid37 blocks absentitems and final46 separatelyrequiresactualnonemptyreasoningtext. ONLY text available (truthy afterstrip): exact togglestate/body,chevron containment/gap0..12/tabIndex0.",
+                "acceptance": "Source branch only;coverage unresolved,presentation andfinaltext criteria distinct."
+              }
             },
             {
               "source": {
@@ -44527,7 +44926,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -44536,14 +44935,24 @@
                 "sourceHelper": "tests/aft/scripts/coverage-chat-disclosures.py",
                 "sourceLine": 45,
                 "sourceFunction": "assert_thinking_presentation",
-                "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
-                "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
+                "canonicalAttempt": "Unreviewed geometryfc candidate mayoffer samecallback facts; exact savedtext availability branches and real expansion/keyboard action assertions unvalidated.",
+                "missingObservation": "Actual same-source items+DOMorderedrows,heading/status/fullbody/aria/tabIndex/row-parent-chevron boxes andoriginalthresholds,with None distinctfrommissing/rawtext unavailable;keep realactorandfinalprerequisite."
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "conditionally-reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+                ],
+                "sourceReason": "Presentation22/35 collapsed+expanded andactualgrid37: saved item order/count/exactidentity/kind,text None-or-string,Thinking completed androw geometry. Emptyitem22/35 can vacuouslyhave0rows,butgrid37 blocks absentitems and final46 separatelyrequiresactualnonemptyreasoningtext. ONLY text available (truthy afterstrip): exact togglestate/body,chevron containment/gap0..12/tabIndex0.",
+                "acceptance": "Source branch only;coverage unresolved,presentation andfinaltext criteria distinct."
+              }
             },
             {
               "source": {
@@ -46980,6 +47389,943 @@
           }
         ],
         "acceptance": "Source reachability only; all41 coverage unresolved. Five raw584 admissions areunchanged,not proof ofsourcepredicates/runtime. Geometryfc implementation candidate unreviewed andunconsumed."
+      },
+      "reasoningSelectedBranchReview": {
+        "at": "2026-10-09T13:09:57.345243+00:00",
+        "frozenHelperAndDisclosureByteMatch": true,
+        "scope": "Actual22/35/37 Thinkingcapture/presentation and recovered final46 callback reasoningassert/seals/text/reload relation. All coverage unresolved.",
+        "inventoryPredicatesReviewed": [
+          {
+            "line": 2916,
+            "endLine": 2917,
+            "function": "reasoning_receipts",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered final callback requires nonempty saved reasoning set and EVERY actual EventID with string nonwhitespace text,unique IDs. Null/empty presentation does NOT discharge original final text prerequisite."
+          },
+          {
+            "line": 2918,
+            "endLine": 2918,
+            "function": "reasoning_receipts",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered final callback requires nonempty saved reasoning set and EVERY actual EventID with string nonwhitespace text,unique IDs. Null/empty presentation does NOT discharge original final text prerequisite."
+          },
+          {
+            "line": 2958,
+            "endLine": 2958,
+            "function": "assert_reasoning_rows",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered final callback BOTH checkpoints/collapsed+expanded: same saved order/count,Thinking completed,source first-line Markdown stripping/Python120char preview,exact expandedstate andrawbody==actualtext orNone."
+          },
+          {
+            "line": 2969,
+            "endLine": 2969,
+            "function": "assert_reasoning_saved_after_reload",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered selected callback compares ENTIRE delivered/turn/items plus derived EventID/text lists across snapshots,not just EventIDs or lengths."
+          },
+          {
+            "line": 2975,
+            "endLine": 2976,
+            "function": "save_reasoning_capture",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35"
+            ],
+            "conditional": false,
+            "previousClassification": "selected-function-reachable-branch-unresolved",
+            "recoveredDynamicCallback": false,
+            "sourceReason": "Both explicit selected stages first-capture-only: neither capture norseal mayexist orbesymlink before write; binds same original sourceRUN/ws/agent/stage/case."
+          },
+          {
+            "line": 2983,
+            "endLine": 2983,
+            "function": "load_reasoning_capture",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered dynamic callback: final_visual_assert passes reasoning_assert as checker then invokes check(); reasoning_assert loads BOTH before-reload/reloaded sealed checkpoints,never re-captures after secondturn."
+          },
+          {
+            "line": 2986,
+            "endLine": 2986,
+            "function": "load_reasoning_capture",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered dynamic callback: final_visual_assert passes reasoning_assert as checker then invokes check(); reasoning_assert loads BOTH before-reload/reloaded sealed checkpoints,never re-captures after secondturn."
+          },
+          {
+            "line": 2992,
+            "endLine": 2992,
+            "function": "load_reasoning_capture",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered dynamic callback: final_visual_assert passes reasoning_assert as checker then invokes check(); reasoning_assert loads BOTH before-reload/reloaded sealed checkpoints,never re-captures after secondturn."
+          },
+          {
+            "line": 2995,
+            "endLine": 2995,
+            "function": "load_reasoning_capture",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered dynamic callback: final_visual_assert passes reasoning_assert as checker then invokes check(); reasoning_assert loads BOTH before-reload/reloaded sealed checkpoints,never re-captures after secondturn."
+          },
+          {
+            "line": 2996,
+            "endLine": 2997,
+            "function": "load_reasoning_capture",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered dynamic callback: final_visual_assert passes reasoning_assert as checker then invokes check(); reasoning_assert loads BOTH before-reload/reloaded sealed checkpoints,never re-captures after secondturn."
+          },
+          {
+            "line": 2998,
+            "endLine": 2999,
+            "function": "load_reasoning_capture",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered dynamic callback: final_visual_assert passes reasoning_assert as checker then invokes check(); reasoning_assert loads BOTH before-reload/reloaded sealed checkpoints,never re-captures after secondturn."
+          },
+          {
+            "line": 3000,
+            "endLine": 3000,
+            "function": "load_reasoning_capture",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered dynamic callback: final_visual_assert passes reasoning_assert as checker then invokes check(); reasoning_assert loads BOTH before-reload/reloaded sealed checkpoints,never re-captures after secondturn."
+          },
+          {
+            "line": 3007,
+            "endLine": 3007,
+            "function": "reasoning_capture",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35"
+            ],
+            "conditional": false,
+            "previousClassification": "selected-function-reachable-branch-unresolved",
+            "recoveredDynamicCallback": false,
+            "sourceReason": "Explicit selected stages before-reload22/reloaded35,actual first rendering window: saved items/collapsed+expanded DOM frozen with equal final saved tuple,not validated yet."
+          },
+          {
+            "line": 3034,
+            "endLine": 3035,
+            "function": "reasoning_capture",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35"
+            ],
+            "conditional": false,
+            "previousClassification": "selected-function-reachable-branch-unresolved",
+            "recoveredDynamicCallback": false,
+            "sourceReason": "Explicit selected stages before-reload22/reloaded35,actual first rendering window: saved items/collapsed+expanded DOM frozen with equal final saved tuple,not validated yet."
+          },
+          {
+            "line": 3052,
+            "endLine": 3052,
+            "function": "reasoning_presentation_grid",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+            ],
+            "conditional": false,
+            "previousClassification": "selected-function-reachable-branch-unresolved",
+            "recoveredDynamicCallback": false,
+            "sourceReason": "Actual saved reasoning items REQUIRED for source presentation grid.800/390x844light/dark,realexpand and FIRST expanded toggle focus+Enter for every actualtoggle,emptyrowsnonexpandable. Originalviewport/theme restore in finally."
+          },
+          {
+            "line": 3117,
+            "endLine": 3119,
+            "function": "reasoning_assert",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered actual reasoning checker callback executed independently alongside motion even when motion fails; first saved delivered/turn tuple must equal first motion capture tuple."
+          },
+          {
+            "line": 2960,
+            "endLine": 2960,
+            "function": "assert_reasoning_rows",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered final callback BOTH checkpoints/collapsed+expanded: same saved order/count,Thinking completed,source first-line Markdown stripping/Python120char preview,exact expandedstate andrawbody==actualtext orNone."
+          },
+          {
+            "line": 2961,
+            "endLine": 2962,
+            "function": "assert_reasoning_rows",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered final callback BOTH checkpoints/collapsed+expanded: same saved order/count,Thinking completed,source first-line Markdown stripping/Python120char preview,exact expandedstate andrawbody==actualtext orNone."
+          },
+          {
+            "line": 2963,
+            "endLine": 2963,
+            "function": "assert_reasoning_rows",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered final callback BOTH checkpoints/collapsed+expanded: same saved order/count,Thinking completed,source first-line Markdown stripping/Python120char preview,exact expandedstate andrawbody==actualtext orNone."
+          },
+          {
+            "line": 2964,
+            "endLine": 2965,
+            "function": "assert_reasoning_rows",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered final callback BOTH checkpoints/collapsed+expanded: same saved order/count,Thinking completed,source first-line Markdown stripping/Python120char preview,exact expandedstate andrawbody==actualtext orNone."
+          },
+          {
+            "line": 3002,
+            "endLine": 3002,
+            "function": "load_reasoning_capture",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered dynamic callback: final_visual_assert passes reasoning_assert as checker then invokes check(); reasoning_assert loads BOTH before-reload/reloaded sealed checkpoints,never re-captures after secondturn."
+          },
+          {
+            "line": 3076,
+            "endLine": 3076,
+            "function": "reasoning_presentation_grid",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+            ],
+            "conditional": false,
+            "previousClassification": "selected-function-reachable-branch-unresolved",
+            "recoveredDynamicCallback": false,
+            "sourceReason": "Actual saved reasoning items REQUIRED for source presentation grid.800/390x844light/dark,realexpand and FIRST expanded toggle focus+Enter for every actualtoggle,emptyrowsnonexpandable. Originalviewport/theme restore in finally."
+          },
+          {
+            "line": 3088,
+            "endLine": 3089,
+            "function": "assert_reasoning_captures",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered reasoning_assert -> validate BOTH checkpoint stage/item windows,exact reload saved tuples/order,then require actual nonempty text and collapsed/expanded body comparisons."
+          },
+          {
+            "line": 3090,
+            "endLine": 3091,
+            "function": "assert_reasoning_captures",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered reasoning_assert -> validate BOTH checkpoint stage/item windows,exact reload saved tuples/order,then require actual nonempty text and collapsed/expanded body comparisons."
+          },
+          {
+            "line": 3092,
+            "endLine": 3092,
+            "function": "assert_reasoning_captures",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered reasoning_assert -> validate BOTH checkpoint stage/item windows,exact reload saved tuples/order,then require actual nonempty text and collapsed/expanded body comparisons."
+          },
+          {
+            "line": 3093,
+            "endLine": 3095,
+            "function": "assert_reasoning_captures",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered reasoning_assert -> validate BOTH checkpoint stage/item windows,exact reload saved tuples/order,then require actual nonempty text and collapsed/expanded body comparisons."
+          },
+          {
+            "line": 3097,
+            "endLine": 3097,
+            "function": "assert_reasoning_captures",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered reasoning_assert -> validate BOTH checkpoint stage/item windows,exact reload saved tuples/order,then require actual nonempty text and collapsed/expanded body comparisons."
+          },
+          {
+            "line": 3069,
+            "endLine": 3069,
+            "function": "reasoning_presentation_grid",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+            ],
+            "conditional": true,
+            "previousClassification": "selected-function-reachable-branch-unresolved",
+            "recoveredDynamicCallback": false,
+            "sourceReason": "Actual saved reasoning items REQUIRED for source presentation grid.800/390x844light/dark,realexpand and FIRST expanded toggle focus+Enter for every actualtoggle,emptyrowsnonexpandable. Originalviewport/theme restore in finally. Focus assertion executes ONLY actual available expandedtoggle loop;absent/null-text rows have no toggle,never synthesize a keyboard pass."
+          },
+          {
+            "line": 23,
+            "endLine": 23,
+            "function": "assert_thinking_presentation",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-disclosures.py",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+            ],
+            "conditional": false,
+            "previousClassification": "selected-function-reachable-branch-unresolved",
+            "recoveredDynamicCallback": false,
+            "sourceReason": "Presentation22/35 collapsed+expanded andactualgrid37: saved item order/count/exactidentity/kind,text None-or-string,Thinking completed androw geometry. Emptyitem22/35 can vacuouslyhave0rows,butgrid37 blocks absentitems and final46 separatelyrequiresactualnonemptyreasoningtext."
+          },
+          {
+            "line": 25,
+            "endLine": 26,
+            "function": "assert_thinking_presentation",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-disclosures.py",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+            ],
+            "conditional": false,
+            "previousClassification": "selected-function-reachable-branch-unresolved",
+            "recoveredDynamicCallback": false,
+            "sourceReason": "Presentation22/35 collapsed+expanded andactualgrid37: saved item order/count/exactidentity/kind,text None-or-string,Thinking completed androw geometry. Emptyitem22/35 can vacuouslyhave0rows,butgrid37 blocks absentitems and final46 separatelyrequiresactualnonemptyreasoningtext."
+          },
+          {
+            "line": 28,
+            "endLine": 28,
+            "function": "assert_thinking_presentation",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-disclosures.py",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+            ],
+            "conditional": false,
+            "previousClassification": "selected-function-reachable-branch-unresolved",
+            "recoveredDynamicCallback": false,
+            "sourceReason": "Presentation22/35 collapsed+expanded andactualgrid37: saved item order/count/exactidentity/kind,text None-or-string,Thinking completed androw geometry. Emptyitem22/35 can vacuouslyhave0rows,butgrid37 blocks absentitems and final46 separatelyrequiresactualnonemptyreasoningtext."
+          },
+          {
+            "line": 30,
+            "endLine": 30,
+            "function": "assert_thinking_presentation",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-disclosures.py",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+            ],
+            "conditional": false,
+            "previousClassification": "selected-function-reachable-branch-unresolved",
+            "recoveredDynamicCallback": false,
+            "sourceReason": "Presentation22/35 collapsed+expanded andactualgrid37: saved item order/count/exactidentity/kind,text None-or-string,Thinking completed androw geometry. Emptyitem22/35 can vacuouslyhave0rows,butgrid37 blocks absentitems and final46 separatelyrequiresactualnonemptyreasoningtext."
+          },
+          {
+            "line": 39,
+            "endLine": 39,
+            "function": "assert_thinking_presentation",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-disclosures.py",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+            ],
+            "conditional": false,
+            "previousClassification": "selected-function-reachable-branch-unresolved",
+            "recoveredDynamicCallback": false,
+            "sourceReason": "Presentation22/35 collapsed+expanded andactualgrid37: saved item order/count/exactidentity/kind,text None-or-string,Thinking completed androw geometry. Emptyitem22/35 can vacuouslyhave0rows,butgrid37 blocks absentitems and final46 separatelyrequiresactualnonemptyreasoningtext."
+          },
+          {
+            "line": 32,
+            "endLine": 32,
+            "function": "assert_thinking_presentation",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-disclosures.py",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+            ],
+            "conditional": true,
+            "previousClassification": "selected-function-reachable-branch-unresolved",
+            "recoveredDynamicCallback": false,
+            "sourceReason": "Presentation22/35 collapsed+expanded andactualgrid37: saved item order/count/exactidentity/kind,text None-or-string,Thinking completed androw geometry. Emptyitem22/35 can vacuouslyhave0rows,butgrid37 blocks absentitems and final46 separatelyrequiresactualnonemptyreasoningtext. ONLY text available (truthy afterstrip): exact togglestate/body,chevron containment/gap0..12/tabIndex0."
+          },
+          {
+            "line": 33,
+            "endLine": 33,
+            "function": "assert_thinking_presentation",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-disclosures.py",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+            ],
+            "conditional": true,
+            "previousClassification": "selected-function-reachable-branch-unresolved",
+            "recoveredDynamicCallback": false,
+            "sourceReason": "Presentation22/35 collapsed+expanded andactualgrid37: saved item order/count/exactidentity/kind,text None-or-string,Thinking completed androw geometry. Emptyitem22/35 can vacuouslyhave0rows,butgrid37 blocks absentitems and final46 separatelyrequiresactualnonemptyreasoningtext. ONLY text available (truthy afterstrip): exact togglestate/body,chevron containment/gap0..12/tabIndex0."
+          },
+          {
+            "line": 35,
+            "endLine": 35,
+            "function": "assert_thinking_presentation",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-disclosures.py",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+            ],
+            "conditional": true,
+            "previousClassification": "selected-function-reachable-branch-unresolved",
+            "recoveredDynamicCallback": false,
+            "sourceReason": "Presentation22/35 collapsed+expanded andactualgrid37: saved item order/count/exactidentity/kind,text None-or-string,Thinking completed androw geometry. Emptyitem22/35 can vacuouslyhave0rows,butgrid37 blocks absentitems and final46 separatelyrequiresactualnonemptyreasoningtext. ONLY text unavailable(None/empty/whitespace): explicit No reasoning text available,expanded/bodyNone; this is presentation only,not finalreasoning acceptance."
+          },
+          {
+            "line": 36,
+            "endLine": 36,
+            "function": "assert_thinking_presentation",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-disclosures.py",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+            ],
+            "conditional": true,
+            "previousClassification": "selected-function-reachable-branch-unresolved",
+            "recoveredDynamicCallback": false,
+            "sourceReason": "Presentation22/35 collapsed+expanded andactualgrid37: saved item order/count/exactidentity/kind,text None-or-string,Thinking completed androw geometry. Emptyitem22/35 can vacuouslyhave0rows,butgrid37 blocks absentitems and final46 separatelyrequiresactualnonemptyreasoningtext. ONLY text unavailable(None/empty/whitespace): explicit No reasoning text available,expanded/bodyNone; this is presentation only,not finalreasoning acceptance."
+          },
+          {
+            "line": 44,
+            "endLine": 44,
+            "function": "assert_thinking_presentation",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-disclosures.py",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+            ],
+            "conditional": true,
+            "previousClassification": "selected-function-reachable-branch-unresolved",
+            "recoveredDynamicCallback": false,
+            "sourceReason": "Presentation22/35 collapsed+expanded andactualgrid37: saved item order/count/exactidentity/kind,text None-or-string,Thinking completed androw geometry. Emptyitem22/35 can vacuouslyhave0rows,butgrid37 blocks absentitems and final46 separatelyrequiresactualnonemptyreasoningtext. ONLY text available (truthy afterstrip): exact togglestate/body,chevron containment/gap0..12/tabIndex0."
+          },
+          {
+            "line": 45,
+            "endLine": 45,
+            "function": "assert_thinking_presentation",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-disclosures.py",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+            ],
+            "conditional": true,
+            "previousClassification": "selected-function-reachable-branch-unresolved",
+            "recoveredDynamicCallback": false,
+            "sourceReason": "Presentation22/35 collapsed+expanded andactualgrid37: saved item order/count/exactidentity/kind,text None-or-string,Thinking completed androw geometry. Emptyitem22/35 can vacuouslyhave0rows,butgrid37 blocks absentitems and final46 separatelyrequiresactualnonemptyreasoningtext. ONLY text available (truthy afterstrip): exact togglestate/body,chevron containment/gap0..12/tabIndex0."
+          }
+        ],
+        "direct": 32,
+        "conditional": 7,
+        "recoveredFromUnrelated": [
+          {
+            "line": 2916,
+            "endLine": 2917,
+            "function": "reasoning_receipts",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered final callback requires nonempty saved reasoning set and EVERY actual EventID with string nonwhitespace text,unique IDs. Null/empty presentation does NOT discharge original final text prerequisite."
+          },
+          {
+            "line": 2918,
+            "endLine": 2918,
+            "function": "reasoning_receipts",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered final callback requires nonempty saved reasoning set and EVERY actual EventID with string nonwhitespace text,unique IDs. Null/empty presentation does NOT discharge original final text prerequisite."
+          },
+          {
+            "line": 2958,
+            "endLine": 2958,
+            "function": "assert_reasoning_rows",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered final callback BOTH checkpoints/collapsed+expanded: same saved order/count,Thinking completed,source first-line Markdown stripping/Python120char preview,exact expandedstate andrawbody==actualtext orNone."
+          },
+          {
+            "line": 2969,
+            "endLine": 2969,
+            "function": "assert_reasoning_saved_after_reload",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered selected callback compares ENTIRE delivered/turn/items plus derived EventID/text lists across snapshots,not just EventIDs or lengths."
+          },
+          {
+            "line": 2983,
+            "endLine": 2983,
+            "function": "load_reasoning_capture",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered dynamic callback: final_visual_assert passes reasoning_assert as checker then invokes check(); reasoning_assert loads BOTH before-reload/reloaded sealed checkpoints,never re-captures after secondturn."
+          },
+          {
+            "line": 2986,
+            "endLine": 2986,
+            "function": "load_reasoning_capture",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered dynamic callback: final_visual_assert passes reasoning_assert as checker then invokes check(); reasoning_assert loads BOTH before-reload/reloaded sealed checkpoints,never re-captures after secondturn."
+          },
+          {
+            "line": 2992,
+            "endLine": 2992,
+            "function": "load_reasoning_capture",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered dynamic callback: final_visual_assert passes reasoning_assert as checker then invokes check(); reasoning_assert loads BOTH before-reload/reloaded sealed checkpoints,never re-captures after secondturn."
+          },
+          {
+            "line": 2995,
+            "endLine": 2995,
+            "function": "load_reasoning_capture",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered dynamic callback: final_visual_assert passes reasoning_assert as checker then invokes check(); reasoning_assert loads BOTH before-reload/reloaded sealed checkpoints,never re-captures after secondturn."
+          },
+          {
+            "line": 2996,
+            "endLine": 2997,
+            "function": "load_reasoning_capture",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered dynamic callback: final_visual_assert passes reasoning_assert as checker then invokes check(); reasoning_assert loads BOTH before-reload/reloaded sealed checkpoints,never re-captures after secondturn."
+          },
+          {
+            "line": 2998,
+            "endLine": 2999,
+            "function": "load_reasoning_capture",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered dynamic callback: final_visual_assert passes reasoning_assert as checker then invokes check(); reasoning_assert loads BOTH before-reload/reloaded sealed checkpoints,never re-captures after secondturn."
+          },
+          {
+            "line": 3000,
+            "endLine": 3000,
+            "function": "load_reasoning_capture",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered dynamic callback: final_visual_assert passes reasoning_assert as checker then invokes check(); reasoning_assert loads BOTH before-reload/reloaded sealed checkpoints,never re-captures after secondturn."
+          },
+          {
+            "line": 3117,
+            "endLine": 3119,
+            "function": "reasoning_assert",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered actual reasoning checker callback executed independently alongside motion even when motion fails; first saved delivered/turn tuple must equal first motion capture tuple."
+          },
+          {
+            "line": 2960,
+            "endLine": 2960,
+            "function": "assert_reasoning_rows",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered final callback BOTH checkpoints/collapsed+expanded: same saved order/count,Thinking completed,source first-line Markdown stripping/Python120char preview,exact expandedstate andrawbody==actualtext orNone."
+          },
+          {
+            "line": 2961,
+            "endLine": 2962,
+            "function": "assert_reasoning_rows",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered final callback BOTH checkpoints/collapsed+expanded: same saved order/count,Thinking completed,source first-line Markdown stripping/Python120char preview,exact expandedstate andrawbody==actualtext orNone."
+          },
+          {
+            "line": 2963,
+            "endLine": 2963,
+            "function": "assert_reasoning_rows",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered final callback BOTH checkpoints/collapsed+expanded: same saved order/count,Thinking completed,source first-line Markdown stripping/Python120char preview,exact expandedstate andrawbody==actualtext orNone."
+          },
+          {
+            "line": 2964,
+            "endLine": 2965,
+            "function": "assert_reasoning_rows",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered final callback BOTH checkpoints/collapsed+expanded: same saved order/count,Thinking completed,source first-line Markdown stripping/Python120char preview,exact expandedstate andrawbody==actualtext orNone."
+          },
+          {
+            "line": 3002,
+            "endLine": 3002,
+            "function": "load_reasoning_capture",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered dynamic callback: final_visual_assert passes reasoning_assert as checker then invokes check(); reasoning_assert loads BOTH before-reload/reloaded sealed checkpoints,never re-captures after secondturn."
+          },
+          {
+            "line": 3088,
+            "endLine": 3089,
+            "function": "assert_reasoning_captures",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered reasoning_assert -> validate BOTH checkpoint stage/item windows,exact reload saved tuples/order,then require actual nonempty text and collapsed/expanded body comparisons."
+          },
+          {
+            "line": 3090,
+            "endLine": 3091,
+            "function": "assert_reasoning_captures",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered reasoning_assert -> validate BOTH checkpoint stage/item windows,exact reload saved tuples/order,then require actual nonempty text and collapsed/expanded body comparisons."
+          },
+          {
+            "line": 3092,
+            "endLine": 3092,
+            "function": "assert_reasoning_captures",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered reasoning_assert -> validate BOTH checkpoint stage/item windows,exact reload saved tuples/order,then require actual nonempty text and collapsed/expanded body comparisons."
+          },
+          {
+            "line": 3093,
+            "endLine": 3095,
+            "function": "assert_reasoning_captures",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered reasoning_assert -> validate BOTH checkpoint stage/item windows,exact reload saved tuples/order,then require actual nonempty text and collapsed/expanded body comparisons."
+          },
+          {
+            "line": 3097,
+            "endLine": 3097,
+            "function": "assert_reasoning_captures",
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "conditional": false,
+            "previousClassification": "unrelated-to-static-selected-call-closure",
+            "recoveredDynamicCallback": true,
+            "sourceReason": "Recovered reasoning_assert -> validate BOTH checkpoint stage/item windows,exact reload saved tuples/order,then require actual nonempty text and collapsed/expanded body comparisons."
+          }
+        ],
+        "recoveredCount": 22,
+        "additionalSourceGroups": [
+          {
+            "id": "visual-dynamic-final-reasoning-checker-recovery",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 3125,
+              "end": 3141,
+              "text": "def final_visual_assert():\n    verdict = {}\n    for name, check in ((\"motion\", lambda: motion_assert(\"render\")),\n                        (\"reasoning\", reasoning_assert)):\n        try:\n            check()\n        except Exception as exc:\n            detail = str(exc)\n            if name == \"reasoning\" and detail.lstrip().startswith((\"{\", \"[\")):\n                detail = \"Thinking DOM row mismatched its saved item\"\n            verdict[name] = {\"status\": \"failed\", \"error_type\": type(exc).__name__,\n                             \"reason\": detail[:400]}\n        else:\n            verdict[name] = {\"status\": \"passed\"}\n    write(\"render-final-verdict.json\", verdict)\n    assert all(item[\"status\"] == \"passed\" for item in verdict.values()), \\\n        f\"first-turn visual validation failed: {verdict}\""
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-dynamic-callback-or-source-snapshot-actor-not-yet-preserved",
+              "required": "Final iterates motion lambda andreasoning_assert callback then calls check(); BOTH execute independently,collect actual exception failure,write separate verdicts andrequirebothpassed. Static directcallee-only closure missed22 extracted reasoning guard obligations,nowrecovered.",
+              "canonicalAttempt": "Approved584 engine/saved capture are separate interfaces. Actual source-equivalent first-turn reasoning snapshots,typed presentation projection+YAML assertions anddynamicfinalconjunction unproved;unreviewedgeometryfc notconsumed.",
+              "missingObservation": "No callback omission or fullpreservation claim from previous471conservativecandidate count;dynamiccall/importedsourceclosure stillneeds complete reconciliation."
+            },
+            "bounds": {
+              "failureReasonMaxChars": 400
+            }
+          },
+          {
+            "id": "visual-two-reasoning-checkpoint-save-load-seals",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 2972,
+              "end": 3003,
+              "text": "def save_reasoning_capture(stage, snapshot):\n    capture = WORK / f\"render-reasoning-{stage}-capture.json\"\n    seal = WORK / f\"render-reasoning-{stage}-seal.json\"\n    assert all(not p.exists() and not p.is_symlink() for p in (capture, seal)), \\\n        \"reasoning checkpoint already captured\"\n    write(capture.name, snapshot)\n    write(seal.name, {\"sha256\": motion_digest(snapshot), \"stage\": stage, \"case\": \"render\",\n                      \"ws\": WS, \"run\": RUN, \"agent_id\": snapshot[\"agent_id\"]})\n\n\ndef load_reasoning_capture(stage):\n    assert stage in (\"before-reload\", \"reloaded\"), stage\n    capture = WORK / f\"render-reasoning-{stage}-capture.json\"\n    seal = WORK / f\"render-reasoning-{stage}-seal.json\"\n    assert all(p.is_file() and not p.is_symlink() for p in (capture, seal)), \"reasoning capture or seal missing\"\n    try:\n        snapshot = json.loads(capture.read_text())\n        receipt = json.loads(seal.read_text())\n    except (ValueError, OSError) as exc:\n        raise AssertionError(\"reasoning capture is unreadable\") from exc\n    assert isinstance(snapshot, dict) and isinstance(receipt, dict), \"reasoning capture has invalid shape\"\n    expected = {\"sha256\": motion_digest(snapshot), \"stage\": stage, \"case\": \"render\",\n                \"ws\": WS, \"run\": RUN, \"agent_id\": agent_id(\"render\")}\n    assert receipt == expected, \"reasoning capture changed or belongs to a foreign run\"\n    assert all(snapshot.get(key) == value for key, value in expected.items() if key != \"sha256\"), \\\n        \"reasoning capture identity changed\"\n    assert snapshot.get(\"version\") == 1 and snapshot.get(\"validation\") == \"pending\", \\\n        \"reasoning capture version or pending state changed\"\n    assert snapshot.get(\"route\") == f\"/ws/{WS}/chat/{agent_id('render')}\", \"reasoning capture changed Chat route\"\n    for key in (\"delivered\", \"turn_completed\", \"items\", \"collapsed\", \"expanded\"):\n        assert key in snapshot, f\"reasoning capture lacks {key}\"\n    return snapshot"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-dynamic-callback-or-source-snapshot-actor-not-yet-preserved",
+              "required": "Explicit before-reload/reloaded stages,first-only capture+seal noexists/nosymlink;later loadregularfiles/readableobjects/exactdigest/stage/case/ws/sourceRUN/agent/version1/pending/route andALLrequired delivered/completion/items/collapsed/expanded keys. First-turn immutable evidence cannotbe overwritten by reduced turn orlatercompleteevents.",
+              "canonicalAttempt": "Approved584 engine/saved capture are separate interfaces. Actual source-equivalent first-turn reasoning snapshots,typed presentation projection+YAML assertions anddynamicfinalconjunction unproved;unreviewedgeometryfc notconsumed.",
+              "missingObservation": "Canonical ownership-resource/sealreceipt mustbind exact stage andcapturedactualsnapshot,digestwholedata;DATA-onlyor later reread cannot grant authority/repaircapture."
+            },
+            "bounds": {}
+          },
+          {
+            "id": "visual-reasoning-saved-raw-null-capture",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 3006,
+              "end": 3045,
+              "text": "def reasoning_capture(stage):\n    assert stage in (\"before-reload\", \"reloaded\"), stage\n    current(\"render\")\n    delivered, end, between = turn_events(\"render\", \"VISUAL_RENDER\")\n    reasoning_items = [e for e in between if e[\"kind\"] == \"item.completed\" and\n                       e[\"payload\"].get(\"itemKind\") == \"reasoning\"]\n    write(f\"render-reasoning-{stage}-receipts.json\", reasoning_receipt_diagnostic(reasoning_items))\n    # Reveal grouped rows without opening the Thinking bodies yet.\n    for _ in range(20):\n        if not evaluate(f\"document.querySelectorAll({json.dumps(GROUP_COLLAPSED)}).length\"):\n            break\n        click_collapsed_work(GROUP_COLLAPSED, (\"tool-group\", \"work-toggle\"))\n    else:\n        raise AssertionError(\"too many collapsed work groups\")\n    collapsed = evaluate(REASONING_DOM)\n    disclosures.assert_thinking_presentation(reasoning_items, collapsed, False)\n    shot(\"render\", f\"thinking-{stage}-preview\")\n    expand_work()\n    expanded = evaluate(REASONING_DOM)\n    disclosures.assert_thinking_presentation(reasoning_items, expanded, True)\n    write(f\"render-reasoning-{stage}-presentation.json\", {\n        \"criterion\": \"saved-text disclosure or explicit nonexpandable empty state; compact row with nearby chevron\",\n        \"items\": reasoning_receipt_diagnostic(reasoning_items), \"collapsed\": collapsed, \"expanded\": expanded})\n    shot(\"render\", f\"thinking-{stage}-expanded\")\n    current(\"render\")\n    final_delivered, final_end, final_between = turn_events(\"render\", \"VISUAL_RENDER\")\n    final_items = [e for e in final_between if e[\"kind\"] == \"item.completed\" and\n                   e[\"payload\"].get(\"itemKind\") == \"reasoning\"]\n    assert (final_delivered, final_end, final_items) == (delivered, end, reasoning_items), \\\n        \"saved reasoning turn changed during UI capture\"\n    snapshot = {\"version\": 1, \"validation\": \"pending\", \"stage\": stage, \"case\": \"render\",\n                \"ws\": WS, \"run\": RUN, \"agent_id\": agent_id(\"render\"),\n                \"route\": f\"/ws/{WS}/chat/{agent_id('render')}\", \"delivered\": delivered,\n                \"turn_completed\": end, \"items\": reasoning_items,\n                \"collapsed\": collapsed, \"expanded\": expanded}\n    save_reasoning_capture(stage, snapshot)\n    write(f\"render-reasoning-{stage}-diagnostic.json\", {\n        \"validation\": \"pending\", \"capture_sha256\": motion_digest(snapshot),\n        \"delivered_event_id\": delivered[\"event_id\"], \"turn_event_id\": end[\"event_id\"],\n        **reasoning_receipt_diagnostic(reasoning_items)})"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-dynamic-callback-or-source-snapshot-actor-not-yet-preserved",
+              "required": "Read ALL actual saved reasoning items inrenderwindow,diagnose texttype/length without substitutingnull. Actualgroupopening<=20,collapsedDOM+Thinkingpresentation+namedscreenshot,realexpandwork thenexpandedDOM+presentation+namedscreenshot. Freshread exact(delivered,end,reasoning_items) tuple SAMEbeforeseal.",
+              "canonicalAttempt": "Approved584 engine/saved capture are separate interfaces. Actual source-equivalent first-turn reasoning snapshots,typed presentation projection+YAML assertions anddynamicfinalconjunction unproved;unreviewedgeometryfc notconsumed.",
+              "missingObservation": "Keep actualrawnull/text/orderedEventIDs andtimecheckpoint withsameUIactor,not fabricatedreasoning/token generation or failedcapture countedpassed."
+            },
+            "bounds": {
+              "groupLoopIterations": 20
+            }
+          },
+          {
+            "id": "visual-thinking-dom-source-fields-preview",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 2932,
+              "end": 2954,
+              "text": "def reasoning_preview(text):\n    # WorkRows uses timelineRows.firstLine: strip, first line, plain-text marks, 120-character cap.\n    line = re.sub(r\"^#{1,6}\\s+\", \"\", text.strip().split(\"\\n\")[0])\n    while True:\n        plain = re.sub(r\"(\\*\\*|__|\\*|_|`)(.+?)\\1\", r\"\\2\", line)\n        if plain == line:\n            break\n        line = plain\n    line = line.strip()\n    return line if len(line) <= 120 else line[:119] + \"…\"\n\n\nREASONING_DOM = r\"\"\"(() => {\n  const rect=x=>{if(!x)return null;const r=x.getBoundingClientRect();\n    return {x:r.x,y:r.y,width:r.width,height:r.height};};\n  return [...document.querySelectorAll('[data-testid=chat-transcript] [data-testid=reasoning]')]\n  .map(x => { const toggle=x.querySelector('[role=button]'), row=x.firstElementChild;\n    return {heading:x.querySelector('[class*=heading]')?.textContent||'',\n      preview:x.querySelector('[class*=preview]')?.textContent||'',\n      expanded:toggle?.getAttribute('aria-expanded')??null,\n      status:x.dataset.status, body:x.querySelector('pre')?.textContent??null,\n      geometry:{row:rect(row),parent:rect(x),chevron:rect(row?.querySelector('[class*=chevron]')),\n        tabIndex:toggle?.tabIndex??null}}; });})()\"\"\""
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/35",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37",
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-dynamic-callback-or-source-snapshot-actor-not-yet-preserved",
+              "required": "Actualordered reasoningDOM from transcript: FIRSTrolebutton/firstElementChild,heading/preview/bodypre text,nullablearia/tabIndex,closestrowparent/chevronactualrects. Finalexpectedpreview strips firstlineheading/pairedMarkdown repeatedly,trim andPythoncodepoint120cap (119+ellipsis),NOTJSUTF16cap.",
+              "canonicalAttempt": "Approved584 engine/saved capture are separate interfaces. Actual source-equivalent first-turn reasoning snapshots,typed presentation projection+YAML assertions anddynamicfinalconjunction unproved;unreviewedgeometryfc notconsumed.",
+              "missingObservation": "Generic text-only sampler or source renderer alone does notprove DOM body/geometry;exactnullable fields andnormalizationmust becomposed,without inventingliEventIDattrs."
+            },
+            "bounds": {
+              "previewMaxPythonChars": 120
+            }
+          },
+          {
+            "id": "visual-thinking-grid-real-media-keyboard-restoration",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 3048,
+              "end": 3082,
+              "text": "def reasoning_presentation_grid():\n    current(\"render\")\n    delivered, end, between = turn_events(\"render\", \"VISUAL_RENDER\")\n    items = [e for e in between if e[\"kind\"] == \"item.completed\" and e[\"payload\"].get(\"itemKind\") == \"reasoning\"]\n    assert items, \"BLOCKED: no actual saved reasoning item to test disclosure presentation\"\n    original = evaluate(\"({width:innerWidth,height:innerHeight,theme:document.documentElement.dataset.theme})\")\n    captures = []\n    selector = '[data-testid=chat-transcript] [data-testid=reasoning] [role=button][aria-expanded=true]'\n    try:\n        for width in (800, 390):\n            browser(\"set\", \"viewport\", str(width), \"844\")\n            for theme in (\"light\", \"dark\"):\n                if evaluate(\"document.documentElement.dataset.theme\") != theme:\n                    browser(\"click\", f'button[aria-label=\"Switch to {theme} mode\"]')\n                browser(\"wait\", \"--fn\", f'document.documentElement.dataset.theme === {json.dumps(theme)}')\n                expand_work()\n                expanded = evaluate(REASONING_DOM)\n                disclosures.assert_thinking_presentation(items, expanded, True)\n                # Real key presses close each available body; empty rows have no toggle.\n                count = evaluate(f\"document.querySelectorAll({json.dumps(selector)}).length\")\n                for _ in range(count):\n                    assert evaluate(f\"(() => {{const b=document.querySelector({json.dumps(selector)});b.focus();return document.activeElement===b;}})()\")\n                    browser(\"press\", \"Enter\")\n                collapsed = evaluate(REASONING_DOM)\n                disclosures.assert_thinking_presentation(items, collapsed, False)\n                captures.append({\"width\": width, \"theme\": theme, \"collapsed\": collapsed,\n                                 \"expanded\": expanded, \"keyboard_closed\": count})\n                shot(\"render\", f\"thinking-disclosure-{width}-{theme}\")\n        assert turn_events(\"render\", \"VISUAL_RENDER\") == (delivered, end, between), \"saved reasoning changed during presentation checks\"\n        write(\"render-reasoning-presentation-grid.json\", {\"saved_event_ids\": [e[\"event_id\"] for e in items],\n            \"captures\": captures, \"evidence\": \"presentation only; original reasoning-text and motion criteria remain separate\"})\n    finally:\n        browser(\"set\", \"viewport\", str(original[\"width\"]), str(original[\"height\"]))\n        if evaluate(\"document.documentElement.dataset.theme\") != original[\"theme\"]:\n            browser(\"click\", f'button[aria-label=\"Switch to {original[\"theme\"]} mode\"]')"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/37"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-dynamic-callback-or-source-snapshot-actor-not-yet-preserved",
+              "required": "Nonemptysaveditems prerequisite;captureactualoriginal width/height/theme;real800/390x844light/dark actors with actualtheme readiness;expand actualbodies,focusFIRST expandedtoggle andtruefocusedreadbackthenrealEnter everycount. Nullableemptytextrow no toggle. Capturecollapsed/expanded arrays+named4screenshots;freshALLturn window unchanged. Finallyrestoreoriginalviewport/themeevenfailure.",
+              "canonicalAttempt": "Approved584 engine/saved capture are separate interfaces. Actual source-equivalent first-turn reasoning snapshots,typed presentation projection+YAML assertions anddynamicfinalconjunction unproved;unreviewedgeometryfc notconsumed.",
+              "missingObservation": "Preserve exactobservedidentity/media/keyboard counts andrestorationcleanup,not syntheticCSS/theme or simplyexpandedattrs;all4capturesarepresentationonly."
+            },
+            "bounds": {
+              "widths": [
+                800,
+                390
+              ],
+              "height": 844,
+              "themes": [
+                "light",
+                "dark"
+              ]
+            }
+          },
+          {
+            "id": "visual-reasoning-final-text-and-motion-same-turn",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-visual.py",
+            "sourceHelperSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+            "sourceLines": {
+              "start": 3085,
+              "end": 3122,
+              "text": "def assert_reasoning_captures(before, after):\n    for stage, capture in ((\"before-reload\", before), (\"reloaded\", after)):\n        delivered, end, items = capture[\"delivered\"], capture[\"turn_completed\"], capture[\"items\"]\n        assert delivered[\"kind\"] == \"message.delivered\" and \\\n            f\"VISUAL_RENDER_{RUN}\" in delivered[\"payload\"][\"text\"], f\"{stage}: foreign rendering delivery\"\n        assert end[\"kind\"] == \"agent.turn_completed\" and end[\"seq\"] > delivered[\"seq\"], \\\n            f\"{stage}: turn completion does not follow delivery\"\n        assert isinstance(items, list), f\"{stage}: reasoning items missing\"\n        assert all(e[\"kind\"] == \"item.completed\" and e[\"payload\"].get(\"itemKind\") == \"reasoning\" and\n                   delivered[\"seq\"] < e[\"seq\"] < end[\"seq\"] for e in items), \\\n            f\"{stage}: reasoning item outside saved turn\"\n        seqs = [e[\"seq\"] for e in items]\n        assert seqs == sorted(set(seqs)), f\"{stage}: duplicate or unordered reasoning sequence\"\n    assert_reasoning_saved_after_reload(before[\"delivered\"], after[\"delivered\"])\n    assert_reasoning_saved_after_reload(before[\"turn_completed\"], after[\"turn_completed\"])\n    assert_reasoning_saved_after_reload(before[\"items\"], after[\"items\"])\n    if not before[\"items\"]:\n        write(\"reasoning-blocked.json\", {\"status\": \"blocked\", \"prerequisite\":\n              \"actual selected provider must emit saved item.completed reasoning text\"})\n        raise AssertionError(\"BLOCKED: selected real provider emitted no saved reasoning item; Thinking UI cannot be claimed\")\n    saved = reasoning_receipts(before[\"items\"])\n    assert_reasoning_saved_after_reload(saved, reasoning_receipts(after[\"items\"]))\n    for capture in (before, after):\n        assert_reasoning_rows(saved, capture[\"collapsed\"], False)\n        assert_reasoning_rows(saved, capture[\"expanded\"], True)\n    return saved\n\n\ndef reasoning_assert():\n    before = load_reasoning_capture(\"before-reload\")\n    after = load_reasoning_capture(\"reloaded\")\n    motion = load_motion_capture(\"render\")\n    assert (before[\"delivered\"], before[\"turn_completed\"]) == \\\n        (motion[\"delivered\"], motion[\"turn_completed\"]), \\\n        \"frozen reasoning and motion captures belong to different saved turns\"\n    saved = assert_reasoning_captures(before, after)\n    write(\"render-reasoning.json\", {\"validation\": \"passed\", \"saved\": saved,\n          \"before_sha256\": motion_digest(before), \"reloaded_sha256\": motion_digest(after)})"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/46"
+            ],
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-dynamic-callback-or-source-snapshot-actor-not-yet-preserved",
+              "required": "BOTH captured stagesvalidate exactsavedkind/window/order;full delivered/turn/items equalityacrossreload,nonemptyreasoningitems elseexplicitblocked. ALLsavedtexts MUST nonemptystrings/nonwhitespace withuniqueEventIDs;eachcollapsed+expandedrow exactcount/heading/completed/sourcepreview/body/state. Before reasoning saved(delivered,turn) exactequals sealedmotionfirstturn.",
+              "canonicalAttempt": "Approved584 engine/saved capture are separate interfaces. Actual source-equivalent first-turn reasoning snapshots,typed presentation projection+YAML assertions anddynamicfinalconjunction unproved;unreviewedgeometryfc notconsumed.",
+              "missingObservation": "Null/empty reasoning explanation satisfiespresentationonly;final sourceprerequisite remainsfailed/unverified evenwhenbothUIlayoutslookcorrect. Samecapturecursor/redaction/rawtextrequired;no actorbypass orwrongturn inference."
+            },
+            "bounds": {}
+          }
+        ],
+        "acceptance": "Recovered source obligation changesconservativecandidate count,not preservationcredit. Otherdynamic/imported/clipboard/identityclosure unresolved."
       }
     },
     {
@@ -52570,17 +53916,17 @@
     "originalSteps": 207,
     "helperInventoryEntries": 1072,
     "classificationCounts": {
-      "selected-invocation-predicate-reachable": 367,
-      "unrelated-to-static-selected-call-closure": 374,
+      "selected-invocation-predicate-reachable": 399,
+      "unrelated-to-static-selected-call-closure": 352,
       "helper-selftest-negative-requirement": 213,
       "excluded-static-selected-invocation-branch": 10,
-      "selected-invocation-predicate-conditionally-reachable": 39,
-      "selected-function-reachable-branch-unresolved": 51,
+      "selected-invocation-predicate-conditionally-reachable": 46,
+      "selected-function-reachable-branch-unresolved": 34,
       "selected-external-helper-branch-unresolved": 14,
       "unrelated-external-helper-case": 4
     },
-    "reachableCandidatePredicates": 471,
-    "classificationMethod": "Conservative selected-call closure for other pilots; exact Stop and Files arguments/call branches narrowed. Stop40 inventory obligations retained, question3 excluded; Files24 retained, empty-file5 excluded; Files33 selftest/negative entries separated.14 Stop native guards,6 Files origin/editor/cleanup guards and ownership import closure uncovered outside frozen1072 extraction; full denominator unresolved. Child subset31 binding/inventory/ref predicates narrowed and one previously-unrelated teardown predicate recovered; other child shapes still unresolved,15 new source guard groups outside extraction remain uncovered. Child25 completion/repeat/saved-key card predicates now narrowed,8 more exact saved-payload selection groups uncovered; no whole-child acceptance. Child34 Started/layout/Working/activity predicates narrowed(32direct,2conditional),13 exact source capture/selection/actor groups still uncovered;remainingChild67Python/6external andotherpilots unresolved. Child34 card/mobile/tab predicates narrowed;11 exact actor/identity/atomic geometry/diagnostic source groups uncovered. Remaining Child33 Python+6 external guards unresolved. Child remaining33 narrowed:28 direct,4 conditional,current finished-open stage assertion excluded1. Child157 selected predicate records (6 conditional), external ref6 and56 extra source groups/imports not fully covered. Global conservative selected candidates466; no complete source preservation denominator. Six exact child external ref guards narrowed by selected arguments/Lead-task branches,including malformed/foreign deny requirements. Child163 selected frozen records (6 conditional),not preservation credit; ownership imports/source groups still uncovered. SSE selected35 extracted obligations(3 conditional) narrowed;6 setup predicates recovered from unrelated classification,absent argument branch excluded1.10 actual protocol/restart/cleanup source groups uncovered. Current global471 conservative candidates; full historical/imported predicate reconciliation still open. Visual first-turn motion boundary57 extracted assertions narrowed to selected2/12/20/46;10 supplemental source groups retain actor,field selection,freeze/seal,clock joins and unpreserved100ms/layout-shift oracles. Other visual/imported branches still unresolved; no additional preserved-predicate credit. Visual pacing/projection/arrival deadlines/control exit32 Python and14 external Markdown guards narrowed (26 direct,20 conditional),including actual terminal projection23/36 and nonplain46;9 supplemental source groups preserve all-candidate pressure/first-tie/first-rendered/every-arrival/last-control-exit semantics. Other visual/imported branches still unresolved. Visual41 running/native tool/fullreply/render/reload/reduced/expansion guards narrowed33direct8conditional;10 exact sourceactor/payload/centering/history/window groups uncovered. RemainingvisualPython51/external14+ownershipimports unreconciled; geometryfc unreviewed/unconsumed.",
+    "reachableCandidatePredicates": 493,
+    "classificationMethod": "Conservative selected-call closure for other pilots; exact Stop and Files arguments/call branches narrowed. Stop40 inventory obligations retained, question3 excluded; Files24 retained, empty-file5 excluded; Files33 selftest/negative entries separated.14 Stop native guards,6 Files origin/editor/cleanup guards and ownership import closure uncovered outside frozen1072 extraction; full denominator unresolved. Child subset31 binding/inventory/ref predicates narrowed and one previously-unrelated teardown predicate recovered; other child shapes still unresolved,15 new source guard groups outside extraction remain uncovered. Child25 completion/repeat/saved-key card predicates now narrowed,8 more exact saved-payload selection groups uncovered; no whole-child acceptance. Child34 Started/layout/Working/activity predicates narrowed(32direct,2conditional),13 exact source capture/selection/actor groups still uncovered;remainingChild67Python/6external andotherpilots unresolved. Child34 card/mobile/tab predicates narrowed;11 exact actor/identity/atomic geometry/diagnostic source groups uncovered. Remaining Child33 Python+6 external guards unresolved. Child remaining33 narrowed:28 direct,4 conditional,current finished-open stage assertion excluded1. Child157 selected predicate records (6 conditional), external ref6 and56 extra source groups/imports not fully covered. Global conservative selected candidates466; no complete source preservation denominator. Six exact child external ref guards narrowed by selected arguments/Lead-task branches,including malformed/foreign deny requirements. Child163 selected frozen records (6 conditional),not preservation credit; ownership imports/source groups still uncovered. SSE selected35 extracted obligations(3 conditional) narrowed;6 setup predicates recovered from unrelated classification,absent argument branch excluded1.10 actual protocol/restart/cleanup source groups uncovered. Current global471 conservative candidates; full historical/imported predicate reconciliation still open. Visual first-turn motion boundary57 extracted assertions narrowed to selected2/12/20/46;10 supplemental source groups retain actor,field selection,freeze/seal,clock joins and unpreserved100ms/layout-shift oracles. Other visual/imported branches still unresolved; no additional preserved-predicate credit. Visual pacing/projection/arrival deadlines/control exit32 Python and14 external Markdown guards narrowed (26 direct,20 conditional),including actual terminal projection23/36 and nonplain46;9 supplemental source groups preserve all-candidate pressure/first-tie/first-rendered/every-arrival/last-control-exit semantics. Other visual/imported branches still unresolved. Visual41 running/native tool/fullreply/render/reload/reduced/expansion guards narrowed33direct8conditional;10 exact sourceactor/payload/centering/history/window groups uncovered. RemainingvisualPython51/external14+ownershipimports unreconciled; geometryfc unreviewed/unconsumed. Actual final_visual_assert callback reasoning_assert recovers22formerlyunrelated frozen guards;39reasoning/presentation guards narrowed32direct7conditional,6supplemental source groups uncovered. Conservativecandidate count493 replaces471;previousstaticclosure wasincomplete,notfullpredicateproof. Remaining34Python/14external branches plusdynamic/imported/provisioning unresolved.",
     "reviewedAuthoredUnvalidatedPredicates": 20,
     "partiallyMappedRepeatedPredicates": 3,
     "fullPreservationAcceptance": false,
@@ -52590,7 +53936,8 @@
     "additionalUninventoriedChildSourceGroups": 56,
     "additionalUninventoriedSseSourceGroups": 10,
     "additionalUninventoriedVisualMotionSourceGroups": 19,
-    "additionalUninventoriedVisualRenderSourceGroups": 10
+    "additionalUninventoriedVisualRenderSourceGroups": 10,
+    "additionalUninventoriedVisualReasoningSourceGroups": 6
   },
   "dependencies": {
     "acceptedEngine": "e8eee6bb6d8d5d2c8e65bae36154732a74742212",

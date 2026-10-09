@@ -895,7 +895,7 @@
       },
       {
         "file": "tests/aft/declarative-pilots/preservation.json",
-        "sha256": "d9752df15f6cd2d594149054b2b75483b2c7fe04e7364ac809d3f2c90f31d7ad"
+        "sha256": "3345ce062952bb3dcb7f46a4962040466604fac9d46a6877714042eafe155baf"
       },
       {
         "file": "tests/aft/declarative-pilots/sse-cursor.test.yaml",
@@ -937,10 +937,10 @@
       "reviewedPredicateMappings": 20,
       "fullPreservationAccepted": 0,
       "helperInventory": 1072,
-      "conservativeReachableCandidates": 471,
+      "conservativeReachableCandidates": 493,
       "helperSelftestOrNegativeRecords": 213,
-      "unrelatedBranchesOrCases": 388,
-      "exactReachablePredicateDenominator": "Stop40/Files24/Child163/SSE35 selected extracted obligations;Visual boundary57+pacing/projection46(20conditional)+render41(8conditional).All newly reviewedvisualpredicates uncovered.115 supplemental sourcegroups+remaining51Python/14external branches/imported ownership/provisioning unresolved.1072classifiedinventory notfinalpreservation denominator;frozenfullindex unavailable."
+      "unrelatedBranchesOrCases": 366,
+      "exactReachablePredicateDenominator": "Stop40/Files24/Child163/SSE35 selected extracted obligations;Visual boundary57+pacing46+render41+reasoning39(includes22 recovered callbackguards).ALL newlyreviewedvisualrecords uncovered.121 supplemental sourcegroups+remaining34Python/14external/dynamic/imported/provisioning unresolved.493conservativecandidates isnotfinalpreservationdenominator;fullhistoricalindex unavailable."
     },
     "supportedInterfaceScope": "Captured AgentRef/native bootstrap facts, fixtureRunId and scalar owned-relative-path composition supported at deterministic interface depth; this does not validate pilot callers or runtime roots. Four Stop marker checkpoints authored.",
     "blockedCases": [
@@ -2312,6 +2312,22 @@
     "geometryFcUnreviewedAndUnconsumed": true,
     "newYamlOrPreservationCredit": false,
     "accepted584AdmissionReceiptsUnchanged": true,
+    "runtime": 0
+  },
+  "visualReasoningSelectedBranchReview": {
+    "at": "2026-10-09T13:09:57.345243+00:00",
+    "git56bbSourceHashesMatch": true,
+    "visualSha256": "fdcad32225866133f88bef941f0d4d63c8e8cc0b1a7e083a96c8c131d4367db2",
+    "disclosureSha256": "c981ec05a5c8633c67eb83d10a0fc9f80f1a114bcdc29ad477f6a104bead21a0",
+    "selectedExtracted": 39,
+    "direct": 32,
+    "conditional": 7,
+    "recoveredStaticFalseUnrelated": 22,
+    "recoveryEvidence": "final_visual_assert3127 passes reasoning_assert then check()3130 -> loads2snapshots/actualtext/reload/fullrow/motionrelation.",
+    "sourceGroupsUncovered": 6,
+    "conservativeCandidates": 493,
+    "fullPreservationAccepted": false,
+    "allFiveYamlAnd584AdmissionReceiptsUnchanged": true,
     "runtime": 0
   }
 }
