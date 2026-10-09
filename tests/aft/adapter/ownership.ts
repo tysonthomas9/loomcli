@@ -95,8 +95,10 @@ export async function getAgent(context: CapabilityContext, ref: AgentRef): Promi
   const parentId = agent.row.parent_agent_id;
   if (parentId !== null) {
     const parent = fixture.agents.get(parentId);
+    const parentWorkspace=requireOwnedWorkspace(fixture,ref.workspaceId,parentId);
     requireFact(parent && agent.row.created_by_kind === 'agent' && agent.row.created_by_id === parentId &&
-      parent.row.repo === workspace.repo && parent.row.workspace_id === ref.workspaceId &&
+      parent.row.agent_id===parentId&&parent.row.repo===parentWorkspace.repo&&
+      (!parentWorkspace.commonDir||parent.commonDir===parentWorkspace.commonDir)&&parent.row.workspace_id === ref.workspaceId &&
       agent.row.root_agent_id === (parent.row.root_agent_id ?? parentId), 'identity-mismatch', 'Agent parent/root ownership is invalid');
   } else requireFact(agent.row.root_agent_id === null && agent.row.created_by_kind === 'user', 'identity-mismatch', 'Root agent ownership is invalid');
   return { fixture, agent };

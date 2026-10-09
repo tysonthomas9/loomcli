@@ -512,3 +512,28 @@ test('canonical bind resolves a later native actor to the exact second repositor
   assert.equal(z.object({agentId:z.string()}).parse(observed.data).agentId,'agt_beta');
   assert.equal(resolves,2);
 });
+
+test('canonical bind and observation preserve native cross-repository child lineage through bound lookup',async t=>{
+  const {createOwnedWorkspaceRoster}=await import('./workspaces.js');const {fixtureOwnerIdentity}=await import('./authority.js');
+  const h=await setup(t),owner=fixtureOwnerIdentity(h.fixture),parent=h.fixture.agents.get('agt_owned')!,parentRow=parent.row;
+  const fields={identityKind:'native-agent-id' as const,workspaceId:'workspace',repo:parentRow.repo,commonDir:parent.commonDir,storeId:'store',storeGeneration:'generation',
+    agentIds:['agt_owned'],agentSources:[{agentId:'agt_owned',repoNames:['alpha']}],repositories:[
+      {repoName:'alpha',sourceRepoId:'source-alpha',repo:parentRow.repo,commonDir:parent.commonDir,groups:[]},
+      {repoName:'beta',sourceRepoId:'source-beta',repo:'/owned/beta',commonDir:'/owned/beta/.git',groups:[]}]};
+  const creationReceipt=await h.evidenceStore.retain(JSON.stringify({kind:'workspace-created',...owner,...fields}));
+  h.fixture.ownedWorkspaces=await createOwnedWorkspaceRoster(h.fixture,[{...fields,creationReceipt}],h.evidenceStore);
+  h.fixture.readWorkspaceAgent=async(workspaceId,agentId)=>({kind:'agent-enrolled',identityKind:'native-agent-id',...owner,workspaceId,agentId,
+    repo:agentId==='agt_owned'?parentRow.repo:'/owned/beta',commonDir:agentId==='agt_owned'?parent.commonDir:'/owned/beta/.git',storeId:'store',storeGeneration:'generation',
+    parentAgentId:agentId==='agt_owned'?null:'agt_owned',rootAgentId:agentId==='agt_owned'?null:'agt_owned',
+    createdByKind:agentId==='agt_owned'?'user':'agent',createdById:agentId==='agt_owned'?'actual-user':'agt_owned',revision:1});
+  const child=AgentRow.parse({...parentRow,agent_id:'agt_child',repo:'/owned/beta',parent_agent_id:'agt_owned',root_agent_id:'agt_owned',created_by_kind:'agent',created_by_id:'agt_owned'});
+  h.fixture.resolveAgent=async()=>({row:child,commonDir:'/owned/beta/.git'});
+  const bound=await h.invoke('loom.agent.bind',{leaseId:'lease',workspaceId:'workspace',agentId:'agt_child'});assert.equal(bound.availability,'observed',JSON.stringify(bound.error));
+  const input={agent:{fixtureLeaseId:'lease',workspaceId:'workspace',agentId:'agt_child'}};
+  const observed=await h.invoke('loom.agent.observe',input);assert.equal(observed.availability,'observed');assert.equal(observed.provenance.identity.repo,'/owned/beta');
+  for(const change of [{row:{...parentRow,repo:'/owned/beta'},commonDir:'/owned/beta/.git'},
+    {row:{...parentRow,agent_id:'foreign'},commonDir:parent.commonDir},{row:parentRow,commonDir:'/foreign/.git'}]) {
+    h.fixture.agents.set('agt_owned',change);assert.equal((await h.invoke('loom.agent.observe',input)).availability,'error');
+  }
+  h.fixture.agents.set('agt_owned',parent);
+});
