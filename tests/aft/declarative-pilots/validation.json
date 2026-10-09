@@ -5013,7 +5013,7 @@
     "runtime": 0
   },
   "gf1FourBodyCorrection": {
-    "status": "authored-awaiting-canonical-package-validation",
+    "status": "candidate new-operator controls match; full editor chain blocked at existing count capture SyntaxError",
     "rawAfterSha256": "acc39721f43989fd02a41c153247aaf10dd314a3378f7ae5dc8cfdd25b7f3174",
     "mappingFile": "tests/aft/declarative-pilots/preservation.json",
     "mappingPointer": "/pilots/0/fourBodyCorrection",
@@ -5157,7 +5157,7 @@
     ],
     "otherBodyStepsHooksScreenshotsFourBodyCorrectionsUnchanged": true,
     "sourceControls20Retained": true,
-    "canonicalNewPackageValidation": "pending",
+    "canonicalNewPackageValidation": "exact ffff candidate raw admission ADMITTED; no accepted pin/full editor/runtime claim",
     "nativeBindDependency": false,
     "remainingDependencies": [
       "runner-owned stack/profile provisioning",
@@ -5208,5 +5208,224 @@
     ],
     "scopeDecision": "Parent adopted Opus comparison: no unused native bind/store/creator observation gate, originalpublicGET source fields only, narrowedpublicarchive contract pending",
     "sourceReviewerConfirmation": "Opus21:20 agrees nullable*string guards and exactpathname/ID equivalence; sevenhelper interpretation confirmed"
+  },
+  "gf1EngineCandidateDiagnostic": {
+    "at": "2026-10-09T21:41:56.249312+00:00",
+    "evidenceClass": "isolated candidate raw admission and deterministic generated-fixture public runner; no original pilot runtime/preservation acceptance",
+    "authoredHead": "c3bb8658842089f9add9885e681fcf58b82e6ce0",
+    "rawSha256": "acc39721f43989fd02a41c153247aaf10dd314a3378f7ae5dc8cfdd25b7f3174",
+    "adapterBasis": "8dd51b4f6bfda5d9113a4ab7293dfff3602f5845",
+    "engine": {
+      "head": "ffff830b8762fa2670396edde2b5bfccc13d73df",
+      "tree": "d6f7ddf74dae7e03ebfe9941ec380474acfcee36",
+      "parent": "ca73f637d46fa618e2a67f987b89698e914f21cd",
+      "acceptance": "unaccepted candidate",
+      "tarSha256": "7b93bb3bbcb1649ebe75a0297e41df4a2dae723787c0562cfaa5d79ab90dcd0c",
+      "sourceReceiptSha256": "480315a0b280da97b200bc086fcfe368f88d14fd519a3d904d42e9b80bd260f4",
+      "installedBuildFilesMatch": 116,
+      "installedPackageFilesMatch": 149,
+      "singleCanonicalModule": true
+    },
+    "rawAdmission": {
+      "purpose": "Unaccepted isolated GF1 engine candidate unchanged current raw admission only; no originalpilot runtime/preservation claim",
+      "engineHead": "ffff830b8762fa2670396edde2b5bfccc13d73df",
+      "adapterSource": "8dd51b4f6bfda5d9113a4ab7293dfff3602f5845",
+      "actualAdapterRoot": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-engine-candidate-ynzfk96j/tests/aft/adapter",
+      "engineModuleRoot": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-engine-candidate-ynzfk96j/tests/aft/adapter/node_modules/@tysonthomas9/aft/dist",
+      "canonicalModuleResolutionVerified": true,
+      "selectionSha256": "19c984189ba81db01317b5ab3517e1138515de38daad1d28c38991301e731825",
+      "envFileSha256": "5265c27157c9a5e2447b41745c102437b832ee2060c65266642e8bed7e41d82a",
+      "envSha256": "0f6333de3375f8692435ab534292bdc9b8e386a49954c428a878a88dcad8c8da",
+      "pinSha256": "63134b3c1ac72a28d59c283a02b1e9ef1859d227b6b6dd210a1c568884c69ae5",
+      "manifestFiles": 2383,
+      "uniqueManifestBytes": 9078851,
+      "providers": 23,
+      "rawFile": "/private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/files-save-reload.test.yaml",
+      "rawSha256": "acc39721f43989fd02a41c153247aaf10dd314a3378f7ae5dc8cfdd25b7f3174",
+      "rawBytes": 70723,
+      "verifyCalls": 242,
+      "verifyReads": 2383,
+      "verifyBytes": 9078851,
+      "verifyMs": 1086.8821529999968,
+      "elapsedMs": 1257.4013330000002,
+      "effects": 0,
+      "runtimeStarted": 0,
+      "status": "ADMITTED canonical unchanged raw suite",
+      "guardMs": 60000,
+      "loadedSuites": 1,
+      "cases": [
+        {
+          "name": "GF1 UI editor Save updates this Agent API checkout and survives every tab reload",
+          "skipped": true,
+          "declaredSteps": 232
+        }
+      ],
+      "rawUnchangedAfter": true
+    },
+    "publicPrimitiveOwnerControl": {
+      "statuses": [
+        "passed",
+        "failed",
+        "failed"
+      ],
+      "evidence": "generic VM CLI double, no source pilot proof"
+    },
+    "sourceOperatorControls": {
+      "expectedOutcomesMatched": 27,
+      "editorRawAndJoin": 7,
+      "savedKeysetAndCheckoutConjunct": 6,
+      "reloadedKeysetAndCheckoutConjunct": 6,
+      "addedLinePolarity": 7,
+      "delayedAddedAwait": 1,
+      "unchangedAwaitWithinMs": 30000,
+      "negativeAddedLineScope": "immediate capture/predicate polarity only, not 30s timeout proof",
+      "editorScope": "raw-line/join only; count gate excluded diagnostically due retained canonical SyntaxError; missing-editor/panel not tested through fullchain",
+      "inputs": "JSDOM DOM fixtures and literal keyset operands, not actual frontend API evidence"
+    },
+    "fullEditorChain": {
+      "status": "FAILED",
+      "authoredSteps": [
+        79,
+        80,
+        81,
+        82
+      ],
+      "failedStep": 79,
+      "cause": "generic DOM count capture generated expression includes literal LF in single-quoted text-lines split branch and cannot parse before DOM access",
+      "owner": "engine agent-a43468",
+      "correction": "pending exact reviewed package; no overlay"
+    },
+    "cleanupScopeDecision": {
+      "coordinatorDecisionAt": "2026-10-09T21:40:49Z",
+      "supportedPlan": "flat-input immediate archive final BODY step on success; no bind/native or cleanup-claim mechanism",
+      "failurePathDeviation": "If case fails after claim, source archives claimed IDs; declarative uses suite fixture.release/owned compose down. Archive is unobserved on failure path. Exact failure-path archive parity deferred until after paired run.",
+      "approvalScope": "explicit coordinator scope disposition; not source parity or runtime proof",
+      "remaining": "await frozen flat archive contract/callback then author final body call and validate"
+    },
+    "runtime": {
+      "originalPilotExecuted": false,
+      "allFiveRemainSkipped": true,
+      "browserServicesProvidersLaunched": 0,
+      "sameBuildParity": "unverified"
+    },
+    "artifacts": [
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-engine-candidate-ynzfk96j/diagnostic-owned.json",
+        "sha256": "44607dd4b7330191cda841217b904ca168f2e42822bc3bfbfb82f3377c3c9566",
+        "bytes": 539
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-engine-candidate-ynzfk96j/diagnostic-selection.json",
+        "sha256": "19c984189ba81db01317b5ab3517e1138515de38daad1d28c38991301e731825",
+        "bytes": 507
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-engine-candidate-ynzfk96j/public-env-basis.json",
+        "sha256": "bb6ed167c1c04b67a751d4ebda99dd95bdd7f39d1820dfc4e6167e8a8e5e36eb",
+        "bytes": 1273
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-engine-candidate-ynzfk96j/public-env.json",
+        "sha256": "5265c27157c9a5e2447b41745c102437b832ee2060c65266642e8bed7e41d82a",
+        "bytes": 442279
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-engine-candidate-ynzfk96j/construct-public-env.mjs",
+        "sha256": "1e2f78078974e4fc7761738b19e7da00526161aa6313fdb87e79ed930c615f46",
+        "bytes": 1723
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-engine-candidate-ynzfk96j/raw-compatibility.mjs",
+        "sha256": "8e5608116040c3717e04645625ef69e4fd40ac0de350ef0e36be2d4fd9f2fcd8",
+        "bytes": 4176
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-engine-candidate-ynzfk96j/raw-admission-receipt.json",
+        "sha256": "557536709e3ce210bec8dc652f3d2338e34afaa3fbb8faa5c4cb22dc0dd73833",
+        "bytes": 1705
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-engine-candidate-ynzfk96j/installed-byte-receipt.json",
+        "sha256": "3fb396ea8b5a004d69b3a562403939d375494b5635c69682a32a86638044d962",
+        "bytes": 566
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-engine-candidate-ynzfk96j/tests/gf1-candidate-install.log",
+        "sha256": "ac64edfeab111a54e7d8f279cb8d39c868563f2b50a5d3176ae18b2a3d613718",
+        "bytes": 163
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-engine-candidate-ynzfk96j/tests/gf1-projections-install.log",
+        "sha256": "52b306bb67cb106d4cfbd370e07ebb88c3d1311a6a9a1bf76a10adae0b74a4fd",
+        "bytes": 142
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-engine-candidate-ynzfk96j/tests/gf1-adapter-build.log",
+        "sha256": "b5644a9bcf54fb717ff2d7b31c12159c4da5d6424ddb28a18cc286f5199c7226",
+        "bytes": 51
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-engine-candidate-ynzfk96j/tests/aft/adapter/.diagnostic/owner-public-proof.mjs",
+        "sha256": "028998409fbaa7f81c619a8fabc7d6dcb5f673ba296a9374825f79f7a6acd56a",
+        "bytes": 5057
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-engine-candidate-ynzfk96j/tests/aft/adapter/public-proof-receipt.json",
+        "sha256": "d08aecd08ee2a00e539d3fb4e7f32ad6a54445580515c9e14ef18b41958898e7",
+        "bytes": 14902
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-engine-candidate-ynzfk96j/tests/gf1-owner-public-proof.log",
+        "sha256": "1b3b10c9eb9505558d4749ad19d63b2034265c12a1f6f6c1fa6f305192f334ba",
+        "bytes": 753
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-engine-candidate-ynzfk96j/tests/aft/adapter/.diagnostic/gf1-initial-red/gf1-public-proof.mjs",
+        "sha256": "52edaf46f10124a44dd71672d7a017fb4a3ef7318e26acf1ad43fafd451cf0bd",
+        "bytes": 7187
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-engine-candidate-ynzfk96j/tests/aft/adapter/.diagnostic/gf1-initial-red/partial-results.json",
+        "sha256": "40ccd06208ce6200770bfa093b139d3c730e846f16ae9f4941634e7752c674d4",
+        "bytes": 3345
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-engine-candidate-ynzfk96j/tests/aft/adapter/.diagnostic/gf1-initial-red/log.txt",
+        "sha256": "6d331c4e26196ec531f55105bdc87cb385c703b884acf51b1716277939da0a08",
+        "bytes": 1386
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-engine-candidate-ynzfk96j/tests/aft/adapter/.diagnostic/gf1-operator-partial/script.mjs",
+        "sha256": "26732dd5464f3bb2c22c8070292d68c5644768f2cfe480992fd9b9afd7133683",
+        "bytes": 7382
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-engine-candidate-ynzfk96j/tests/aft/adapter/.diagnostic/gf1-operator-partial/results.json",
+        "sha256": "00d3ef5fde15b0f5a226aec07fd22a2163474fe91bcaf66e099b4bf51ceb00b8",
+        "bytes": 13533
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-engine-candidate-ynzfk96j/tests/aft/adapter/.diagnostic/gf1-operator-partial/log.txt",
+        "sha256": "515b305b7103193aab05711d2cc7118749d26682a9f90492eddacbd65f6e3c0c",
+        "bytes": 9915
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-engine-candidate-ynzfk96j/tests/aft/adapter/.diagnostic/gf1-operator-diagnostic.mjs",
+        "sha256": "5efcce1508c823b77c77679338518d821d9ad505058eb189f3b36a36ec4e26c0",
+        "bytes": 5910
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-engine-candidate-ynzfk96j/tests/aft/adapter/.diagnostic/gf1-controls/receipt.json",
+        "sha256": "0b9266fefbb6170ca0065c6c594bf73c82b5bbbedea67810b24109851ee98980",
+        "bytes": 19901
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-engine-candidate-ynzfk96j/tests/gf1-added-operator-diagnostic.log",
+        "sha256": "bf70728b74d7b058e01886df544e416dec72d6fef296f2165c1fa594f07942fc",
+        "bytes": 2000
+      }
+    ],
+    "receiptPath": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-engine-candidate-ynzfk96j/bounded-diagnostic-receipt.json",
+    "receiptSha256": "baa9dcedfeed121193a25722da33193406a3be04a0505c14d77a454f1edf23af"
   }
 }
