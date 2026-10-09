@@ -1,0 +1,10 @@
+export { projectMarkdown, partitionMarkdown, markdownProjectionContract } from './markdown.js';
+export type { MarkdownInput, MotionProjection, TerminalProjection, FrameProjection, ArrivalProjection } from './markdown.js';
+export { expectedProjectionIdentity, validateProjectionIdentity } from './identity.js';
+export type { ProjectionContext, ProjectionIdentity } from './identity.js';
+export { utf16Length, reasoningPreview, compareText, projectRendererTree, projectPlainSource, words, javascriptWords, ProjectionError } from './text.js';
+export type { RendererNode, RendererTreeObservation, RendererText, TextObservation, TextComparison, PlainFrame, PlainSourceInput } from './text.js';
+export { comparePromptArgv, probePromptArgvDouble, promptArgvContract } from './prompt-argv.js';
+export type { PromptExpectation, ArgvObservation, PromptArgvDouble } from './prompt-argv.js';
+export { compareReceiptFields, receiptReplayContract, receiptSourceVersions } from './receipt-replay.js';
+export type { ReceiptSource, SendResult, ReceiptRecord, HandoverEvidence, ReceiptComparisonInput } from './receipt-replay.js';
