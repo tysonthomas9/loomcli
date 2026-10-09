@@ -8860,7 +8860,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "authored-unvalidated",
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/7"
@@ -8892,6 +8892,16 @@
                 "callerDefaultStepMs": 30000,
                 "publicApiRequestMs": 15000,
                 "acceptance": "authored-unvalidated; no raw-suite loader, execution or runtime preservation credit"
+              },
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/7"
+                ],
+                "sourceReason": "selected pending invocation",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
               }
             },
             {
@@ -8905,7 +8915,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "authored-unvalidated",
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
@@ -8938,6 +8948,17 @@
                 "callerDefaultStepMs": 30000,
                 "publicApiRequestMs": 15000,
                 "acceptance": "authored-unvalidated; no raw-suite loader, execution or runtime preservation credit"
+              },
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13"
+                ],
+                "sourceReason": "direct stopped call10 and reloaded13 -> stopped; reused17 does not call stopped",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
               }
             },
             {
@@ -8951,7 +8972,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "authored-unvalidated",
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
@@ -8984,6 +9005,17 @@
                 "callerDefaultStepMs": 30000,
                 "publicApiRequestMs": 15000,
                 "acceptance": "authored-unvalidated; no raw-suite loader, execution or runtime preservation credit"
+              },
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13"
+                ],
+                "sourceReason": "direct stopped call10 and reloaded13 -> stopped; reused17 does not call stopped",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
               }
             },
             {
@@ -8997,7 +9029,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "authored-unvalidated",
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
@@ -9030,6 +9062,17 @@
                 "callerDefaultStepMs": 30000,
                 "publicApiRequestMs": 15000,
                 "acceptance": "authored-unvalidated; no raw-suite loader, execution or runtime preservation credit"
+              },
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13"
+                ],
+                "sourceReason": "direct stopped call10 and reloaded13 -> stopped; reused17 does not call stopped",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
               }
             },
             {
@@ -9043,7 +9086,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "authored-unvalidated",
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
@@ -9096,6 +9139,17 @@
                 "callerDefaultStepMs": 30000,
                 "publicApiRequestMs": 15000,
                 "acceptance": "authored-unvalidated; no raw-suite loader, execution or runtime preservation credit"
+              },
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13"
+                ],
+                "sourceReason": "direct stopped call10 and reloaded13 -> stopped; reused17 does not call stopped",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
               }
             },
             {
@@ -9109,7 +9163,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -9124,7 +9178,18 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13"
+                ],
+                "sourceReason": "direct stopped call10 and reloaded13 -> stopped; reused17 does not call stopped",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
+              }
             },
             {
               "source": {
@@ -9137,7 +9202,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -9152,7 +9217,18 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13"
+                ],
+                "sourceReason": "direct stopped call10 and reloaded13 -> stopped; reused17 does not call stopped",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
+              }
             }
           ]
         },
@@ -9171,7 +9247,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -9189,7 +9265,21 @@
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/0",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/7",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+                ],
+                "sourceReason": "shared Agent API identity/read helpers reached from every selected Stop function",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
+              }
             },
             {
               "source": {
@@ -9227,7 +9317,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -9245,7 +9335,21 @@
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/0",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/7",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+                ],
+                "sourceReason": "shared Agent API identity/read helpers reached from every selected Stop function",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
+              }
             },
             {
               "source": {
@@ -9258,7 +9362,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -9276,7 +9380,21 @@
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/0",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/7",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+                ],
+                "sourceReason": "shared Agent API identity/read helpers reached from every selected Stop function",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
+              }
             },
             {
               "source": {
@@ -9289,7 +9407,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -9307,7 +9425,21 @@
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/0",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/7",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+                ],
+                "sourceReason": "shared Agent API identity/read helpers reached from every selected Stop function",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
+              }
             },
             {
               "source": {
@@ -9320,7 +9452,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -9338,7 +9470,21 @@
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/0",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/7",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+                ],
+                "sourceReason": "shared Agent API identity/read helpers reached from every selected Stop function",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
+              }
             },
             {
               "source": {
@@ -9351,7 +9497,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -9369,7 +9515,21 @@
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/0",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/7",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+                ],
+                "sourceReason": "shared Agent API identity/read helpers reached from every selected Stop function",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
+              }
             },
             {
               "source": {
@@ -9382,7 +9542,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -9399,7 +9559,20 @@
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/7",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+                ],
+                "sourceReason": "pending7 -> ask.events then pending.events; stopped10 -> events then ask_history.events; reloaded13 -> ask_history.events then stopped.events then stopped.ask_history.events; reused17 -> turn.events then ask_history.events. create0 does NOT read events.",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
+              }
             },
             {
               "source": {
@@ -9462,7 +9635,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -9476,7 +9649,17 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/0"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/0"
+                ],
+                "sourceReason": "Stop create passes ('stop','pr-review-interactive','target'); target becomes nonempty required MODEL, so model assertion137 is selected",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
+              }
             },
             {
               "source": {
@@ -9889,7 +10072,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -9903,7 +10086,17 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+                ],
+                "sourceReason": "reused17 calls turn(stop, STOP_RECOVER_<actual RUN_ID>, completed)",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
+              }
             },
             {
               "source": {
@@ -9916,7 +10109,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -9930,7 +10123,17 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+                ],
+                "sourceReason": "reused17 calls turn(stop, STOP_RECOVER_<actual RUN_ID>, completed)",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
+              }
             },
             {
               "source": {
@@ -9943,7 +10146,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -9957,7 +10160,17 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+                ],
+                "sourceReason": "reused17 calls turn(stop, STOP_RECOVER_<actual RUN_ID>, completed)",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
+              }
             },
             {
               "source": {
@@ -9970,7 +10183,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -9984,7 +10197,17 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+                ],
+                "sourceReason": "reused17 calls turn(stop, STOP_RECOVER_<actual RUN_ID>, completed)",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
+              }
             },
             {
               "source": {
@@ -9997,7 +10220,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -10011,7 +10234,17 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/7"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/7"
+                ],
+                "sourceReason": "pending7 calls ask(stop,pending); question-form branch stage=='questions' excluded",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
+              }
             },
             {
               "source": {
@@ -10024,7 +10257,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -10038,7 +10271,17 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/7"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/7"
+                ],
+                "sourceReason": "pending7 calls ask(stop,pending); question-form branch stage=='questions' excluded",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
+              }
             },
             {
               "source": {
@@ -10051,7 +10294,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -10065,7 +10308,17 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/7"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/7"
+                ],
+                "sourceReason": "pending7 calls ask(stop,pending); question-form branch stage=='questions' excluded",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
+              }
             },
             {
               "source": {
@@ -10253,7 +10506,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -10269,7 +10522,19 @@
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+                ],
+                "sourceReason": "stopped10 compare=False; reloaded13 compare=True then stopped compare=False; reused17 compare=True",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
+              }
             },
             {
               "source": {
@@ -10282,7 +10547,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "authored-unvalidated",
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
@@ -10416,6 +10681,18 @@
                 "callerDefaultStepMs": 30000,
                 "publicApiRequestMs": 15000,
                 "acceptance": "authored-unvalidated; no raw-suite loader, execution or runtime preservation credit"
+              },
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+                ],
+                "sourceReason": "stopped10 compare=False; reloaded13 compare=True then stopped compare=False; reused17 compare=True",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
               }
             },
             {
@@ -10429,7 +10706,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "authored-unvalidated",
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
@@ -10533,6 +10810,18 @@
                 "callerDefaultStepMs": 30000,
                 "publicApiRequestMs": 15000,
                 "acceptance": "authored-unvalidated; no raw-suite loader, execution or runtime preservation credit"
+              },
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+                ],
+                "sourceReason": "stopped10 compare=False; reloaded13 compare=True then stopped compare=False; reused17 compare=True",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
               }
             },
             {
@@ -11046,7 +11335,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -11063,7 +11352,20 @@
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable-conditional",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/7",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+                ],
+                "sourceReason": "pending7 -> ask.events then pending.events; stopped10 -> events then ask_history.events; reloaded13 -> ask_history.events then stopped.events then stopped.ask_history.events; reused17 -> turn.events then ask_history.events. create0 does NOT read events.",
+                "conditionalPath": "Only when returned event page.more is true; every subsequent page must advance cursor, no bounded truncation-as-complete",
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
+              }
             },
             {
               "source": {
@@ -11076,7 +11378,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -11090,7 +11392,17 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/0"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/0"
+                ],
+                "sourceReason": "Stop create passes ('stop','pr-review-interactive','target'); target becomes nonempty required MODEL, so model assertion137 is selected",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
+              }
             },
             {
               "source": {
@@ -11228,7 +11540,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-conditionally-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -11242,7 +11554,17 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/7"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable-conditional",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/7"
+                ],
+                "sourceReason": "pending7 calls ask(stop,pending); question-form branch stage=='questions' excluded",
+                "conditionalPath": "Only if initial exact pending ask has no saved ask.opened event; retain browser saved-event wait and fresh exact-ask validation, never silently drop this branch",
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
+              }
             },
             {
               "source": {
@@ -11255,7 +11577,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "excluded-static-selected-invocation-branch",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -11267,7 +11589,18 @@
                 "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
-              "selectedCallerOldStepIds": [
+              "selectedCallerOldStepIds": [],
+              "selectedInvocationReachability": {
+                "status": "excluded-static-selected-branch",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/7"
+                ],
+                "sourceReason": "pending7 calls ask(stop,pending); question-form branch stage=='questions' excluded",
+                "conditionalPath": null,
+                "excludedReason": "static stage='pending' differs from 'questions'; belongs to another caller branch, not a Stop obligation",
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
+              },
+              "excludedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/7"
               ]
             },
@@ -11282,7 +11615,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "excluded-static-selected-invocation-branch",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -11294,7 +11627,18 @@
                 "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
-              "selectedCallerOldStepIds": [
+              "selectedCallerOldStepIds": [],
+              "selectedInvocationReachability": {
+                "status": "excluded-static-selected-branch",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/7"
+                ],
+                "sourceReason": "pending7 calls ask(stop,pending); question-form branch stage=='questions' excluded",
+                "conditionalPath": null,
+                "excludedReason": "static stage='pending' differs from 'questions'; belongs to another caller branch, not a Stop obligation",
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
+              },
+              "excludedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/7"
               ]
             },
@@ -11309,7 +11653,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "excluded-static-selected-invocation-branch",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -11321,7 +11665,18 @@
                 "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
-              "selectedCallerOldStepIds": [
+              "selectedCallerOldStepIds": [],
+              "selectedInvocationReachability": {
+                "status": "excluded-static-selected-branch",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/7"
+                ],
+                "sourceReason": "pending7 calls ask(stop,pending); question-form branch stage=='questions' excluded",
+                "conditionalPath": null,
+                "excludedReason": "static stage='pending' differs from 'questions'; belongs to another caller branch, not a Stop obligation",
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
+              },
+              "excludedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/7"
               ]
             },
@@ -11336,7 +11691,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -11349,10 +11704,20 @@
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
               "selectedCallerOldStepIds": [
-                "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+                ],
+                "sourceReason": "stopped10 compare=False; reloaded13 compare=True then stopped compare=False; reused17 compare=True",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
+              }
             },
             {
               "source": {
@@ -11365,7 +11730,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -11378,10 +11743,20 @@
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
               "selectedCallerOldStepIds": [
-                "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+                ],
+                "sourceReason": "stopped10 compare=False; reloaded13 compare=True then stopped compare=False; reused17 compare=True",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
+              }
             },
             {
               "source": {
@@ -11546,7 +11921,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -11563,7 +11938,20 @@
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/3",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+                ],
+                "sourceReason": "all four selected callers execute no-argument effect helper sequentially",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
+              }
             },
             {
               "source": {
@@ -11572,7 +11960,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "authored-unvalidated",
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/3",
@@ -11628,6 +12016,19 @@
                 "filesystemStepMs": 30000,
                 "wholeCallerDeadline": "unvalidated across authored typed chain",
                 "acceptance": "authored-unvalidated; no raw-suite/public-runner pilot preservation/runtime credit"
+              },
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/3",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+                ],
+                "sourceReason": "all four selected callers execute no-argument effect helper sequentially",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
               }
             },
             {
@@ -11637,7 +12038,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "authored-unvalidated",
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/3",
@@ -11693,6 +12094,19 @@
                 "filesystemStepMs": 30000,
                 "wholeCallerDeadline": "unvalidated across authored typed chain",
                 "acceptance": "authored-unvalidated; no raw-suite/public-runner pilot preservation/runtime credit"
+              },
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/3",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+                ],
+                "sourceReason": "all four selected callers execute no-argument effect helper sequentially",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
               }
             },
             {
@@ -11702,7 +12116,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "authored-unvalidated",
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/3",
@@ -11758,6 +12172,19 @@
                 "filesystemStepMs": 30000,
                 "wholeCallerDeadline": "unvalidated across authored typed chain",
                 "acceptance": "authored-unvalidated; no raw-suite/public-runner pilot preservation/runtime credit"
+              },
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/3",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+                ],
+                "sourceReason": "all four selected callers execute no-argument effect helper sequentially",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
               }
             },
             {
@@ -11767,7 +12194,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "authored-unvalidated",
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/3",
@@ -11823,6 +12250,19 @@
                 "filesystemStepMs": 30000,
                 "wholeCallerDeadline": "unvalidated across authored typed chain",
                 "acceptance": "authored-unvalidated; no raw-suite/public-runner pilot preservation/runtime credit"
+              },
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/3",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+                ],
+                "sourceReason": "all four selected callers execute no-argument effect helper sequentially",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
               }
             },
             {
@@ -11832,7 +12272,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "authored-unvalidated",
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/3",
@@ -11888,6 +12328,19 @@
                 "filesystemStepMs": 30000,
                 "wholeCallerDeadline": "unvalidated across authored typed chain",
                 "acceptance": "authored-unvalidated; no raw-suite/public-runner pilot preservation/runtime credit"
+              },
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/3",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+                ],
+                "sourceReason": "all four selected callers execute no-argument effect helper sequentially",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
               }
             }
           ]
@@ -11903,7 +12356,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -11917,7 +12370,17 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+                ],
+                "sourceReason": "reused17 executes no-argument native helper after recovery and marker checks",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
+              }
             },
             {
               "source": {
@@ -11926,7 +12389,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -11940,7 +12403,17 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+                ],
+                "sourceReason": "reused17 executes no-argument native helper after recovery and marker checks",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
+              }
             },
             {
               "source": {
@@ -11949,7 +12422,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -11963,7 +12436,17 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+                ],
+                "sourceReason": "reused17 executes no-argument native helper after recovery and marker checks",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
+              }
             },
             {
               "source": {
@@ -11972,7 +12455,7 @@
                 "destination": "split admission invariant from visible YAML expectation; source preserved",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-external-helper-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -11986,7 +12469,17 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+                ],
+                "sourceReason": "reused17 executes no-argument native helper after recovery and marker checks",
+                "conditionalPath": null,
+                "excludedReason": null,
+                "acceptance": "reachability review only; original coverage/unresolved gap retained, no new YAML/admission/runtime credit"
+              }
             }
           ]
         }
@@ -12029,6 +12522,444 @@
         "evidence": "real native OpenCode ask/turn + external model; rendered Chat + persisted events + native model + filesystem absence",
         "deadlines": "original180000ms pending/stopped/recovery waits; default30000ms for unbudgeted reload wait; original native/API helper deadlines",
         "screenshots": "all18 named step checkpoints including actual pending ask, bare Stop result and reload/reused Chat"
+      },
+      "selectedBranchReview": {
+        "at": "2026-10-09T10:56:32.384523+00:00",
+        "scope": "bare-stop only; frozen inventory predicates plus uncovered source guards",
+        "sourceByteReceipts": [
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-chat-controls-stop.py",
+            "sha256": "a815891dcc4cf4f270e9581cc83fb3f99ad530bd569036585385c32bbaa26d6c",
+            "frozenBytesMatch": true
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-chat-controls.py",
+            "sha256": "987677716b61bc200b2cc7723bd244c741085381722c885fa73066b01cbb7469",
+            "frozenBytesMatch": true
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-chat-controls-stop-effect.sh",
+            "sha256": "932966414dc98a4666889f1d4e06e4fbe5c7f8294c3045430df1ad3912106a33",
+            "frozenBytesMatch": true
+          },
+          {
+            "helper": "campaign:tests/aft/scripts/coverage-chat-controls-stop-native.sh",
+            "sha256": "f46ea6dbb4c270269f541abd0d13f48cb5129f71985b98ba48c74d3dfda815e9",
+            "frozenBytesMatch": true
+          }
+        ],
+        "selectedHelperInvocationsExpanded": [
+          {
+            "oldStep": 0,
+            "call": "stop.create -> controls.create(stop,pr-review-interactive,target)"
+          },
+          {
+            "oldStep": 7,
+            "call": "stop.pending -> controls.ask(stop,pending)"
+          },
+          {
+            "oldStep": 10,
+            "call": "stop.stopped -> controls.ask_history(stop,stopped,1,0,1,False)"
+          },
+          {
+            "oldStep": 13,
+            "call": "stop.reloaded -> ask_history(compare=True), then stopped -> ask_history(compare=False)"
+          },
+          {
+            "oldStep": 17,
+            "call": "stop.reused -> turn(STOP_RECOVER_<actual RUN_ID>,completed), ask_history(compare=True)"
+          },
+          {
+            "oldSteps": [
+              3,
+              10,
+              13,
+              17
+            ],
+            "call": "no-argument stop-effect helper"
+          },
+          {
+            "oldStep": 17,
+            "call": "no-argument stop-native helper after reused+effect"
+          }
+        ],
+        "inventoryReview": {
+          "selectedCandidateEntriesBefore": 43,
+          "reachable": 38,
+          "conditionallyReachable": 2,
+          "excludedQuestionFormBranch": 3,
+          "selectedFrozenInventoryObligations": 40,
+          "scopeLimit": "40 is the selected Stop subset inside frozen inventory, not the complete Stop denominator or other pilots denominator;14 additional native source guards and ownership import closure remain uncovered"
+        },
+        "additionalNativeSourceObligations": [
+          {
+            "id": "stop-native-recovery-proof",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-controls-stop-native.sh",
+            "sourceHelperSha256": "f46ea6dbb4c270269f541abd0d13f48cb5129f71985b98ba48c74d3dfda815e9",
+            "sourceLines": {
+              "start": 10,
+              "end": 11,
+              "text": "jq -e '.stop_reason == \"completed\" and (.turn_id | type == \"string\" and length > 0) and (.completion_event_id | type == \"string\" and length > 0)' \\\n  \"$AFT_WORK_DIR/chat-controls/stop-STOP_RECOVER_${RUN_ID}-turn.json\" >/dev/null"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+            ],
+            "coverage": "unresolved",
+            "gap": {
+              "kind": "reachable-source-obligation-outside-frozen-predicate-extraction",
+              "required": "Before native read require same recovery turn proof stop_reason=completed and nonempty string turn_id/completion_event_id; actual STOP_RECOVER_<fixtureRunId> file binding",
+              "canonicalAttempt": "Existing bind/native-registration/native.observe authoring nearby does not map this exact full source guard; no independent engine schema or expected-result provider",
+              "missingObservation": "Exact source guard must map to authenticated canonical facts/admission checks with explicit YAML or remain uncovered; no source-only preservation credit"
+            },
+            "destination": []
+          },
+          {
+            "id": "stop-native-owning-sqlite-row",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-controls-stop-native.sh",
+            "sourceHelperSha256": "f46ea6dbb4c270269f541abd0d13f48cb5129f71985b98ba48c74d3dfda815e9",
+            "sourceLines": {
+              "start": 24,
+              "end": 29,
+              "text": "  const db = new DatabaseSync(\"/root/.loom/agents.db\", {readOnly:true});\n  const row = db.prepare(\"SELECT agent_id,name,repo,harness,preset,model,state,harness_session_id AS native_id,harness_session_root AS native_root,worktree_path FROM agents WHERE agent_id=? AND workspace_id=?\").get(id,\"LOCALMODE\");\n  if (!row || row.name !== `cov-controls-stop-${run}` || row.repo !== repo ||\n      row.harness !== \"opencode\" || row.preset !== \"pr-review-interactive\" || row.model !== target ||\n      !row.native_id || typeof row.native_root !== \"string\" || !row.worktree_path)\n    return fail(\"owned-agent-or-native-ref-mismatch\");"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+            ],
+            "coverage": "unresolved",
+            "gap": {
+              "kind": "reachable-source-obligation-outside-frozen-predicate-extraction",
+              "required": "Actual owning SQLite row exists in LOCALMODE and matches name/run, repo, opencode harness, preset, requested model, native ref/root and worktree",
+              "canonicalAttempt": "Existing bind/native-registration/native.observe authoring nearby does not map this exact full source guard; no independent engine schema or expected-result provider",
+              "missingObservation": "Exact source guard must map to authenticated canonical facts/admission checks with explicit YAML or remain uncovered; no source-only preservation credit"
+            },
+            "destination": []
+          },
+          {
+            "id": "stop-native-historical-registration",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-controls-stop-native.sh",
+            "sourceHelperSha256": "f46ea6dbb4c270269f541abd0d13f48cb5129f71985b98ba48c74d3dfda815e9",
+            "sourceLines": {
+              "start": 30,
+              "end": 31,
+              "text": "  if (!db.prepare(\"SELECT 1 FROM agent_native_sessions WHERE agent_id=? AND harness=? AND native_root=? AND native_id=?\").get(id,\"opencode\",row.native_root,row.native_id))\n    return fail(\"native-ref-not-owned\");"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+            ],
+            "coverage": "unresolved",
+            "gap": {
+              "kind": "reachable-source-obligation-outside-frozen-predicate-extraction",
+              "required": "Historical agent_native_sessions row matches same exact agent/opencode/root/native ID",
+              "canonicalAttempt": "Existing bind/native-registration/native.observe authoring nearby does not map this exact full source guard; no independent engine schema or expected-result provider",
+              "missingObservation": "Exact source guard must map to authenticated canonical facts/admission checks with explicit YAML or remain uncovered; no source-only preservation credit"
+            },
+            "destination": []
+          },
+          {
+            "id": "stop-native-service-root-binary",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-controls-stop-native.sh",
+            "sourceHelperSha256": "f46ea6dbb4c270269f541abd0d13f48cb5129f71985b98ba48c74d3dfda815e9",
+            "sourceLines": {
+              "start": 32,
+              "end": 34,
+              "text": "  if (process.env.LOOM_CONFIG_DIR !== \"/root/.loom\" ||\n      process.env.LOOM_OPENCODE_BIN !== \"/usr/local/bin/opencode\")\n    return fail(\"owned-service-root-or-binary-mismatch\");"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+            ],
+            "coverage": "unresolved",
+            "gap": {
+              "kind": "reachable-source-obligation-outside-frozen-predicate-extraction",
+              "required": "Actual LOOM_CONFIG_DIR=/root/.loom and LOOM_OPENCODE_BIN=/usr/local/bin/opencode",
+              "canonicalAttempt": "Existing bind/native-registration/native.observe authoring nearby does not map this exact full source guard; no independent engine schema or expected-result provider",
+              "missingObservation": "Exact source guard must map to authenticated canonical facts/admission checks with explicit YAML or remain uncovered; no source-only preservation credit"
+            },
+            "destination": []
+          },
+          {
+            "id": "stop-native-registration-readable",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-controls-stop-native.sh",
+            "sourceHelperSha256": "f46ea6dbb4c270269f541abd0d13f48cb5129f71985b98ba48c74d3dfda815e9",
+            "sourceLines": {
+              "start": 35,
+              "end": 37,
+              "text": "  const file = path.join(process.env.LOOM_CONFIG_DIR, \"agents-opencode/state/opencode/service.json\");\n  let reg;\n  try { reg = JSON.parse(fs.readFileSync(file,\"utf8\")); } catch { return fail(\"service-registration-unavailable\"); }"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+            ],
+            "coverage": "unresolved",
+            "gap": {
+              "kind": "reachable-source-obligation-outside-frozen-predicate-extraction",
+              "required": "Read and parse actual owning service.json; unavailable/inaccessible/malformed is not absence or success",
+              "canonicalAttempt": "Existing bind/native-registration/native.observe authoring nearby does not map this exact full source guard; no independent engine schema or expected-result provider",
+              "missingObservation": "Exact source guard must map to authenticated canonical facts/admission checks with explicit YAML or remain uncovered; no source-only preservation credit"
+            },
+            "destination": []
+          },
+          {
+            "id": "stop-native-registration-url-parses",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-controls-stop-native.sh",
+            "sourceHelperSha256": "f46ea6dbb4c270269f541abd0d13f48cb5129f71985b98ba48c74d3dfda815e9",
+            "sourceLines": {
+              "start": 38,
+              "end": 39,
+              "text": "  let base;\n  try { base = new URL(reg.url); } catch { return fail(\"service-url-invalid\"); }"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+            ],
+            "coverage": "unresolved",
+            "gap": {
+              "kind": "reachable-source-obligation-outside-frozen-predicate-extraction",
+              "required": "Actual registered URL parses, not guessed service URL",
+              "canonicalAttempt": "Existing bind/native-registration/native.observe authoring nearby does not map this exact full source guard; no independent engine schema or expected-result provider",
+              "missingObservation": "Exact source guard must map to authenticated canonical facts/admission checks with explicit YAML or remain uncovered; no source-only preservation credit"
+            },
+            "destination": []
+          },
+          {
+            "id": "stop-native-closed-service-identity",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-controls-stop-native.sh",
+            "sourceHelperSha256": "f46ea6dbb4c270269f541abd0d13f48cb5129f71985b98ba48c74d3dfda815e9",
+            "sourceLines": {
+              "start": 40,
+              "end": 45,
+              "text": "  const port = Number(base.port);\n  if (base.protocol !== \"http:\" || ![\"127.0.0.1\",\"localhost\"].includes(base.hostname) ||\n      !/^[1-9][0-9]{0,4}$/.test(base.port) || port > 65535 ||\n      base.username || base.password || base.pathname !== \"/\" || base.search || base.hash ||\n      !Number.isInteger(reg.pid) || reg.pid < 1 ||\n      typeof reg.password !== \"string\" || !reg.password) return fail(\"service-identity-invalid\");"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+            ],
+            "coverage": "unresolved",
+            "gap": {
+              "kind": "reachable-source-obligation-outside-frozen-predicate-extraction",
+              "required": "Actual http loopback URL, bounded numeric port, no URL credentials/path/query/hash, positive integer PID and nonempty private password; credentials never output",
+              "canonicalAttempt": "Existing bind/native-registration/native.observe authoring nearby does not map this exact full source guard; no independent engine schema or expected-result provider",
+              "missingObservation": "Exact source guard must map to authenticated canonical facts/admission checks with explicit YAML or remain uncovered; no source-only preservation credit"
+            },
+            "destination": []
+          },
+          {
+            "id": "stop-native-actual-process-readable",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-controls-stop-native.sh",
+            "sourceHelperSha256": "f46ea6dbb4c270269f541abd0d13f48cb5129f71985b98ba48c74d3dfda815e9",
+            "sourceLines": {
+              "start": 46,
+              "end": 51,
+              "text": "  let command, executable, pinned;\n  try {\n    command = fs.readFileSync(`/proc/${reg.pid}/cmdline`,\"utf8\").split(\"\\0\").filter(Boolean);\n    executable = fs.realpathSync(`/proc/${reg.pid}/exe`);\n    pinned = fs.realpathSync(process.env.LOOM_OPENCODE_BIN);\n  } catch { return fail(\"service-process-unavailable\"); }"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+            ],
+            "coverage": "unresolved",
+            "gap": {
+              "kind": "reachable-source-obligation-outside-frozen-predicate-extraction",
+              "required": "Actual owning /proc PID cmdline/exe and configured binary are readable; unavailable rejects",
+              "canonicalAttempt": "Existing bind/native-registration/native.observe authoring nearby does not map this exact full source guard; no independent engine schema or expected-result provider",
+              "missingObservation": "Exact source guard must map to authenticated canonical facts/admission checks with explicit YAML or remain uncovered; no source-only preservation credit"
+            },
+            "destination": []
+          },
+          {
+            "id": "stop-native-exact-binary-command",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-controls-stop-native.sh",
+            "sourceHelperSha256": "f46ea6dbb4c270269f541abd0d13f48cb5129f71985b98ba48c74d3dfda815e9",
+            "sourceLines": {
+              "start": 52,
+              "end": 54,
+              "text": "  if (command[0] !== process.env.LOOM_OPENCODE_BIN || command[1] !== \"serve\" ||\n      !command.includes(\"--service\") || executable !== pinned)\n    return fail(\"service-process-not-pinned-opencode\");"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+            ],
+            "coverage": "unresolved",
+            "gap": {
+              "kind": "reachable-source-obligation-outside-frozen-predicate-extraction",
+              "required": "command[0] equals configured binary, command[1]=serve, contains --service, actual exe realpath equals pinned binary",
+              "canonicalAttempt": "Existing bind/native-registration/native.observe authoring nearby does not map this exact full source guard; no independent engine schema or expected-result provider",
+              "missingObservation": "Exact source guard must map to authenticated canonical facts/admission checks with explicit YAML or remain uncovered; no source-only preservation credit"
+            },
+            "destination": []
+          },
+          {
+            "id": "stop-native-typed-read-route-deadline",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-controls-stop-native.sh",
+            "sourceHelperSha256": "f46ea6dbb4c270269f541abd0d13f48cb5129f71985b98ba48c74d3dfda815e9",
+            "sourceLines": {
+              "start": 56,
+              "end": 66,
+              "text": "  const get = async pathname => {\n    const response = await fetch(new URL(pathname, base), {headers:{Authorization:auth},signal:AbortSignal.timeout(15000)});\n    if (!response.ok) throw Error(\"native-service-unavailable\");\n    return response.json();\n  };\n  let info, session, messages;\n  try {\n    info = await get(\"/api/info\");\n    session = await get(\"/api/session/\" + encodeURIComponent(row.native_id));\n    messages = await get(\"/api/session/\" + encodeURIComponent(row.native_id) + \"/message?type=assistant&order=desc&limit=200\");\n  } catch { return fail(\"native-read-unavailable\"); }"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+            ],
+            "coverage": "unresolved",
+            "gap": {
+              "kind": "reachable-source-obligation-outside-frozen-predicate-extraction",
+              "required": "Original successful authenticated info/session/message reads each15000ms; exact assistant descending limit200 endpoint; failure rejects",
+              "canonicalAttempt": "Existing bind/native-registration/native.observe authoring nearby does not map this exact full source guard; no independent engine schema or expected-result provider",
+              "missingObservation": "Exact source guard must map to authenticated canonical facts/admission checks with explicit YAML or remain uncovered; no source-only preservation credit"
+            },
+            "destination": []
+          },
+          {
+            "id": "stop-native-info-session-identity",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-controls-stop-native.sh",
+            "sourceHelperSha256": "f46ea6dbb4c270269f541abd0d13f48cb5129f71985b98ba48c74d3dfda815e9",
+            "sourceLines": {
+              "start": 67,
+              "end": 70,
+              "text": "  if (info?.pid !== reg.pid || session?.data?.id !== row.native_id ||\n      session.data.metadata?.agent_id !== id ||\n      session.data.location?.directory !== row.worktree_path ||\n      !Array.isArray(messages?.data)) return fail(\"native-session-identity-mismatch\");"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+            ],
+            "coverage": "unresolved",
+            "gap": {
+              "kind": "reachable-source-obligation-outside-frozen-predicate-extraction",
+              "required": "Returned info PID equals registration; session native ID, metadata agent ID and worktree directory match same owning row; messages.data is an array",
+              "canonicalAttempt": "Existing bind/native-registration/native.observe authoring nearby does not map this exact full source guard; no independent engine schema or expected-result provider",
+              "missingObservation": "Exact source guard must map to authenticated canonical facts/admission checks with explicit YAML or remain uncovered; no source-only preservation credit"
+            },
+            "destination": []
+          },
+          {
+            "id": "stop-native-first-truthy-completion",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-controls-stop-native.sh",
+            "sourceHelperSha256": "f46ea6dbb4c270269f541abd0d13f48cb5129f71985b98ba48c74d3dfda815e9",
+            "sourceLines": {
+              "start": 71,
+              "end": 73,
+              "text": "  const completed = messages.data.filter(m => m?.type === \"assistant\" && m.time?.completed && m.finish && !m.error);\n  if (!completed.length) return fail(\"native-completed-assistant-missing\");\n  const model = completed[0].model;"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+            ],
+            "coverage": "unresolved",
+            "gap": {
+              "kind": "reachable-source-obligation-outside-frozen-predicate-extraction",
+              "required": "Filter actual descending assistant list by truthy completed/nonempty finish/no error, require nonempty, select FIRST survivor; not !=null, not existential later match, not full200-as-incomplete",
+              "canonicalAttempt": "Existing bind/native-registration/native.observe authoring nearby does not map this exact full source guard; no independent engine schema or expected-result provider",
+              "missingObservation": "Exact source guard must map to authenticated canonical facts/admission checks with explicit YAML or remain uncovered; no source-only preservation credit"
+            },
+            "destination": []
+          },
+          {
+            "id": "stop-native-selected-model-equality",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-controls-stop-native.sh",
+            "sourceHelperSha256": "f46ea6dbb4c270269f541abd0d13f48cb5129f71985b98ba48c74d3dfda815e9",
+            "sourceLines": {
+              "start": 73,
+              "end": 75,
+              "text": "  const model = completed[0].model;\n  const observed = model?.providerID && model?.id ? model.providerID + \"/\" + model.id : null;\n  if (!observed || observed !== target) return fail(\"native-completed-model-mismatch\");"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+            ],
+            "coverage": "unresolved",
+            "gap": {
+              "kind": "reachable-source-obligation-outside-frozen-predicate-extraction",
+              "required": "First eligible message has providerID/id and actual provider/model equals source target",
+              "canonicalAttempt": "Existing bind/native-registration/native.observe authoring nearby does not map this exact full source guard; no independent engine schema or expected-result provider",
+              "missingObservation": "Exact source guard must map to authenticated canonical facts/admission checks with explicit YAML or remain uncovered; no source-only preservation credit"
+            },
+            "destination": []
+          },
+          {
+            "id": "stop-native-probe-exception-negative",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-chat-controls-stop-native.sh",
+            "sourceHelperSha256": "f46ea6dbb4c270269f541abd0d13f48cb5129f71985b98ba48c74d3dfda815e9",
+            "sourceLines": {
+              "start": 80,
+              "end": 80,
+              "text": "})().catch(() => fail(\"native-probe-error\"));"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+            ],
+            "coverage": "unresolved",
+            "gap": {
+              "kind": "reachable-source-obligation-outside-frozen-predicate-extraction",
+              "required": "Unexpected native probe error yields unavailable; downstream observed status assertion rejects, never a passed placeholder",
+              "canonicalAttempt": "Existing bind/native-registration/native.observe authoring nearby does not map this exact full source guard; no independent engine schema or expected-result provider",
+              "missingObservation": "Exact source guard must map to authenticated canonical facts/admission checks with explicit YAML or remain uncovered; no source-only preservation credit"
+            },
+            "destination": []
+          }
+        ],
+        "sourcedOwnershipClosure": {
+          "path": "campaign:tests/aft/scripts/agent-flows-ownership.sh",
+          "sha256": "ff8df4fe520c7e3f1f85dd0875f830c73a47b1dd9cf39e6a2f55acac70f3a4e3",
+          "matchesOriginalBase": true,
+          "imports": [
+            {
+              "caller": "stop-effect.sh:5-6,18-20,22",
+              "callerOldSteps": [
+                3,
+                10,
+                13,
+                17
+              ]
+            },
+            {
+              "caller": "stop-native.sh:5-6,13-15,17",
+              "callerOldSteps": [
+                17
+              ]
+            }
+          ],
+          "reachableFunctions": [
+            "agent_flows_check_manifest:3-43",
+            "agent_flows_podman:62-81",
+            "agent_flows_check_container:83-90"
+          ],
+          "excludedFunction": "agent_flows_declared_agents:45-60 is defined by sourcing but not invoked by these Stop helpers",
+          "classification": "reachable-source-import-closure-unmapped",
+          "required": "Original run/evidence/sourceHEAD/backend/API port/Compose project/Podman HOME+connection+fingerprint/container service ownership and deny-on-failure helpers require exact canonical provenance mapping; no host Podman/runtime commands run here",
+          "predicateDenominator": "not yet enumerated; not silently included in1072 or credited by40 selected inventory records",
+          "coverage": "unresolved"
+        },
+        "internalCallPaths": [
+          {
+            "oldStep": 0,
+            "paths": [
+              "stop.create -> controls.create -> call(POST agents,status201)",
+              "controls.create -> agent -> call(GET agent,status200) + aid validation",
+              "controls.create -> aid for final identity"
+            ]
+          },
+          {
+            "oldStep": 7,
+            "paths": [
+              "stop.pending -> controls.ask -> agent, events",
+              "controls.ask not-opened conditional -> browser saved-event read wait (max20pages per attempt, limit500), then fresh agent/events and same exact pending ask",
+              "stop.pending -> saved pending identity, then fresh controls.events; no resolved/lost exact ask"
+            ]
+          },
+          {
+            "oldStep": 10,
+            "paths": [
+              "stop.stopped -> saved pending identity, agent, events",
+              "stop.stopped -> ask_history(compare=False) -> fresh events + aid; save full ask payload baseline"
+            ]
+          },
+          {
+            "oldStep": 13,
+            "paths": [
+              "stop.reloaded -> ask_history(compare=True) -> fresh events + prior saved baseline + aid",
+              "stop.reloaded -> stopped -> saved pending identity, agent, events",
+              "stopped -> ask_history(compare=False) -> another fresh events + aid; replace baseline only after earlier exact comparison"
+            ]
+          },
+          {
+            "oldStep": 17,
+            "paths": [
+              "stop.reused -> turn -> agent, events, exact delivered/start/completion and idle",
+              "stop.reused -> ask_history(compare=True) -> fresh events + saved baseline + aid",
+              "then external marker helper, then external native helper"
+            ]
+          }
+        ]
       }
     },
     {
@@ -41695,17 +42626,22 @@
     "originalSteps": 207,
     "helperInventoryEntries": 1072,
     "classificationCounts": {
-      "selected-function-reachable-branch-unresolved": 430,
+      "selected-function-reachable-branch-unresolved": 397,
       "unrelated-to-static-selected-call-closure": 414,
-      "selected-external-helper-branch-unresolved": 44,
+      "selected-invocation-predicate-reachable": 38,
+      "selected-invocation-predicate-conditionally-reachable": 2,
+      "excluded-static-selected-invocation-branch": 3,
+      "selected-external-helper-branch-unresolved": 34,
       "helper-selftest-negative-requirement": 180,
       "unrelated-external-helper-case": 4
     },
-    "reachableCandidatePredicates": 474,
-    "classificationMethod": "Conservative static selected invocation/function-call closure and external helper filename references, with selected branch obligations explicitly unresolved. Unknown dynamic paths receive no preservation credit; selected closure is a conservative candidate set, not a completed branch-specific acceptance denominator.",
+    "reachableCandidatePredicates": 471,
+    "classificationMethod": "Conservative static selected-call closure for all pilots, narrowed by exact Stop arguments/call branches only. Three question-form assertions excluded; conditional event cursor and delayed saved ask retained.40 Stop inventory obligations individually source-selected,14 additional native guards and sourced ownership closure explicitly uncovered. Other selected helper branches remain unresolved; exact full reachable denominator is open.",
     "reviewedAuthoredUnvalidatedPredicates": 20,
     "partiallyMappedRepeatedPredicates": 3,
-    "fullPreservationAcceptance": false
+    "fullPreservationAcceptance": false,
+    "additionalUninventoriedStopNativeGuards": 14,
+    "ownershipImportedPredicateDenominator": "unresolved; excluded from1072 frozen extraction, included in required followup"
   },
   "dependencies": {
     "acceptedEngine": "e8eee6bb6d8d5d2c8e65bae36154732a74742212",

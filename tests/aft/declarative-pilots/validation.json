@@ -895,7 +895,7 @@
       },
       {
         "file": "tests/aft/declarative-pilots/preservation.json",
-        "sha256": "e49dc01e2d23844d8c513fae89e013dc9f83e2cc068f9d94f1c22c81c0e39d3b"
+        "sha256": "122e7f9d34387a09daedecfd52a015f44e5e604a676869ad0642f446bdc4a91a"
       },
       {
         "file": "tests/aft/declarative-pilots/sse-cursor.test.yaml",
@@ -934,10 +934,10 @@
       "reviewedPredicateMappings": 20,
       "fullPreservationAccepted": 0,
       "helperInventory": 1072,
-      "conservativeReachableCandidates": 474,
+      "conservativeReachableCandidates": 471,
       "helperSelftestOrNegativeRecords": 180,
-      "unrelatedBranchesOrCases": 418,
-      "exactReachablePredicateDenominator": "unresolved selected-branch narrowing; no1072-obligation claim"
+      "unrelatedBranchesOrCases": 421,
+      "exactReachablePredicateDenominator": "Other helper branches and imported ownership/native guard extensions still unresolved; Stop frozen inventory subset40 individually selected,14 additional native guards uncovered."
     },
     "supportedInterfaceScope": "Captured AgentRef/native bootstrap facts, fixtureRunId and scalar owned-relative-path composition supported at deterministic interface depth; this does not validate pilot callers or runtime roots. Four Stop marker checkpoints authored.",
     "blockedCases": [
@@ -1553,5 +1553,19 @@
     "guards": "One bounded original source-shaped profile per hypothesis;45s cooperative profile guard with60s outer process guard. All underlying schema/provider/manifest checks called unchanged. No raised timeout claimed as fix.",
     "owner": "Engine owner notified with exact timings/artifacts; no engine/core edits or unsafe cache reuse in pilot.",
     "remaining": "All5 full raw pilot admission still lacks completed outcome; existing exact60s timeout receipts preserved. Journal, runtime, helper preservation remain distinct open gates."
+  },
+  "stopSelectedBranchReview": {
+    "at": "2026-10-09T10:56:32.384523+00:00",
+    "helperFrozenByteMatches": 4,
+    "selectedInventoryObligations": 40,
+    "unconditional": 38,
+    "conditional": 2,
+    "excludedQuestionFormAssertions": 3,
+    "additionalNativeGuardsUncovered": 14,
+    "ownershipImportClosure": "uncovered, SHA matches frozen original base",
+    "newYamlOrPreservationCredit": false,
+    "globalInventoryCount": 1072,
+    "globalConservativeReachableCandidates": 471,
+    "fullReachableDenominator": "unresolved"
   }
 }
