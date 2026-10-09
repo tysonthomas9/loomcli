@@ -32,6 +32,7 @@ export * from './git-lifecycle.js';
 export * from './workspaces.js';
 export { createLegacyProviders } from './legacy/providers.js';
 export type { LegacyAccessFactory } from './legacy/providers.js';
+export { productionLegacyAccess } from './legacy/host-access.js';
 
 export const BindAgentInput = z.object({ leaseId: Id, workspaceId: Id, agentId: Id }).strict();
 export const BindAgentOutput = z.object({ fixtureLeaseId: Id, workspaceId: Id, agentId: Id,
@@ -60,7 +61,7 @@ export function createCoreProviders(implementation: ImplementationPin & { sha256
       async run(input, context) {
         const fixture = await getFixture(context, input.leaseId);
         requireOwnedWorkspace(fixture,input.workspaceId);
-        if(fixture.ownedWorkspaces&&!fixture.ownedWorkspaces.find(value=>value.workspaceId===input.workspaceId)!.agentIds.includes(input.agentId))
+        if(fixture.ownedWorkspaces&&!fixture.ownedWorkspaces.find(value=>value.workspaceId===input.workspaceId&&value.identityKind==='native-agent-id')!.agentIds.includes(input.agentId))
           await enrollOwnedWorkspaceAgent(fixture,input.workspaceId,input.agentId,context.signal,getFixtureEvidenceStore(context,fixture.leaseId));
         const workspace = requireOwnedWorkspace(fixture,input.workspaceId,input.agentId);
         requireFact(!fixture.agents.has(input.agentId), 'ownership-mismatch', 'Foreign or duplicate agent binding');
@@ -109,7 +110,7 @@ export function createCoreProviders(implementation: ImplementationPin & { sha256
     defineOperation({ ...common, id: 'loom.files.observe', inputSchema: FilesInput, outputSchema: FilesOutput,
       async run(input, context) {
         const { fixture, agent } = await getAgent(context, input.agent);
-        const value = await observeFiles(input, fixture.repo, fixture.readFiles, context.signal);
+        const value = await observeFiles(input, agent.row.repo, fixture.readFiles, context.signal);
         requireFact(value.view !== 'content' || value.content === null || redact(value.content, fixture.secrets) === value.content,
           'observation-failed', 'Exact Files content contains private material');
         return { value, identity: identity(fixture, agent.row), evidenceClass: fixture.evidenceClass, secrets: fixture.secrets };

@@ -62,7 +62,11 @@ Additional workspaces require an owner-bound, bounded roster with retained actua
 creation receipts, source/common-directory and private store identity. Agents
 created later by the UI enroll through the fixture's fixed private store reader;
 exact workspace, actor, lineage and store generation are checked before binding.
-Old, foreign or listing-only records grant no authority. These receipts remain
+Legacy `domain.Agent` names and native Agent API IDs have separate identity kinds
+and private store readers. Names never grant native-ID authority. Legacy enrollment
+retains actual scoped Parent and timestamps; native enrollment retains actual
+creator/parent/root fields. Old, foreign or listing-only records grant no authority.
+These receipts remain
 available until consumers finish.
 
 Deletion observations read the surviving source repository and exact captured

@@ -3,7 +3,7 @@ import type { z } from 'zod';
 import type { FilesystemInput, FilesystemOutput } from './filesystem.js';
 import type { GitLifecycleInput, GitLifecycleOutput } from './git-lifecycle.js';
 import type { GitInput, GitOutput } from './git.js';
-import { requireOwnedWorkspace, validateOwnedWorkspaceRoster, type OwnedWorkspaceRoster, type WorkspaceAgentFact } from './workspaces.js';
+import { requireOwnedWorkspace, validateOwnedWorkspaceRoster, type OwnedWorkspaceRoster, type WorkspaceAgentFact, type LegacyWorkspaceAgentFact } from './workspaces.js';
 import type { OwnedRendererTarget } from './renderer-target.js';
 import type { SyntheticProbe } from './synthetic-probe.js';
 import type { EvidenceClass } from '@tysonthomas9/aft/types';
@@ -41,7 +41,8 @@ export interface OwnedFixture {
   rendererTarget?: OwnedRendererTarget;
   operationAuthority?: FixtureOperationAuthority;
   ownedWorkspaces?: OwnedWorkspaceRoster;
-  readWorkspaceAgent?: (workspaceId:string,agentId:string,signal:AbortSignal)=>Promise<WorkspaceAgentFact>;
+  readWorkspaceAgent?: (workspaceId:string,agentId:string,signal:AbortSignal)=>Promise<Omit<WorkspaceAgentFact,'identityKind'> & {identityKind?:'native-agent-id'}>;
+  readWorkspaceLegacyAgent?: (workspaceId:string,name:string,signal:AbortSignal)=>Promise<LegacyWorkspaceAgentFact>;
   readApi: ReadTransport;
   readFiles: ReadTransport;
   resolveAgent(agentId: string, signal: AbortSignal, workspaceId?: string): Promise<OwnedAgent>;
