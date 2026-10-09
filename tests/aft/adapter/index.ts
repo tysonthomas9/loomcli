@@ -4,6 +4,9 @@ import type { ObservationResult } from '@tysonthomas9/aft/types';
 import { z } from 'zod';
 import { AgentRef, AgentRow, AgentHistory, Id, requireFact, redact, type AgentRow as Row } from './protocol.js';
 import { FixtureWorkerStateId,FixtureWorkerStateEffects,FixtureWorkerStateInput,FixtureWorkerStateOutput,observeFixtureWorkerState } from './fixture-worker-state.js';
+import { FixtureComposeServeId,RestartComposeServeId,FixtureComposeServeEffects,RestartComposeServeEffects,
+  FixtureComposeServeInput,FixtureComposeServeOutput,RestartComposeServeInput,RestartComposeServeOutput,
+  observeComposeServe,restartComposeServe } from './fixture-compose.js';
 import { getFixtureEvidenceStore } from './evidence.js';
 import { retainSavedCapture } from './saved-capture.js';
 export { SavedCaptureInput, rereadSavedCapture } from './saved-capture.js';
@@ -35,6 +38,7 @@ export * from './redaction.js';
 export * from './authority.js';
 export * from './fixture-workers.js';
 export * from './fixture-worker-state.js';
+export * from './fixture-compose.js';
 export * from './git-lifecycle.js';
 export * from './workspaces.js';
 export { createLegacyProviders } from './legacy/providers.js';
@@ -71,6 +75,20 @@ export function createCoreProviders(implementation: ImplementationPin & { sha256
     evidenceClasses: ['deterministic', 'persisted-public-api', 'real-native', 'live-provider'] as const };
   const common = { implementation, implementationSha256: implementation.sha256, ...read, evidenceClasses: [...read.evidenceClasses] };
   return [
+    defineOperation({...common,id:FixtureComposeServeId,effects:[...FixtureComposeServeEffects],retry:'never',
+      inputSchema:FixtureComposeServeInput,outputSchema:FixtureComposeServeOutput,
+      async run(input,context) {
+        const {fixture,grant,value}=await observeComposeServe(context,input,implementation.sha256);
+        return {value,identity:identity(fixture),evidenceClass:grant.evidenceClass,secrets:fixture.secrets};
+      },
+    }),
+    defineOperation({...common,id:RestartComposeServeId,effects:[...RestartComposeServeEffects],retry:'never',
+      inputSchema:RestartComposeServeInput,outputSchema:RestartComposeServeOutput,
+      async run(input,context) {
+        const {fixture,grant,value}=await restartComposeServe(context,input,implementation.sha256);
+        return {value,identity:identity(fixture),evidenceClass:grant.evidenceClass,secrets:fixture.secrets};
+      },
+    }),
     defineOperation({...common,id:FixtureWorkerStateId,effects:[...FixtureWorkerStateEffects],retry:'never',
       inputSchema:FixtureWorkerStateInput,outputSchema:FixtureWorkerStateOutput,
       async run(input,context) {
