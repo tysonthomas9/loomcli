@@ -35,7 +35,7 @@ async function setup(profile = 'agents-real-opencode',fixtureRunId?:string) {
  const connection={Identity:'/owned/key',Name:'owned',URI:'ssh://owned'};
  const config:ProductionConfig={loom:registered,fleet:registered,engine:registered,adapter:registered,tempParent:root,lockParent:path.join(root,'locks'),hostHome:path.join(root,'home'),toolPath:'/pinned/toolchain',connection:'owned',connectionFingerprint:hash(JSON.stringify([connection])),minimumFreeBytes:1,fixtureRunId,attestedImages:true,emulatorBinary:{path:path.join(build,'emulator'),sha256:hash(elf)},modecloud:{codexAuthRoot:auth,frontendDist:frontend}};
  const plan:FixturePlan={profile,loomRevision:revision,fleetRevision:revision,engineRevision:revision,adapterRevision:revision,model:profile==='agents-emulator'?'aft/m':'openai/m',maxCases:10,caseCount:1,selectionSha256:'d'.repeat(64),leaseDurationMs:10000};
- let onExec:((request:ProcessRequest)=>Promise<void>)|undefined,onRestart:(()=>Promise<void>)|undefined,onRead:(()=>Promise<void>)|undefined;
+ let onExec:((request:ProcessRequest)=>Promise<void>)|undefined,onRestart:(()=>Promise<void>)|undefined,onRead:((signal:AbortSignal)=>Promise<void>)|undefined;
  let restartMode='success',restarted=false,readFails=false;
  const calls:ProcessRequest[]=[]; let project='',up=false,change='',port=5000,serial=0;
  const services=cloud?['redis','fleet-auth-seed','fleet-db','loom-serve','worker','stub-upstream']:['redis','fleet-db','loom-local','ui-local'];
@@ -54,10 +54,10 @@ async function setup(profile = 'agents-real-opencode',fixtureRunId?:string) {
     const override=JSON.parse(await fs.readFile(path.join(driver.runtimeRoot,'compose.json'),'utf8'));
     const service=override.services[cloud?'loom-serve':'loom-local'];return JSON.stringify({runId:change==='wrong-run-id'?'foreign-run':service.environment.RUN_ID,leaseId:change==='wrong-run-lease'?'foreign-lease':service.environment.AFT_FIXTURE_LEASE_ID});
   }return a.at(-1)?.includes('controlled-codex-preflight') ? JSON.stringify({ready:true,cleaned:change!=='probe-leak',complete:change!=='probe-incomplete'}) : JSON.stringify({sourceRepo:'/work/source-repos/aft-repo'});}
-  if(a.includes('ps')) return up?services.map(s=>`container-${s}`).join('\n'):'';
+  if(a.includes('ps')) return up?services.map(s=>`container-${s}${restarted&&restartMode==='new-id'&&s==='loom-local'?'-replacement':''}`).join('\n'):'';
   if(a.includes('ls')) return up?(a.includes('volume')?'volume-owned':'network-owned'):'';
   if(a.includes('inspect')) {
-   const id=a.at(-1)!,container=id.startsWith('container-'),service=id.replace('container-','');
+   const id=a.at(-1)!,container=id.startsWith('container-'),service=id.replace('container-','').replace(/-replacement$/,'');
    const labels={'com.docker.compose.project':project,'io.loom.aft.lease':change==='foreign'?'foreign':'opaque-fixture','com.docker.compose.service':service};
    const mappings:Record<string,number>=cloud?{'loom-serve':0,'fleet-db':1,'stub-upstream':2}:{'fleet-db':0,'loom-local':1,'ui-local':2};const index=mappings[service] ?? 0;
    const target=restarted&&service==='loom-local';
@@ -66,13 +66,13 @@ async function setup(profile = 'agents-real-opencode',fixtureRunId?:string) {
   }return '';
  };
  const files={...fs,statfs:async()=>({type:0,blocks:20*1024**3,bavail:20*1024**3,bfree:20*1024**3,bsize:1,files:1000,ffree:1000})} as unknown as typeof fs;
- const http=async (_origin:string,relative:string)=>{if(restarted&&relative==='/api/config'){await onRead?.();if(readFails)throw Error('private API failure');}
+ const http=async (_origin:string,relative:string,signal:AbortSignal)=>{if(restarted&&relative==='/api/config'){await onRead?.(signal);if(readFails)throw Error('private API failure');}
   return relative.endsWith('/repos')?{success:true,repos:[{name:'aft-repo'}]}:relative.endsWith('/LOCALMODE')?{data:{id:'LOCALMODE',path:'/root/.loom/workspaces/LOCALMODE',repos:[{name:'source-repo',path:'/root/.loom/workspaces/LOCALMODE/source-repo'}]}}:relative.endsWith('/models')?{providers:[{models:[{id:plan.model},{id:'openai/alternate'}]}]}:{};};
  const driver=new ComposeFixtureDriver(config,run,files,()=>`id${++serial}`,async()=>({port:port++,async release(){}}),http,async()=>({status:201,body:{}}));
  const lifecycle=new FixtureLifecycle([plan],()=>driver,()=>1000,()=> 'opaque-fixture');
  const request={runId:'run',profile,loomRevision:revision,fleetRevision:revision,model:plan.model,maxCases:1,selectionSha256:plan.selectionSha256};
  return {root,source,driver,lifecycle,request,calls,onExec(callback:(request:ProcessRequest)=>Promise<void>){onExec=callback;},mutate(v:string){change=v;},
-  restartMode(value:string){restartMode=value;},onRestart(callback:()=>Promise<void>){onRestart=callback;},onRead(callback:()=>Promise<void>){onRead=callback;},failRead(){readFails=true;},async cleanup(){await fs.rm(root,{recursive:true});}};
+  restartMode(value:string){restartMode=value;},restoreOriginalContainer(){restarted=false;restartMode='success';},onRestart(callback:()=>Promise<void>){onRestart=callback;},onRead(callback:(signal:AbortSignal)=>Promise<void>){onRead=callback;},failRead(){readFails=true;},async cleanup(){await fs.rm(root,{recursive:true});}};
 }
 for(const profile of ['agents-real-opencode','agents-emulator']) test(`${profile}: concrete compose driver preserves profile realness and resource ownership`,async()=>{
  const r=await setup(profile);try{
@@ -273,4 +273,55 @@ test('container PID replacement without start identity cannot be rebound, while 
   }
   assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,true);
  }finally{await r.cleanup();}}
+});
+
+test('parent review source readiness clock starts only after restart completes',async()=>{
+ const r=await setup(); const original=AbortSignal.timeout;let duringRestart=-1;const seen:number[]=[];
+ try{
+  const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal);
+  const before=(await r.lifecycle.observe(a.lease.id,'run')).services.find(value=>value.id==='container-loom-local')!;
+  AbortSignal.timeout=((ms:number)=>{seen.push(ms);return original.call(AbortSignal,ms);}) as typeof AbortSignal.timeout;
+  r.onRestart(async()=>{duringRestart=seen.filter(ms=>ms===180000).length;});
+  await r.driver.restartOwnedServe(before.id,before.generation,signal);
+  assert.equal(duringRestart,0,'readiness window must not start before restart finishes');
+  assert.equal(seen.filter(ms=>ms===180000).length,1);
+ }finally{AbortSignal.timeout=original;await r.cleanup();}
+});
+
+test('selected SSE request has its own three-second bound and cannot report success after that bound expires',async()=>{
+ const r=await setup(),original=AbortSignal.timeout,requestTimeout=new AbortController();const seen:number[]=[];
+ try{
+  const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal);
+  AbortSignal.timeout=((ms:number)=>{seen.push(ms);return ms===3000?requestTimeout.signal:original.call(AbortSignal,ms);}) as typeof AbortSignal.timeout;
+  r.onRead(async requestSignal=>{assert.equal(requestSignal.aborted,false);requestTimeout.abort();assert.equal(requestSignal.aborted,true);});
+  await assert.rejects(r.driver.restartOwnedServe('container-loom-local','container-loom-local:generation',signal));
+  assert.deepEqual(seen.slice(0,3),[60000,180000,3000]);
+  assert.equal(r.calls.filter(call=>call.args.includes('restart')).length,1);
+  assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,true);
+ }finally{AbortSignal.timeout=original;await r.cleanup();}
+});
+
+test('selected SSE dispatch expiration cannot start a readiness window or retry the mutation',async()=>{
+ const r=await setup(),original=AbortSignal.timeout,dispatchTimeout=new AbortController();const seen:number[]=[];
+ try{
+  const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal);
+  AbortSignal.timeout=((ms:number)=>{seen.push(ms);return ms===60000?dispatchTimeout.signal:original.call(AbortSignal,ms);}) as typeof AbortSignal.timeout;
+  r.onRestart(async()=>dispatchTimeout.abort());
+  await assert.rejects(r.driver.restartOwnedServe('container-loom-local','container-loom-local:generation',signal));
+  assert.equal(seen.includes(180000),false);assert.equal(seen.includes(3000),false);
+  await assert.rejects(r.driver.restartOwnedServe('container-loom-local','container-loom-local:generation',signal));
+  assert.equal(r.calls.filter(call=>call.args.includes('restart')).length,1);
+  assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,true);
+ }finally{AbortSignal.timeout=original;await r.cleanup();}
+});
+
+test('selected SSE new-ID replacement is an explicit ownership restriction rather than an original same-ID predicate',async()=>{
+ const r=await setup();try{
+  const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal);r.restartMode('new-id');
+  await assert.rejects(r.driver.restartOwnedServe('container-loom-local','container-loom-local:generation',signal));
+  assert.equal(r.calls.filter(call=>call.args.includes('restart')).length,1);
+  assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,false);
+  assert.equal(r.calls.some(call=>call.args.includes('down')),false);
+  r.restoreOriginalContainer();assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,true);
+ }finally{await r.cleanup();}
 });
