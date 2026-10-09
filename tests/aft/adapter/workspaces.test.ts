@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, realpath, rm, writeFile, readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createEvidenceStore } from './evidence.js';
@@ -143,6 +143,54 @@ test('missing serialized identity kind fails before receipt lookup and cannot gr
 
 const repositories=[{repoName:'alpha',sourceRepoId:'source-alpha',repo:fields.repo,commonDir:fields.commonDir,groups:['shared']},
   {repoName:'beta',sourceRepoId:'source-beta',repo:'/owned/beta',commonDir:'/owned/beta/.git',groups:['beta-only','shared']}];
+test('legacy unselected physical source retains actual multi-repository membership without an anchor choice',async t=>{
+  const {LegacyWorkspaceAgentFact,enrollOwnedLegacyAgent,requireOwnedWorkspaceRecord}=await import('./workspaces.js');
+  const {store}=await setup(t),signal=new AbortController().signal;
+  for(const named of [repositories,[...repositories].reverse()]) {
+    const initial={...fields,identityKind:'legacy-agent-name' as const,agentIds:[],repositories:named,agentSources:[]};
+    const creationReceipt=await store.retain(JSON.stringify({kind:'workspace-created',...owner,...initial}));
+    const fixture=makeFixture(await createOwnedWorkspaceRoster(owner,[{...initial,creationReceipt}],store));
+    const fact=LegacyWorkspaceAgentFact.parse({kind:'legacy-agent-enrolled',identityKind:'legacy-agent-name',...owner,workspaceId:'workspace',name:'multi',
+      repo:null,commonDir:null,storeId:fields.storeId,storeGeneration:fields.storeGeneration,parentName:null,
+      createdAt:'actual-created',updatedAt:'actual-updated',assignedRepos:['alpha','beta'],assignedRepoGroups:[]});
+    fixture.readWorkspaceLegacyAgent=async()=>fact;
+    await enrollOwnedLegacyAgent(fixture,'workspace','multi',signal,store);
+    assert.throws(()=>requireOwnedWorkspace(fixture,'workspace','multi','legacy-agent-name'),/ambiguous/);
+    const topology=requireOwnedWorkspaceRecord(fixture,'workspace','legacy-agent-name');assert.ok(topology);assert.equal(topology.repo,fields.repo);
+    assert.deepEqual(topology.agentSources,[{agentId:'multi',repoNames:['alpha','beta']}]);
+    assert.equal(requireOwnedWorkspace(fixture,'workspace','multi','legacy-agent-name','beta').commonDir,'/owned/beta/.git');
+    const retained=JSON.parse(await readFile(await store.resolve(topology.enrollmentReceipts[0]!.id),'utf8'));
+    assert.equal(retained.repo,null);assert.equal(retained.commonDir,null);
+    for(const changed of [{...fact,repo:fields.repo},{...fact,commonDir:fields.commonDir},
+      {...fact,repo:undefined},{...fact,commonDir:undefined}])assert.equal(LegacyWorkspaceAgentFact.safeParse(changed).success,false);
+  }
+});
+
+test('unselected legacy source cannot bypass assigned groups, foreign or stale topology and single-source receipts',async t=>{
+  const {enrollOwnedLegacyAgent}=await import('./workspaces.js');const {store}=await setup(t),signal=new AbortController().signal;
+  const initial={...fields,identityKind:'legacy-agent-name' as const,agentIds:[],repositories,agentSources:[]};
+  const creationReceipt=await store.retain(JSON.stringify({kind:'workspace-created',...owner,...initial}));
+  const fixture=makeFixture(await createOwnedWorkspaceRoster(owner,[{...initial,creationReceipt}],store));
+  let groups=['beta-only'];let assigned:string[]=[];let selected:string|null=null;
+  fixture.readWorkspaceLegacyAgent=async(workspaceId,name)=>({kind:'legacy-agent-enrolled',identityKind:'legacy-agent-name',...owner,workspaceId,name,
+    repo:selected,commonDir:selected===null?null:selected+'/.git',storeId:fields.storeId,storeGeneration:fields.storeGeneration,parentName:null,
+    createdAt:'actual-created',updatedAt:'actual-updated',assignedRepos:assigned,assignedRepoGroups:groups});
+  await enrollOwnedLegacyAgent(fixture,'workspace','grouped-null',signal,store);
+  assert.equal(requireOwnedWorkspace(fixture,'workspace','grouped-null','legacy-agent-name').repo,'/owned/beta');
+  assert.throws(()=>requireOwnedWorkspace(fixture,'workspace','grouped-null','legacy-agent-name','alpha'));
+  groups=['unknown'];await assert.rejects(enrollOwnedLegacyAgent(fixture,'workspace','missing-group',signal,store));
+  groups=[];assigned=['foreign'];await assert.rejects(enrollOwnedLegacyAgent(fixture,'workspace','foreign',signal,store));
+  assigned=['beta'];selected=fields.repo;await assert.rejects(enrollOwnedLegacyAgent(fixture,'workspace','anchor',signal,store));
+  selected='/owned/beta';await enrollOwnedLegacyAgent(fixture,'workspace','actual-beta',signal,store);
+  assert.equal(requireOwnedWorkspace(fixture,'workspace','actual-beta','legacy-agent-name').repo,'/owned/beta');
+  const current=fixture.ownedWorkspaces!;fixture.ownedWorkspaces=await createOwnedWorkspaceRoster(owner,[{...initial,creationReceipt}],store);
+  assert.throws(()=>requireOwnedWorkspace(fixture,'workspace','actual-beta','legacy-agent-name'),/stale/);fixture.ownedWorkspaces=current;
+  const singleFields={...fields,identityKind:'legacy-agent-name' as const,agentIds:[]};
+  const singleReceipt=await store.retain(JSON.stringify({kind:'workspace-created',...owner,...singleFields}));
+  const single=makeFixture(await createOwnedWorkspaceRoster(owner,[{...singleFields,creationReceipt:singleReceipt}],store));
+  single.readWorkspaceLegacyAgent=fixture.readWorkspaceLegacyAgent;selected=null;assigned=[];
+  await assert.rejects(enrollOwnedLegacyAgent(single,'workspace','unselected-single',signal,store));
+});
 test('finite named repositories resolve actual native actors without a primary or position alias',async t=>{
   const {enrollOwnedWorkspaceAgent,requireOwnedWorkspaceRecord}=await import('./workspaces.js');const {store}=await setup(t);
   const initial={...fields,agentIds:[],repositories,agentSources:[]};
