@@ -241,20 +241,21 @@ tests:
                     binding: leadId
                 - literal: agt_
         intent: Bind the route to the saved Lead ID and canonical repo
-      - capability:
-          request:
-            id: loom.agent.bind
-            version: 1
-            input:
-              leaseId:
-                ref:
-                  binding: lease
-              workspaceId:
-                literal: ${AFT_WS}
-              agentId:
-                ref:
-                  binding: leadId
-          as: leadBound
+      - capture:
+          source: url
+          view: pathname
+          as: leadClaimPath
+        intent: Bind the route to the saved Lead ID and canonical repo
+      - assert:
+          op: eq
+          args:
+            - ref:
+                binding: leadClaimPath
+            - op: concat
+              args:
+                - literal: /ws/${AFT_WS}/chat/
+                - ref:
+                    binding: leadId
         intent: Bind the route to the saved Lead ID and canonical repo
       - api:
           method: GET
@@ -305,7 +306,7 @@ tests:
                 - ref:
                     binding: leadRow
                     pointer: /body/harness
-                - literal: opencode
+                - literal: ${AFT_REAL_BACKEND}
             - op: eq
               args:
                 - ref:
@@ -318,24 +319,32 @@ tests:
                     binding: leadRow
                     pointer: /body/created_by_kind
                 - literal: user
-            - op: eq
-              args:
-                - ref:
-                    binding: leadRow
-                    pointer: /body/parent_agent_id
-                - literal: null
-            - op: eq
-              args:
-                - ref:
-                    binding: leadRow
-                    pointer: /body/root_agent_id
-                - literal: null
-            - op: ne
-              args:
-                - ref:
-                    binding: leadRow
-                    pointer: /body/worktree_path
-                - literal: ""
+            - any:
+                - op: eq
+                  args:
+                    - ref:
+                        binding: leadRow
+                        pointer: /body/parent_agent_id
+                    - literal: null
+                - op: eq
+                  args:
+                    - ref:
+                        binding: leadRow
+                        pointer: /body/parent_agent_id
+                    - literal: ""
+            - all:
+                - op: ne
+                  args:
+                    - ref:
+                        binding: leadRow
+                        pointer: /body/worktree_path
+                    - literal: null
+                - op: ne
+                  args:
+                    - ref:
+                        binding: leadRow
+                        pointer: /body/worktree_path
+                    - literal: ""
         intent: Bind the route to the saved Lead ID and canonical repo
       - screenshot: files-save-reload-s09
         intent: Bind the route to the saved Lead ID and canonical repo
