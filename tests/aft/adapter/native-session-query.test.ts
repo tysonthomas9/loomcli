@@ -122,3 +122,27 @@ test('abort after a native read denies publication and no automatic read retry o
   await assert.rejects(h.invoke(req('native-info'),controller.signal));assert.equal(reads,1);
   const denied=setup();await assert.rejects(denied.invoke(req('native-info'),AbortSignal.abort()));assert.deepEqual(denied.calls,[]);
 });
+
+test('source prefix query fixes desc200 and rejects caller query options before verification',async()=>{
+  const h=setup();
+  const request=req('native-assistant-prefix',{agentId:'agt_owned',nativeSessionId:'ses_owned',nativeRoot:''});
+  for(const extra of [{limit:1},{order:'asc'},{type:'user'},{path:'/api/arbitrary'}])await assert.rejects(h.invoke({...request,...extra}));
+  assert.deepEqual(h.calls,[]);
+  const value=await h.invoke(request);
+  assert.deepEqual(value.data,{status:200,body:{route:'/api/session/ses_owned/message?type=assistant&order=desc&limit=200'}});
+  h.setRefs([]);await assert.rejects(h.invoke(request));
+});
+test('actual identity mapper denies absent capability and creation/source changes without alias/default',async()=>{
+  const h=setup(),request=req('agent-identity',{agentId:'agt_owned'});
+  await assert.rejects(h.invoke(request),/unavailable/);
+  h.binding.access.agentIdentity=async()=>({...actor,name:'actual-name',created_at:'actual-created'});
+  const value=await h.invoke(request);
+  assert.equal(value.operation,'agent-identity');if(value.operation!=='agent-identity')throw Error('wrong operation');
+  assert.equal(value.data.name,'actual-name');assert.equal(value.data.created_at,'actual-created');
+  for(const corrupt of [{repo:'/foreign'}, {name:''}, {created_at:''}]){
+    h.binding.access.agentIdentity=async()=>({...actor,name:'actual-name',created_at:'actual-created',...corrupt});
+    await assert.rejects(h.invoke(request));
+  }
+  let reads=0;h.binding.access.agentIdentity=async()=>({...actor,name:'actual-name',created_at:++reads===1?'original':'replacement'});
+  await assert.rejects(h.invoke(request),/changed/);
+});

@@ -22,6 +22,9 @@ export const AgentRow = z.object({
   state: Id, running_turn_id: Id.nullable(), deleted_at: Id.nullable(), history_purged_at: Id.nullable(),
 }).passthrough();
 export type AgentRow = z.infer<typeof AgentRow>;
+/** Actual store fields, read separately so older row consumers keep their contract. */
+export const NativeAgentIdentity = AgentRow.extend({ name: Id, created_at: Id });
+export type NativeAgentIdentity = z.infer<typeof NativeAgentIdentity>;
 export const NativeRef = z.object({ agent_id: Id, harness: z.literal('opencode'), native_root: z.string(), native_id: Id }).strict();
 export type NativeRef = z.infer<typeof NativeRef>;
 export const Event = z.object({
@@ -67,6 +70,7 @@ export interface NativeAccess {
   pinnedExecutable: string;
   sessions(agentId: string): Promise<NativeRef[]>;
   agent(agentId: string): Promise<AgentRow>;
+  agentIdentity?(agentId: string, signal: AbortSignal): Promise<NativeAgentIdentity>;
   history?(agentId: string): Promise<AgentHistory>;
   read: ReadTransport;
   log?(nativeSessionId: string, signal: AbortSignal): Promise<string>;
