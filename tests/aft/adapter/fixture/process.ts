@@ -90,7 +90,7 @@ export function createNodeProcesses(spawnChild: typeof spawn = spawn, signalGrou
     void ready.catch(() => undefined);
     let closedResolve!: () => void;
     const closed = new Promise<void>(resolve => { closedResolve = resolve; });
-    const output={stdout:[] as Buffer[],stderr:[] as Buffer[]},sizes={stdout:0,stderr:0};
+    const output={stdout:[] as Buffer[],stderr:[] as Buffer[]},sizes={stdout:0,stderr:0},streamHealthy={stdout:true,stderr:true};
     const capture=(stream:'stdout'|'stderr',chunk:Buffer)=>{
       sizes[stream]+=chunk.length;
       if(sizes[stream]<=4*1024*1024)output[stream].push(Buffer.from(chunk));
@@ -104,13 +104,17 @@ export function createNodeProcesses(spawnChild: typeof spawn = spawn, signalGrou
       if (tail.includes(readinessText)) { tail = ''; readyResolve(); }
     };
     child.stdout!.on('data', (chunk:Buffer)=>capture('stdout',chunk)); child.stderr!.on('data', (chunk:Buffer)=>capture('stderr',chunk));
+    for(const stream of ['stdout','stderr'] as const)child[stream]!.on('error',()=>{
+      streamHealthy[stream]=false;readyReject(new FixtureError('observation-failed'));
+    });
     child.on('error', () => { running = false;outputHealthy=false; readyReject(new FixtureError('observation-failed')); closedResolve(); });
     child.on('close', () => { running = false;outputClosed=true; readyReject(new FixtureError('observation-failed')); closedResolve(); });
     return {
       pid: child.pid ?? 0, generation, executable: command.executable, argv: Object.freeze([...command.argv]),
       state: () => running ? 'running' : 'exited',
       output:()=>({stdout:Buffer.concat(output.stdout).toString('utf8'),stderr:Buffer.concat(output.stderr).toString('utf8'),
-        stdoutComplete:outputHealthy&&sizes.stdout<=4*1024*1024,stderrComplete:outputHealthy&&sizes.stderr<=4*1024*1024,closed:outputClosed}),
+        stdoutComplete:outputHealthy&&streamHealthy.stdout&&sizes.stdout<=4*1024*1024,
+        stderrComplete:outputHealthy&&streamHealthy.stderr&&sizes.stderr<=4*1024*1024,closed:outputClosed}),
       async ready(signal) {
         signal.throwIfAborted();
         let abort!: () => void;

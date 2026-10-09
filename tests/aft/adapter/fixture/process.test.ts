@@ -57,3 +57,24 @@ test('owned service transport error cannot turn discarded or unfinished logs int
  await assert.rejects(p.ready(new AbortController().signal));
  assert.deepEqual(p.output!(),{stdout:'',stderr:'',stdoutComplete:false,stderrComplete:false,closed:false});
 });
+
+for(const stream of ['stdout','stderr'] as const)test(`owned service ${stream} read error stays incomplete through later bytes and child close`,async()=>{
+ const r=rig(),p=r.processes.start(command,'ready','registered');
+ // Same observation is reachable on the old production class without an
+ // unhandled EventEmitter error masking its incorrect completeness flag.
+ r.child[stream].on('error',()=>{});
+ r.child.stdout.write('ready\n');await p.ready(new AbortController().signal);
+ r.child[stream].write('actual prefix\n');r.child[stream].emit('error',new Error('private stream failure'));
+ assert.equal(p.output!()[`${stream}Complete`],false);assert.equal(p.state(),'running');
+ r.child[stream].write('later bytes\n');r.finish();
+ assert.equal(p.output!()[`${stream}Complete`],false);assert.equal(p.output!().closed,true);
+ assert.equal(p.output!()[stream==='stdout'?'stderrComplete':'stdoutComplete'],true);
+ assert.equal(p.output!()[stream].includes('private stream failure'),false);await p.stop();assert.deepEqual(r.signals,[]);
+});
+
+test('output stream failure before readiness cannot be repaired by a later readiness marker',async()=>{
+ const r=rig(),p=r.processes.start(command,'ready','registered');
+ r.child.stderr.on('error',()=>{});r.child.stderr.emit('error',new Error('private stderr read failure'));
+ r.child.stdout.write('ready\n');await assert.rejects(p.ready(new AbortController().signal));
+ assert.equal(p.output!().stderrComplete,false);r.finish();assert.equal(p.output!().stderrComplete,false);await p.stop();
+});
