@@ -109,7 +109,17 @@ export function RevisionsSection({
       setOverride("");
       setReason("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not record verdict");
+      setError(verdictErrorText(err));
+      // The verdict may be recorded even though its apply or PR is held (a
+      // 409 naming the overlapping paths): show the server's revisions so the
+      // decided verdict locks the buttons now, as it does after a reload.
+      try {
+        if (!controlled)
+          setRevisions(await getTaskRevisions(workspaceId, taskId, lead));
+        onChanged?.();
+      } catch {
+        // Keep the verdict error on screen; a reload shows the server state.
+      }
     } finally {
       setBusy("");
     }
@@ -235,6 +245,8 @@ export function RevisionsSection({
         // again, which re-arms the follow.
         const spent = revision.follow_status === "spent";
         const decided = Boolean(revision.verdict) && !spent;
+        // An approval whose apply is held stays decided: say why it waits.
+        const held = revision.applied ? "" : heldText(revision.follow_status);
         // The server reports an approved revision still waiting for a working
         // area, so Apply survives a reload. A follow status from this session
         // (e.g. a 404 from Apply clearing it) takes precedence.
@@ -321,6 +333,11 @@ export function RevisionsSection({
                 >
                   Create PR
                 </button>
+              </div>
+            )}
+            {held && (
+              <div role="status" data-testid="revision-follow-held">
+                {held}
               </div>
             )}
             {spent && (
@@ -443,6 +460,30 @@ export function RevisionsSection({
       })}
     </section>
   );
+}
+
+/**
+ * Why a verdict request failed. A held approval's response carries a readable
+ * message (with the overlapping paths) next to its error code; prefer it.
+ */
+export function verdictErrorText(err: unknown): string {
+  if (err instanceof ApiError && err.body && typeof err.body === "object") {
+    const message = (err.body as { message?: unknown }).message;
+    if (typeof message === "string" && message) return message;
+  }
+  return err instanceof Error ? err.message : "Could not record verdict";
+}
+
+/** Why an approved revision is not applied yet, from its follow status. */
+export function heldText(followStatus: string | undefined): string {
+  switch (followStatus) {
+    case "apply_pending":
+      return "Approved, not applied yet: the lead's working area has unsaved edits to the same files. No PR until it applies.";
+    case "conflict":
+      return "Approved, not applied yet: it conflicts with the stack. No PR until it applies.";
+    default:
+      return "";
+  }
 }
 
 /** The newest revision of each change, in list order. */
