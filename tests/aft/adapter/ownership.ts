@@ -7,6 +7,7 @@ import { requireOwnedWorkspace, validateOwnedWorkspaceRoster, type OwnedWorkspac
 import type { OwnedRendererTarget } from './renderer-target.js';
 import type { SyntheticProbe } from './synthetic-probe.js';
 import type { FixtureWorkersOutput } from './fixture-workers.js';
+import type { FixtureWorkerStateInput,FixtureWorkerStateOutput } from './fixture-worker-state.js';
 import type { EvidenceClass } from '@tysonthomas9/aft/types';
 import { validateFixtureOperationAuthority, type FixtureOperationAuthority } from './authority.js';
 import { bindEvidenceStore, evidenceKey } from './evidence.js';
@@ -42,6 +43,7 @@ export interface OwnedFixture {
   rendererTarget?: OwnedRendererTarget;
   operationAuthority?: FixtureOperationAuthority;
   observeWorkers?: (signal:AbortSignal)=>Promise<FixtureWorkersOutput>;
+  observeWorkerState?: (input:FixtureWorkerStateInput,signal:AbortSignal)=>Promise<FixtureWorkerStateOutput>;
   ownedWorkspaces?: OwnedWorkspaceRoster;
   readWorkspaceAgent?: (workspaceId:string,agentId:string,signal:AbortSignal)=>Promise<WorkspaceAgentFact>;
   readWorkspaceLegacyAgent?: (workspaceId:string,name:string,signal:AbortSignal)=>Promise<LegacyWorkspaceAgentFact>;
