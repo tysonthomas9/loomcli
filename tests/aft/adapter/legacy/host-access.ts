@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { constants } from 'node:fs';
 import { lstat, realpath, open } from 'node:fs/promises';
 import { z } from 'zod';
@@ -11,7 +12,7 @@ import { LegacyError, LegacyEvidenceClasses, type LegacyAccess, type LegacyLease
 import { fixtureOwnerIdentity, getFixtureOperationAuthority } from '../authority.js';
 import type { EvidenceStore } from '../evidence.js';
 import { LegacyOperationEffects } from './effects.js';
-import { requireOwnedWorkspace } from '../workspaces.js';
+import { enrollOwnedLegacyAgent, requireOwnedWorkspace, requireOwnedWorkspaceRecord, resolveLegacyRepositoryAssignments } from '../workspaces.js';
 import { checkConfiguredModel } from './model-selection.js';
 import type { BaselineTarget } from '../fixture/baseline.js';
 import { validateLocalSeedPath } from './seed-path.js';
@@ -19,7 +20,8 @@ import { validateLocalSeedPath } from './seed-path.js';
 const Name = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/);
 // These projections follow ops.WorkspaceData and domain.Agent, not AgentRow.
 const Workspace = z.object({ success: z.literal(true), data: z.object({ id: Name, path: z.string(),
-  repos: z.array(z.object({ name: Name, path: z.string() }).passthrough()) }).passthrough() }).passthrough();
+  repos: z.array(z.object({ name: Name, path: z.string(), source_repo_id: z.string().min(1),
+    groups: z.array(z.string().min(1).max(512)).max(32) }).passthrough()).max(32) }).passthrough() }).passthrough();
 const Agents = z.object({ success: z.literal(true), total: z.number().int().nonnegative(),
   data: z.array(z.object({ workspace_key: Name, name: Name, role_name: Name, updated_at: z.string().min(1) }).passthrough()) }).passthrough();
 const Issues = z.object({ success: z.literal(true), data: z.array(z.object({ id: Name }).passthrough()).max(999) }).passthrough();
@@ -101,8 +103,8 @@ export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtur
       await verify(id, signal);
       const records = fixture.ownedWorkspaces?.filter(row => row.identityKind === 'legacy-agent-name');
       requireOwned(records?.length);
-      const primary = requireOwnedWorkspace(fixture, fixture.workspaceId, undefined, 'legacy-agent-name');
-      requireOwned(primary.repo === fixture.repo);
+      const primary = requireOwnedWorkspaceRecord(fixture, fixture.workspaceId, 'legacy-agent-name');
+      requireOwned(primary?.repo === fixture.repo);
       // A managed checkout is distinct from the launcher's source checkout.
       // Re-read the fixture's successful creation facts and captured store,
       // rather than granting ownership from the API topology below.
@@ -112,14 +114,15 @@ export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtur
         requireOwned(matches.length === 1);
         const created = matches[0]!;
         requireOwned(created.repo === record.repo && created.commonDir === record.commonDir &&
-          created.storeId === record.storeId && created.storeGeneration === record.storeGeneration);
+          created.storeId === record.storeId && created.storeGeneration === record.storeGeneration &&
+          isDeepStrictEqual(created.repositories, record.repositories));
       }
       const cli = driver.cliRegistration;
       // The owned service port rejects overlapping operations. Discovery is
       // bounded by the authenticated roster and serializes without retries.
       const metadata = [];
       for (const record of records!) {
-        const owned = requireOwnedWorkspace(fixture, record.workspaceId, undefined, 'legacy-agent-name');
+        const owned = requireOwnedWorkspaceRecord(fixture, record.workspaceId, 'legacy-agent-name')!;
         requireOwned(owned.repo.startsWith(driver.runtimeRoot + path.sep) && await realpath(owned.repo) === owned.repo);
         const prefix = `/api/workspaces/${encodeURIComponent(record.workspaceId)}`;
         const workspace = Workspace.parse(await api(prefix, signal)).data;
@@ -131,7 +134,12 @@ export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtur
         requireOwned(agents.total === agents.data.length && agents.data.every(row => row.workspace_key === record.workspaceId) &&
           new Set(agents.data.map(row => row.name)).size === agents.data.length);
         const repos = await Promise.all(workspace.repos.map(async row => {
-          requireOwned(row.path.startsWith(owned.repo + path.sep) || row.path === owned.repo);
+          if (owned.repositories) {
+            const retained = owned.repositories.filter(repo => repo.repoName === row.name && repo.repo === row.path &&
+              repo.sourceRepoId === row.source_repo_id && isDeepStrictEqual(repo.groups, [...row.groups].sort()));
+            requireOwned(retained.length === 1 && workspace.repos.length === owned.repositories.length);
+          } else requireOwned(row.path.startsWith(owned.repo + path.sep) || row.path === owned.repo);
+          requireOwned(row.path.startsWith(driver.runtimeRoot + path.sep));
           requireOwned(await realpath(row.path) === row.path);
           return { workspaceId: record.workspaceId, name: row.name, sourcePath: row.path };
         }));
@@ -177,7 +185,31 @@ export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtur
       const workspaceId = command.argv[0] === 'usage' ? command.env.LOOM_WORKSPACE_ID! : command.argv[1] === 'seed-worktree' ? command.argv[3]! : command.argv[1]!;
       const actor = operation === 'loom.cli.task' ? command.argv[5] : operation === 'loom.cli.usage' ? command.argv[4] :
         operation === 'loom.fixture.seedWorktree' ? command.argv[5] : undefined;
-      requireOwnedWorkspace(fixture, workspaceId, actor, 'legacy-agent-name');
+      const workspace = requireOwnedWorkspaceRecord(fixture, workspaceId, 'legacy-agent-name');
+      let observedActor: Awaited<ReturnType<HostFixtureDriver['readWorkspaceLegacyAgent']>> | undefined;
+      if (actor !== undefined) {
+        await enrollOwnedLegacyAgent(fixture, workspaceId, actor, signal, evidenceStore);
+        requireOwned(requireOwnedWorkspaceRecord(fixture, workspaceId, 'legacy-agent-name')?.agentIds.includes(actor));
+        // Enrollment records membership once. A task must also narrow its
+        // effect against the actual current source assignments, without
+        // adopting a changed association or topology anchor as authority.
+        observedActor = await driver.readWorkspaceLegacyAgent(fixtureOwnerIdentity(fixture), workspaceId, actor, signal);
+        requireOwned(observedActor.name === actor && observedActor.workspaceId === workspaceId &&
+          observedActor.storeId === workspace!.storeId && observedActor.storeGeneration === workspace!.storeGeneration);
+      }
+      if (operation === 'loom.fixture.seedWorktree') requireOwnedWorkspace(fixture, workspaceId, actor, 'legacy-agent-name');
+      if (operation === 'loom.cli.task' && command.env.LOOM_SOURCE_REPOS !== '') {
+        const selected = cached!.repos.find(repo => repo.workspaceId === workspaceId && repo.sourcePath === command.env.LOOM_SOURCE_REPOS);
+        requireOwned(selected);
+        if (workspace?.repositories) requireOwnedWorkspace(fixture, workspaceId, actor, 'legacy-agent-name', selected!.name);
+      }
+      if (operation === 'loom.cli.task' && workspace?.repositories) {
+        const assigned = resolveLegacyRepositoryAssignments(workspace.repositories, observedActor!.assignedRepos, observedActor!.assignedRepoGroups);
+        const retained = workspace.agentSources!.find(source => source.agentId === actor);
+        requireOwned(retained && assigned.every(name => retained.repoNames.includes(name)));
+        if (command.env.LOOM_SOURCE_REPOS !== '') requireOwned(workspace.repositories.some(repo =>
+          repo.repo === command.env.LOOM_SOURCE_REPOS && assigned.includes(repo.repoName)));
+      }
       const seed = operation === 'loom.fixture.seedWorktree' ? seeds.get(seedKey(workspaceId, actor!)) : undefined;
       if (operation === 'loom.fixture.seedWorktree') {
         requireOwned(seed?.state === 'prepared' && seed.relativePath === command.argv[7]);
@@ -202,6 +234,8 @@ export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtur
         const result = await driver.launchOwnedCli(plan.argv, plan.envOverrides, plan.stdin, plan.waitForExit, signal);
         const registered = await driver.inspectOwnedProcess(result.id, result.generation, signal);
         requireOwned(registered.pid === result.pid);
+        if (observedActor) requireOwned(isDeepStrictEqual(observedActor,
+          await driver.readWorkspaceLegacyAgent(fixtureOwnerIdentity(fixture), workspaceId, actor!, signal)));
         if (seed) seed.state = result.completion.complete && result.completion.exitCode === 0 ? 'completed' : 'uncertain';
         return { processId: result.id, generation: result.generation, ...result.completion };
       } catch (error) { if (seed) seed.state = 'uncertain'; throw error; }
