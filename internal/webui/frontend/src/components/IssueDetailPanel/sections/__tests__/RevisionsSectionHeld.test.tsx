@@ -104,6 +104,25 @@ describe("RevisionsSection held approval (P2.21)", () => {
     for (const button of verdictButtons()) expect(button).toBeDisabled();
   });
 
+  it("locks the verdicts at once, before the caller's reload arrives", async () => {
+    submitRevisionVerdict.mockRejectedValue(heldError);
+    render(
+      <RevisionsSection
+        workspaceId="W"
+        taskId="T"
+        lead="lead"
+        revisions={[revision]}
+        verdictsFor={1}
+        onChanged={() => {}}
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Approve and create PR" }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("held.txt");
+    for (const button of verdictButtons()) expect(button).toBeDisabled();
+  });
+
   it("keeps the held approval locked after a reload", async () => {
     getTaskRevisions.mockResolvedValue([held]);
     render(<RevisionsSection workspaceId="W" taskId="T" lead="lead" />);

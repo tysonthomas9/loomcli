@@ -49,6 +49,9 @@ export function RevisionsSection({
   const [reason, setReason] = useState("");
   const [follow, setFollow] = useState<Record<string, string>>({});
   const [menu, setMenu] = useState("");
+  // Revisions whose verdict the server recorded although the request failed
+  // (held apply or PR): locked until the reloaded list carries the verdict.
+  const [recorded, setRecorded] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (snapshot) {
@@ -110,6 +113,8 @@ export function RevisionsSection({
       setReason("");
     } catch (err) {
       setError(verdictErrorText(err));
+      if (verdictRecorded(err))
+        setRecorded((prev) => ({ ...prev, [key]: true }));
       // The verdict may be recorded even though its apply or PR is held (a
       // 409 naming the overlapping paths): show the server's revisions so the
       // decided verdict locks the buttons now, as it does after a reload.
@@ -244,7 +249,8 @@ export function RevisionsSection({
         // change was unapplied first): show why and let the reviewer approve
         // again, which re-arms the follow.
         const spent = revision.follow_status === "spent";
-        const decided = Boolean(revision.verdict) && !spent;
+        const decided =
+          (Boolean(revision.verdict) || Boolean(recorded[key])) && !spent;
         // An approval whose apply is held stays decided: say why it waits.
         const held = revision.applied ? "" : heldText(revision.follow_status);
         // The server reports an approved revision still waiting for a working
@@ -472,6 +478,14 @@ export function verdictErrorText(err: unknown): string {
     if (typeof message === "string" && message) return message;
   }
   return err instanceof Error ? err.message : "Could not record verdict";
+}
+
+/** The failed verdict request still recorded the verdict (the server says so). */
+function verdictRecorded(err: unknown): boolean {
+  return (
+    err instanceof ApiError &&
+    typeof (err.body as { status?: unknown } | undefined)?.status === "string"
+  );
 }
 
 /** Why an approved revision is not applied yet, from its follow status. */
