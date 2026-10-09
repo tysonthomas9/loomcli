@@ -18,6 +18,21 @@ const Fields = { identityKind:WorkspaceIdentityKind,workspaceId:Id,repo:Id,commo
   agentSources:z.array(AgentSource).max(1000).optional() };
 export const WorkspaceCreationFact = z.object({kind:z.literal('workspace-created'),leaseId:Id,runId:Id,suiteId:Id,
   scope:z.enum(['suite','case']),caseId:Id,profile:Id,...Fields}).strict();
+const EmptyCreationFields=WorkspaceCreationFact.pick({leaseId:true,runId:true,suiteId:true,scope:true,caseId:true,profile:true,
+  workspaceId:true,storeId:true,storeGeneration:true}).shape;
+/** The successful initial empty response has no physical repository authority. */
+export const WorkspaceEmptyCreationFact=z.object({kind:z.literal('workspace-created-empty'),...EmptyCreationFields,
+  identityKind:z.literal('native-agent-id'),httpStatus:z.literal(201),
+  repositories:z.array(WorkspaceRepositoryFact).length(0),agentIds:z.array(Id).length(0)}).strict();
+export type WorkspaceEmptyCreationFact=z.infer<typeof WorkspaceEmptyCreationFact>;
+/** The separate repository-addition response links its exact retained empty creation. */
+export const WorkspaceRepositoriesAddedFact=z.object({...WorkspaceCreationFact.omit({kind:true}).shape,
+  kind:z.literal('workspace-repositories-added'),identityKind:z.literal('native-agent-id'),httpStatus:z.literal(201),
+  repositories:z.array(WorkspaceRepositoryFact).min(1).max(32),agentIds:z.array(Id).length(0),
+  agentSources:z.array(AgentSource).length(0),initialCreationReceipt:ArtifactRefSchema}).strict();
+export type WorkspaceRepositoriesAddedFact=z.infer<typeof WorkspaceRepositoriesAddedFact>;
+export const FinalWorkspaceCreationFact=z.discriminatedUnion('kind',[WorkspaceCreationFact,WorkspaceRepositoriesAddedFact]);
+export type FinalWorkspaceCreationFact=z.infer<typeof FinalWorkspaceCreationFact>;
 export const WorkspaceAgentFact = z.object({kind:z.literal('agent-enrolled'),identityKind:z.literal('native-agent-id'),leaseId:Id,runId:Id,suiteId:Id,
   scope:z.enum(['suite','case']),caseId:Id,profile:Id,workspaceId:Id,agentId:Id,repo:Id,commonDir:Id,storeId:Id,storeGeneration:Id,
   parentAgentId:Id.nullable(),rootAgentId:Id.nullable(),createdByKind:z.enum(['user','agent']),createdById:Id.nullable(),
@@ -94,6 +109,43 @@ function factSources(record:Topology,fact:WorkspaceAgentFact|LegacyWorkspaceAgen
     'ownership-mismatch','Legacy selected physical source is not an assigned owned repository');
   return [...names];
 }
+async function readRepositoryCreationReceipt(receipt:z.infer<typeof ArtifactRefSchema>,store:EvidenceStore):Promise<unknown> {
+  ArtifactRefSchema.parse(receipt);
+  requireFact(receipt.bytes>0&&receipt.bytes<=4_000_000,'incomplete-pages','Repository creation receipt exceeds the evidence bound');
+  const filename=await store.resolve(receipt.id),handle=await open(filename,constants.O_RDONLY|constants.O_NOFOLLOW);
+  let bytes:Buffer;
+  try {
+    const before=await handle.stat();
+    requireFact(before.isFile()&&before.nlink===1&&before.size===receipt.bytes,'identity-mismatch','Repository creation receipt changed');
+    bytes=Buffer.alloc(receipt.bytes);let offset=0;
+    while(offset<bytes.length) {
+      const read=await handle.read(bytes,offset,bytes.length-offset,offset);
+      requireFact(read.bytesRead>0,'identity-mismatch','Repository creation receipt is incomplete');offset+=read.bytesRead;
+    }
+    const extra=await handle.read(Buffer.alloc(1),0,1,bytes.length),after=await handle.stat();
+    requireFact(extra.bytesRead===0&&before.dev===after.dev&&before.ino===after.ino&&before.size===after.size&&
+      await sha256(bytes)===receipt.sha256,'identity-mismatch','Repository creation receipt bytes changed');
+  } finally {await handle.close();}
+  await store.resolve(receipt.id);
+  const serialized=bytes.toString('utf8');
+  requireFact(redact(serialized)===serialized,'observation-failed','Repository creation receipt contains private material');
+  return JSON.parse(serialized) as unknown;
+}
+/** Authenticate both actual responses in the same owning evidence store. This
+ * validates retained facts only; the fixture producer owns dispatch, transition
+ * reservation, current store/topology rereads and uncertain-outcome cleanup. */
+export async function readWorkspaceRepositoriesAddedFact(owner:FixtureAuthorityOwner,receipt:z.infer<typeof ArtifactRefSchema>,store:EvidenceStore):Promise<WorkspaceRepositoriesAddedFact> {
+  const identity=fixtureOwnerIdentity(owner);
+  const final=WorkspaceRepositoriesAddedFact.parse(await readRepositoryCreationReceipt(receipt,store));
+  const initial=WorkspaceEmptyCreationFact.parse(await readRepositoryCreationReceipt(final.initialCreationReceipt,store));
+  requireFact(Object.entries(identity).every(([key,value])=>final[key as keyof FixtureAuthorityOwner]===value&&initial[key as keyof FixtureAuthorityOwner]===value)&&
+    ['identityKind','workspaceId','storeId','storeGeneration'].every(key=>initial[key as keyof WorkspaceEmptyCreationFact]===final[key as keyof WorkspaceRepositoriesAddedFact]),
+    'ownership-mismatch','Repository addition belongs to another empty workspace creation or owning store');
+  validateTopology(final);
+  requireFact(new Set(final.repositories.map(repository=>repository.sourceRepoId)).size===final.repositories.length,
+    'ownership-mismatch','Repository addition contains duplicate actual source identities');
+  return final;
+}
 /** Trusted finite fixture setup calls this only after actual owned creation.
  * A listing or requested identifier cannot replace the retained creation fact. */
 export async function createOwnedWorkspaceRoster(owner:FixtureAuthorityOwner,records:readonly (z.input<typeof RecordSchema>|OwnedWorkspaceRecord)[],store:EvidenceStore):Promise<OwnedWorkspaceRoster> {
@@ -117,10 +169,11 @@ export async function createOwnedWorkspaceRoster(owner:FixtureAuthorityOwner,rec
       requireFact(redact(serialized)===serialized,'observation-failed','Workspace ownership receipt contains private material');
       return JSON.parse(serialized) as unknown;
     };
-    const fact=WorkspaceCreationFact.parse(await receiptFact(record.creationReceipt));
+    let fact=FinalWorkspaceCreationFact.parse(await receiptFact(record.creationReceipt));
+    if(fact.kind==='workspace-repositories-added')fact=await readWorkspaceRepositoriesAddedFact(owner,record.creationReceipt,store);
     validateTopology(fact);
     const {creationReceipt,enrollmentReceipts,...fields}=record;
-    const sameIdentity=(fact:WorkspaceAgentFact|LegacyWorkspaceAgentFact|z.infer<typeof WorkspaceCreationFact>)=>Object.entries(identity).every(([key,value])=>fact[key as keyof typeof identity]===value);
+    const sameIdentity=(fact:WorkspaceAgentFact|LegacyWorkspaceAgentFact|FinalWorkspaceCreationFact)=>Object.entries(identity).every(([key,value])=>fact[key as keyof typeof identity]===value);
     requireFact(sameIdentity(fact)&&Object.entries(fields).every(([key,value])=>['agentIds','agentSources'].includes(key)||isDeepStrictEqual(fact[key as keyof typeof fields],value)),
       'ownership-mismatch','Workspace creation receipt belongs to another fixture or source');
     const members=[...fact.agentIds];
