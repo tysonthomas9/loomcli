@@ -1,9 +1,11 @@
 import { z } from 'zod';
+import type { EvidenceClass } from '@tysonthomas9/aft/types';
 import { isAbsolute } from 'node:path';
 import { Id, Json, RelativePath, HttpResponse, redact } from '../protocol.js';
 import { FixtureId, FixtureParameters, ScenarioId, scenario } from './catalog.js';
 
 const Arg = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/);
+export const LegacyEvidenceClasses = ['deterministic', 'persisted-public-api', 'real-native', 'live-provider'] as const satisfies readonly EvidenceClass[];
 const LeaseWorkspace = { leaseId: Id, workspaceId: Arg };
 export const RuntimeInput = z.object({ leaseId: Id, targetId: Id,
   operation: z.enum(['serve-restart', 'harness-restart', 'worker-stop', 'terminal-close']),
@@ -33,7 +35,7 @@ export const ConfigureInput = z.discriminatedUnion('setting', [
 ]);
 
 export class LegacyError extends Error {
-  constructor(readonly code: 'invalid-input' | 'ownership-mismatch' | 'stale-generation' | 'process-failed' |
+  constructor(readonly code: 'invalid-input' | 'ownership-mismatch' | 'source-mismatch' | 'stale-generation' | 'process-failed' |
     'response-invalid' | 'unsupported-capability' | 'mutation-repeated' | 'cleanup-failed', message: string) { super(message); }
 }
 function fact(condition: unknown, code: LegacyError['code'], message: string): asserts condition {
@@ -50,7 +52,7 @@ export interface OwnedProcess {
   workspaceId: string | null; agentName: string | null; sessionName: string | null;
 }
 export interface LegacyLease {
-  id: string; runId: string; active: boolean; evidence: 'deterministic' | 'real' | 'live';
+  id: string; runId: string; active: boolean; evidence: EvidenceClass;
   secrets: readonly string[]; binary: string; cwd: string; env: Readonly<Record<string, string>>;
   workspaces: readonly string[];
   agents: readonly { workspaceId: string; id: string; name: string; generation: string }[];
@@ -97,7 +99,7 @@ export interface LegacyReceipt {
   evidence: LegacyLease['evidence']; actor: 'loom-cli' | 'runtime' | 'fixture';
   facts: Json;
 }
-export function createLegacyOperations(access: LegacyAccess) {
+export function createLegacyOperations(access: LegacyAccess, expectedEvidence?: EvidenceClass) {
   const claimed = new Set<string>();
   const configurations = new Map<string, ConfigurationSnapshot>();
   const configurationLocks = new Set<string>();
@@ -108,6 +110,8 @@ export function createLegacyOperations(access: LegacyAccess) {
     call.signal.throwIfAborted();
     const lease = await access.lease(id, call.signal);
     fact(lease.active && lease.id === id && lease.runId === call.runId, 'ownership-mismatch', 'Fixture lease is inactive or foreign');
+    fact(z.enum(LegacyEvidenceClasses).safeParse(lease.evidence).success && (expectedEvidence === undefined || lease.evidence === expectedEvidence),
+      'source-mismatch', 'Legacy transport evidence differs from canonical fixture');
     fact(isAbsolute(lease.binary) && isAbsolute(lease.cwd), 'ownership-mismatch', 'CLI registration is not absolute');
     return structuredClone(lease);
   }
