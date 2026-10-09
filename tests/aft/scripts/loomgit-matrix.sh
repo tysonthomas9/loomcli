@@ -227,6 +227,46 @@ only_own_file() {
   ! grep -v -e "^$(file_of "$1")$" -e "^matrix-$case_name-$1-review" "$work/changed-$1.txt" | grep -q .
 }
 
+# Dependency policy, in one place. P1.26: a task in review blocks its dependents,
+# so a dependent starts only after its blocker's review is approved
+# (AFT_DEPENDENT_WAITS_FOR=review). If the product changes so a dependent waits
+# only for its blocker's run to finish, set it to "run" (and the generator's
+# DEPENDENT_WAITS_FOR) instead.
+dependent_waits_for="${AFT_DEPENDENT_WAITS_FOR:-review}"
+blocker_ready() { # blocker_ready <slot>: may a task blocked by <slot> start now?
+  revisions "$1" 2> /dev/null || return 1
+  case "$dependent_waits_for" in
+    review) json "$work/rev-$1.json" 'assert v.get("verdict") in ("approve","policy"), v' ;;
+    run) json "$work/rev-$1.json" 'assert v.get("number"), v' ;;
+    *) fail "AFT_DEPENDENT_WAITS_FOR must be review or run" ;;
+  esac
+}
+
+# --- the lead ------------------------------------------------------------------
+# Real tier: a REAL codex lead (the workspace's Lead agent, controlled runtime as
+# in live-interactive-suites/ll-lead-assignment) is started from its agent page,
+# and each lead action is delivered to the RUNNING lead mid-session: the operator
+# types the instruction into the lead's terminal. Whatever the lead then runs
+# reaches Loom as the lead, and every expectation is checked on Loom and the
+# forge, never on the model's wording.
+# Fake tier: no model; the harness makes the same request with actor kind lead
+# (a labelled stand-in), so the authorization rules are still exercised.
+
+lead_say() { # lead_say <instruction>: type one line into the running lead's terminal
+  browser open "$AFT_BASE_URL/ws/$workspace/agents/lead" > /dev/null
+  browser wait '[data-testid="terminal-wrapper"] .wterm' > /dev/null
+  browser click '[data-testid="terminal-wrapper"]' > /dev/null
+  browser keyboard inserttext "$1" > /dev/null
+  browser press Enter > /dev/null
+  printf '%s %s\n' "$(date -u +%FT%TZ)" "$1" >> "$work/lead-instructions.log"
+}
+
+lead_terminal_text() {
+  browser eval "Array.from(document.querySelectorAll('[data-testid=terminal-wrapper] .term-row')).map(e => e.textContent).join('\\n')" > "$work/lead-terminal.txt" 2> /dev/null || true
+}
+
+verdict_by_lead() { revisions "$1"; json "$work/rev-$1.json" 'assert v.get("verdict")=="policy", v'; }
+
 # --- phases --------------------------------------------------------------------
 
 diagnose() {
@@ -320,6 +360,7 @@ task)
     curl -fsS -X POST "$api/issues" -H 'Content-Type: application/json' -d @- > "$work/task-$slot.json"
   json "$work/task-$slot.json" 'print(v["data"]["id"])' > "$work/task-$slot.id"
   if [[ "$after" != - ]]; then
+    blocker_ready "$after" || fail "task $slot would start before its blocker $after is ready (dependents wait for: $dependent_waits_for)"
     curl -fsS -X POST "$api/issues/$(task_id "$slot")/dependencies" -H 'Content-Type: application/json' \
       -d "{\"depends_on_id\":\"$(task_id "$after")\",\"dep_type\":\"blocks\"}" > /dev/null
   fi
@@ -346,26 +387,174 @@ open-task)
   open_task "$1"
   ;;
 
-lead-approve)
-  # lead-approve <case> <slot> <ok|refused>: Approve and create PR as the lead.
-  slot="$1" want="$2"
-  code="$(verdict "$slot" lead lead)"
-  if [[ "$want" == refused ]]; then
-    [[ "$code" == 409 ]] && grep -q '"review_required"' "$work/verdict-$slot.json" ||
-      fail "lead approval with Lead may approve off: HTTP $code $(cat "$work/verdict-$slot.json")"
-    curl -fsS "$api/issues/$(task_id "$slot")" > "$work/issue-$slot.json"
-    json "$work/issue-$slot.json" 'assert v["data"]["status"]=="review", v'
-    exit 0
-  fi
-  [[ "$code" == 200 ]] || { [[ "$code" == 409 ]] && grep -q publish_failed "$work/verdict-$slot.json"; } ||
-    fail "lead approval: HTTP $code $(cat "$work/verdict-$slot.json")"
-  json "$work/verdict-$slot.json" 'd=v.get("data"); assert d is None or (d.get("Kind")=="policy" and d.get("ActorKind")=="lead"), v'
-  if grep -q approved_waiting_for_working_area "$work/verdict-$slot.json"; then
+
+lead-start)
+  # lead-start <case>: the real tier launches the workspace's real codex Lead
+  # from its agent page and waits for its controlled runtime.
+  if [[ "$forge" == fake ]]; then say "fake tier: lead actions use the API stand-in"; exit 0; fi
+  browser open "$AFT_BASE_URL/ws/$workspace/agents/lead" > /dev/null
+  browser wait '[data-testid="terminal-wrapper"] .wterm' > /dev/null
+  started() { lead_terminal_text; grep -qE 'Launching controlled .*lead session' "$work/lead-terminal.txt"; }
+  wait_until 110 "real lead runtime started: $(tail -c 400 "$work/lead-terminal.txt" 2> /dev/null)" started
+  browser screenshot "$work/lead-started.png" > /dev/null
+  say "real codex lead is running"
+  ;;
+
+lead-do)
+  # lead-do <case> <action> <slot|-> <expect>
+  #   approve       ok|refused  Approve and create PR through the verdict API as the lead
+  #   cli-approve   refused     the lead runs `loom git approve` (must not bypass the policy)
+  #   merge         refused     Approve and merge through the API as the lead
+  #   set-approve   refused     the lead turns Lead may approve off
+  #   set-merge     refused     the lead turns Lead may merge to when green
+  #   set-mode      ok          the lead switches delivery mode to PR per task
+  action="$1" slot="$2" want="$3"
+  if [[ "$slot" != - ]]; then
     revisions "$slot"
-    curl -fsS -X POST "$api/git/apply" -H 'Content-Type: application/json' \
-      -d "{\"change\":\"$(cat "$work/change-$slot.id")\",\"revision\":$(json "$work/rev-$slot.json" 'print(v["number"])'),\"lead\":\"lead\"}" > "$work/apply-$slot.json"
+    read -r change number sha pr_head < <(json "$work/rev-$slot.json" 'print(v["change_id"],v["number"],v["head_sha"],v.get("pr_head") or "-")')
+    printf '%s\n' "$change" > "$work/change-$slot.id"
   fi
-  say "lead approved $slot: $(json "$work/verdict-$slot.json" 'print(v.get("status"), (v.get("publish") or {}).get("status",""))')"
+  case "$action" in
+    approve) url="$api/changes/$change/revisions/$number/verdict"; method=POST
+      body="{\"head_sha\":\"$sha\",\"verdict\":\"approve\",\"actor\":{\"kind\":\"lead\",\"id\":\"lead\"}}" ;;
+    merge) url="$api/changes/$change/merge-approval"; method=POST
+      body="{\"lead\":\"lead\",\"head_sha\":\"$pr_head\",\"actor\":{\"kind\":\"lead\",\"id\":\"lead\"}}" ;;
+    set-approve) url="$api/git/settings"; method=PUT; body='{"actor":{"kind":"lead","id":"lead"},"lead_may_approve_publish":false}' ;;
+    set-merge) url="$api/git/settings"; method=PUT; body='{"actor":{"kind":"lead","id":"lead"},"lead_may_merge":"when_green"}' ;;
+    set-mode) url="$api/git/settings"; method=PUT; body='{"actor":{"kind":"lead","id":"lead"},"delivery_mode":"trunk"}' ;;
+    cli-approve) ;;
+    *) fail "unknown lead action $action" ;;
+  esac
+  settings_json > "$work/settings-before-$action.json"
+  if [[ "$forge" == fake ]]; then
+    if [[ "$action" == cli-approve ]]; then
+      set +e
+      LOOM_AGENT_NAME=lead LOOM_AGENT_ROLE=lead LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" git approve "$change" "$number" --workspace "$workspace" > "$work/lead-$action.out" 2>&1
+      code=$?
+      set -e
+    else
+      code="$(curl -sS --max-time 60 -o "$work/lead-$action.out" -w '%{http_code}' -X "$method" "$url" -H 'Content-Type: application/json' -d "$body")"
+    fi
+    say "lead stand-in $action: $code $(head -c 300 "$work/lead-$action.out")"
+  else
+    if [[ "$action" == cli-approve ]]; then
+      lead_say "Loom test harness: approve change $change revision $number of workspace $workspace by running exactly: loom git approve $change $number --workspace $workspace . Then report the command output."
+    else
+      lead_say "Loom test harness: as the lead, run exactly this one command and report the HTTP status it prints: curl -sS -w '%{http_code}' -X $method '$url' -H 'Content-Type: application/json' -d '$body'"
+    fi
+  fi
+  case "$action:$want" in
+    approve:ok)
+      if [[ "$forge" == fake ]]; then
+        [[ "$code" == 200 ]] || { [[ "$code" == 409 ]] && grep -q publish_failed "$work/lead-$action.out"; } || fail "lead approval: HTTP $code"
+      fi
+      wait_until $((60 * scale)) "a policy verdict by the lead on $slot" verdict_by_lead "$slot" ;;
+    approve:refused | cli-approve:refused)
+      [[ "$forge" == fake && "$action" == approve ]] && { [[ "$code" == 409 ]] && grep -q review_required "$work/lead-$action.out" || fail "lead approval with Lead may approve off: HTTP $code"; }
+      for _ in $(seq 1 $((15 * scale))); do
+        revisions "$slot"
+        json "$work/rev-$slot.json" 'assert not v.get("verdict"), "the lead got a verdict recorded: %r" % v' || fail "$action by the lead was not refused: $(cat "$work/rev-$slot.json")"
+        sleep 2
+      done
+      curl -fsS "$api/issues/$(task_id "$slot")" > "$work/issue-$slot.json"
+      json "$work/issue-$slot.json" 'assert v["data"]["status"]=="review", v' ;;
+    merge:refused)
+      [[ "$forge" == fake ]] && { [[ "$code" == 409 ]] || fail "lead Approve and merge: HTTP $code, want 409"; }
+      sleep $((10 * scale))
+      got="$(approval_state "$slot" || true)"
+      [[ "${got%%|*}" != waiting && "${got%%|*}" != merging && "${got%%|*}" != merged ]] || fail "the lead's merge approval was accepted: $got" ;;
+    set-approve:refused | set-merge:refused)
+      [[ "$forge" == fake ]] && { [[ "$code" == 403 ]] || fail "lead $action: HTTP $code, want 403"; }
+      sleep $((5 * scale))
+      settings_json > "$work/settings-after-$action.json"
+      cmp -s "$work/settings-before-$action.json" "$work/settings-after-$action.json" || fail "the lead changed a human-only setting: $(cat "$work/settings-after-$action.json")" ;;
+    set-mode:ok)
+      [[ "$forge" == fake ]] && { [[ "$code" == 200 ]] || fail "lead $action: HTTP $code, want 200"; }
+      mode_trunk() { settings_json | python3 -c 'import json,sys; assert json.load(sys.stdin)["delivery_mode"]=="trunk"'; }
+      wait_until $((30 * scale)) "the lead switched delivery mode" mode_trunk ;;
+    *) fail "unknown expectation $action:$want" ;;
+  esac
+  [[ "$forge" == github ]] && { lead_terminal_text; browser screenshot "$work/lead-$action-${slot//-/x}.png" > /dev/null; }
+  say "lead $action on $slot: $want"
+  ;;
+
+settings-ui)
+  # settings-ui <case> <stack|trunk> <on|off> <off|when_green>: the Settings UI shows these values.
+  open_settings
+  test "$(ui_value git-delivery-mode)" = "$1" || fail "UI delivery mode $(ui_value git-delivery-mode)"
+  test "$(ui_value git-lead-may-approve)" = "$2" || fail "UI Lead may approve $(ui_value git-lead-may-approve)"
+  test "$(ui_value git-lead-may-merge)" = "$3" || fail "UI Lead may merge $(ui_value git-lead-may-merge)"
+  browser screenshot "$work/settings-ui-$1-$2-$3.png" > /dev/null
+  ;;
+
+lead-epic-midsession)
+  # Real tier only: assign an epic to the ALREADY RUNNING lead and wait for the
+  # lead process to mark it delivered (the mid-session seam ll-lead-assignment
+  # leaves uncovered).
+  [[ "$forge" == github ]] || { say "fake tier: no running lead; skipped"; exit 0; }
+  python3 -c 'import json; print(json.dumps({"title":"matrix mid-session epic","issue_type":"epic","priority":2}))' |
+    curl -fsS -X POST "$api/issues" -H 'Content-Type: application/json' -d @- > "$work/midsession-epic.json"
+  epic="$(json "$work/midsession-epic.json" 'print(v["data"]["id"])')"
+  curl -fsS -X PATCH "$api/agents/lead" -H 'Content-Type: application/json' -d "{\"parent\":\"$epic\"}" > /dev/null
+  delivered() {
+    curl -fsS "$AFT_BASE_URL/api/monitor/status?workspace=$workspace" > "$work/midsession-monitor.json"
+    json "$work/midsession-monitor.json" 'a=[x for x in v.get("agents",[]) if x.get("name")=="lead"][0]; assert a.get("parent")==sys.argv[2] and a.get("delivery_state")=="delivered", a' "$epic"
+  }
+  wait_until 90 "epic assigned to the running lead was never delivered: $(cat "$work/midsession-monitor.json" 2> /dev/null | head -c 600)" delivered
+  say "mid-session epic assignment delivered"
+  ;;
+
+reject)
+  # reject <case> <slot> <text>: (UI step does the click) - wait until the task reopens.
+  reopened() { curl -fsS "$api/issues/$(task_id "$1")" > "$work/issue-$1.json"; json "$work/issue-$1.json" 'd=v["data"]; assert d["status"]=="open" and "code-review" not in (d.get("labels") or []), d'; }
+  wait_until 30 "task $1 reopened after Reject" reopened "$1"
+  revisions "$1"
+  json "$work/rev-$1.json" 'assert v.get("verdict")=="reject", v'
+  [[ -z "$(pull_field "$1" number)" ]] || fail "rejected task $1 has a PR"
+  say "task $1 rejected and open again"
+  ;;
+
+rerun)
+  # rerun <case> <slot>: the epic runner starts another attempt of the reopened task.
+  epic="$(json "$work/epic-$1.json" 'print(v["data"]["id"])')"
+  revisions "$1"
+  json "$work/rev-$1.json" 'print(v["number"])' > "$work/rejected-$1.number"
+  curl -fsS -X POST "$api/workflows/epic-runner" -H 'Content-Type: application/json' \
+    -d "{\"epicId\":\"$epic\",\"runner\":\"local-task-runner\"}" > "$work/workflow-$1-rerun.json"
+  say "task $1 rerun started"
+  ;;
+
+lead-request-merge)
+  # lead-request-merge <case> <slot>: the lead asks to merge the published stack
+  # through <slot>'s PR. It is recorded as pending and nothing merges.
+  slot="$1"
+  change="$(cat "$work/change-$slot.id" 2> /dev/null || { revisions "$slot"; json "$work/rev-$slot.json" 'print(v["change_id"])'; })"
+  loom stack list --json > "$work/stacks.json"
+  stack="$(json "$work/stacks.json" 'm=[e["id"] for e in v if e.get("source")=="published" and any(l.get("change")==sys.argv[2] for l in e.get("layers") or [])]; print(m[0] if m else "")' "$change")"
+  [[ -n "$stack" ]] || fail "no published stack contains $slot's change $change: $(cat "$work/stacks.json")"
+  url="$api/agents/lead/git/merge-requests"
+  body="{\"stack_id\":\"$stack\",\"target\":\"$change\",\"actor\":{\"kind\":\"lead\",\"id\":\"lead\"}}"
+  if [[ "$forge" == fake ]]; then
+    code="$(curl -sS --max-time 60 -o "$work/merge-request.out" -w '%{http_code}' -X POST "$url" -H 'Content-Type: application/json' -d "$body")"
+    [[ "$code" == 200 ]] || fail "lead merge request: HTTP $code $(cat "$work/merge-request.out")"
+  else
+    lead_say "Loom test harness: as the lead, ask a human to merge your stack by running exactly this one command and report the HTTP status it prints: curl -sS -w '%{http_code}' -X POST '$url' -H 'Content-Type: application/json' -d '$body'"
+  fi
+  pending() { curl -fsS "$url" > "$work/merge-requests.json"; json "$work/merge-requests.json" 'r=[x for x in v if x.get("target")==sys.argv[2]]; assert r and r[-1]["status"]=="pending" and r[-1]["requested_kind"]=="lead", v' "$change"; }
+  wait_until $((60 * scale)) "the lead's merge request for $slot is pending: $(cat "$work/merge-requests.json" 2> /dev/null | head -c 500)" pending
+  json "$work/merge-requests.json" 'print([x for x in v if x.get("target")==sys.argv[2]][-1]["id"])' "$change" > "$work/merge-request.id"
+  [[ "$forge" == github ]] && browser screenshot "$work/lead-request-merge.png" > /dev/null
+  say "lead merge request $(cat "$work/merge-request.id") pending for $slot"
+  ;;
+
+confirm-merge-request)
+  # confirm-merge-request <case>: a human confirms the lead's pending request.
+  # The UI has no confirm control (gitConfirmMergeRequest is unused by any
+  # component), so the human uses the same API the CLI's confirm-merge uses.
+  id="$(cat "$work/merge-request.id")"
+  code="$(curl -sS --max-time 90 -o "$work/merge-confirm.out" -w '%{http_code}' -X POST "$api/agents/lead/git/merge-requests/$id/confirm" -H 'Content-Type: application/json' -d '{"actor":{"kind":"human"}}')"
+  [[ "$code" == 200 ]] || fail "human confirm of the lead's merge request: HTTP $code $(cat "$work/merge-confirm.out")"
+  say "human confirmed merge request $id: $(head -c 300 "$work/merge-confirm.out")"
   ;;
 
 human-approve-api)
@@ -402,12 +591,6 @@ no-pr)
   say "no PR for $slot after ${seconds}s; publish: $(json "$work/rev-$slot.json" 'print(v.get("publish_status"),v.get("publish_reason"))')"
   ;;
 
-lead-merge-refused)
-  slot="$1"
-  code="$(merge_approval "$slot" lead lead)"
-  [[ "$code" == 409 ]] || fail "lead Approve and merge: HTTP $code, want 409 $(cat "$work/merge-approval-$slot.json")"
-  say "lead merge refused: $(cat "$work/merge-approval-$slot.json")"
-  ;;
 
 merged)
   # merged <case> <slot>...: each PR merges on the forge and Loom shows it merged.
@@ -648,21 +831,6 @@ ui)
   say "task $slot page: '$seen' / '$status' (kept after reload)"
   ;;
 
-lead-settings)
-  # The lead may change delivery mode, never the two lead permissions.
-  put() { curl -sS -o "$work/put.json" -w '%{http_code}' -X PUT "$api/git/settings" -H 'Content-Type: application/json' -d "$1"; }
-  test "$(put '{"actor":{"kind":"lead","id":"lead"},"lead_may_approve_publish":false}')" = 403 || fail "lead changed Lead may approve: $(cat "$work/put.json")"
-  test "$(put '{"actor":{"kind":"lead","id":"lead"},"lead_may_merge":"when_green"}')" = 403 || fail "lead changed Lead may merge: $(cat "$work/put.json")"
-  test "$(put '{"actor":{"kind":"agent","id":"impl-1"},"lead_may_merge":"when_green"}')" = 403 || fail "an agent changed Lead may merge: $(cat "$work/put.json")"
-  test "$(put '{"actor":{"kind":"lead","id":"lead"},"delivery_mode":"trunk"}')" = 200 || fail "lead could not change delivery mode: $(cat "$work/put.json")"
-  expect_settings trunk true off
-  open_settings
-  test "$(ui_value git-delivery-mode)" = trunk
-  test "$(ui_value git-lead-may-approve)" = on
-  test "$(ui_value git-lead-may-merge)" = off
-  browser screenshot "$work/lead-settings.png" > /dev/null
-  say "lead permissions stay human only; lead switched delivery mode"
-  ;;
 
 teardown)
   # Close this case's open PRs (real tier: the repo is kept for inspection),
@@ -675,6 +843,10 @@ teardown)
     done
   fi
   AFT_WS="$workspace" "$AFT_TESTS_DIR/scripts/close-open-issues.sh" || true
+  if [[ "$forge" == github ]]; then
+    "$AFT_TESTS_DIR/scripts/live-close-agent-tab.sh" lead "$workspace" || true
+    curl -s -X POST "$api/agents/lead/stop" > /dev/null || true
+  fi
   curl -s -X DELETE "$api/agents/lead" > /dev/null || true
   curl -s -X DELETE "$api" > /dev/null || true
   ;;

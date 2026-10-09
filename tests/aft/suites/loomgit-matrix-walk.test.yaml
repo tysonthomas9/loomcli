@@ -11,6 +11,8 @@ tests:
     steps:
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" setup walk native"
         intent: "Fixture: one repo, one Loom workspace and its lead (real tier: a clone of the run's sandbox repo)"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" lead-start walk"
+        intent: "Real tier: the workspace's real codex lead is started from its agent page and its controlled runtime comes up"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" settings walk stack on off"
         intent: "Human sets Delivery mode stack, Lead may approve on, Lead may merge off in Settings > Git; the server and a reload agree"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" task walk a -"

@@ -36,6 +36,9 @@ LIVE_ACCOUNT_LOCK=""
 # Absolute ceiling on paid cases per run, independent of --max-real-cases. Backstop
 # for a bad cap or a miscount; raise it deliberately, not in passing.
 LIVE_MAX_CASES_CEILING=10
+# The real-GitHub matrix (PX.7) runs every W, S and variant case in one run by
+# design (no budget trimming), so it has its own, higher backstop.
+REAL_GITHUB_MAX_CASES_CEILING=40
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --live)            AFT_LIVE=1; shift ;;
@@ -136,8 +139,8 @@ if [[ -n "$AFT_REAL_GITHUB" ]]; then
     done
     [[ -n "$rg_saw_no_agent" ]] || { echo "[aft] --real-github requires --no-agent" >&2; exit 1; }
     [[ -n "$AFT_MAX_REAL_CASES" ]] || { echo "[aft] --real-github requires --max-real-cases <n>" >&2; exit 1; }
-    if [[ "$AFT_MAX_REAL_CASES" -gt "$LIVE_MAX_CASES_CEILING" ]]; then
-        echo "[aft] refusing to start: --max-real-cases $AFT_MAX_REAL_CASES exceeds the ceiling of $LIVE_MAX_CASES_CEILING" >&2
+    if [[ "$AFT_MAX_REAL_CASES" -gt "$REAL_GITHUB_MAX_CASES_CEILING" ]]; then
+        echo "[aft] refusing to start: --max-real-cases $AFT_MAX_REAL_CASES exceeds the real-github ceiling of $REAL_GITHUB_MAX_CASES_CEILING" >&2
         exit 1
     fi
     rg_root="$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$SCRIPT_DIR/real-github-suites")"

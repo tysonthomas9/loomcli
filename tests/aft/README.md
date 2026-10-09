@@ -244,6 +244,57 @@ separate `make test-aft-real` target sets it, and real scenarios live in
 In real mode the harness also unsets `OPENAI_API_KEY`, defaults `AFT_TIMEOUT` to
 `600000`, and fails fast if `codex` or `~/.codex/auth.json` is missing.
 
+### Real GitHub tier: Git settings matrix (PX.7)
+
+`loomgit-matrix-walk` (W1–W8: one stacked journey), `loomgit-matrix-settings`
+(S1–S10: delivery mode × Lead may approve × Lead may merge, plus mode switch and
+lead permissions) and `loomgit-matrix-variants` (L1 mid-session epic assignment
+to a running lead, N1 the lead's `loom git approve` with Lead may approve off,
+N2 Approve and merge on a red PR and its recovery, N3 the lead's merge request
+needing a human, R1 Reject → rerun → approve) run on the fake forge with every
+`loomgit-*` run:
+
+```bash
+make test-aft AFT_ARGS="--suite 'loomgit-matrix-*' --no-agent --screenshots"
+```
+
+The same cases run against **real GitHub with real codex** and a **real codex
+lead**: the workspace's Lead is started from its agent page (controlled runtime,
+as in `live-interactive-suites/ll-lead-assignment`), and every lead action is
+typed into that running lead's terminal; the result is checked on Loom and
+GitHub. On the fake tier the lead steps use a labelled API stand-in (actor kind
+`lead`). Run every case (no budget trimming; the real-github backstop is 40):
+
+```bash
+for s in walk settings variants; do
+  AFT_SUITES=tests/aft/real-github-suites/real-github-matrix-$s.test.yaml \
+    make test-aft-real-github AFT_ARGS="--max-real-cases 10 --screenshots"
+done
+# one case: add --filter "S7 PR per task, human does everything" (the cap still counts the whole file)
+```
+
+Dependents wait for their blocker's review to be approved (P1.26). That policy
+lives in one place: `DEPENDENT_WAITS_FOR` in `scripts/gen-matrix-suites.py` and
+`AFT_DEPENDENT_WAITS_FOR` in `scripts/loomgit-matrix.sh` (`review` or `run`).
+
+- Each run creates a NEW private repo `tysonthomas9/loom-aft-git-<yyyymmdd-hhmm>`
+  with the operator's `gh` login (needs `repo` and `workflow` scopes), seeds `main`
+  with a README and the required Actions check `check` (red when a file contains
+  `FAIL`), and protects `main` with it (admins included). No other repo is touched.
+- Only the Loom server gets the token (`gh auth token`, exported in its launch
+  subshell, never in argv or logs); serve runs with an owned global Git config and
+  no system config, and agents are env-filtered. Real codex writes the task files;
+  the W5/S3 review fix-up runs real codex in the task copy Loom hands out.
+- PR comments are posted on GitHub and relayed to Loom's signed webhook endpoint,
+  because GitHub cannot reach the local server.
+- At the end the harness closes the run's open PRs, checks no codex process
+  leaked, and appends `created` / `finished` lines with the repo URL to
+  `reports/live-ledger.log`. The repo is kept for inspection; delete it by hand
+  (the token has no `delete_repo` scope). PR URLs per case are in
+  `reports/_work/<run>/matrix-prs.log`.
+- The real-tier YAML is generated with the fake one by
+  `tests/aft/scripts/gen-matrix-suites.py`; `--real-github` refuses stale copies.
+
 ### Other real backends: claude, opencode, cursor
 
 The same host epic-runner tier exists for every other first-class agent backend,

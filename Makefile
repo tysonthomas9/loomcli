@@ -480,7 +480,7 @@ test-e2e: ensure-frontend-deps
 	@cd $(FRONTEND_DIR) && npx playwright test --project=chromium --workers=1
 
 # Run AFT browser E2E suites using the self-contained deterministic stack.
-.PHONY: test-aft test-aft-strict test-aft-heal test-aft-real \
+.PHONY: test-aft test-aft-strict test-aft-heal test-aft-real test-aft-real-github \
 	test-aft-real-claude test-aft-real-opencode test-aft-real-cursor \
 	test-aft-real-all test-aft-live-interactive test-aft-live-workers \
 	test-aft-podman
@@ -502,6 +502,11 @@ test-aft-heal:
 # window, so these remain separate from the deterministic CI target.
 test-aft-real:
 	@AFT_REAL_CODEX=1 tests/aft/run-aft.sh --no-agent $(AFT_ARGS)
+
+# PX.7 real-GitHub tier: a new private sandbox repo per run, real codex, the
+# operator's gh login (server only). AFT_ARGS must carry --max-real-cases.
+test-aft-real-github:
+	@tests/aft/run-aft.sh --real-github --no-agent $(AFT_ARGS)
 
 test-aft-real-claude:
 	@AFT_REAL_BACKEND=claude tests/aft/run-aft.sh --no-agent $(AFT_ARGS)
