@@ -39,6 +39,26 @@ export type OwnedWorkspaceRoster = readonly OwnedWorkspaceRecord[];
 const generated = new WeakMap<object,Readonly<FixtureAuthorityOwner>>();
 const current = new WeakMap<OwnedFixture,OwnedWorkspaceRoster>();
 type Topology=Pick<OwnedWorkspaceRecord,'identityKind'|'repo'|'commonDir'|'agentIds'|'repositories'|'agentSources'>;
+/** Pure source policy over retained topology; it neither enrolls an actor nor
+ * grants access to a workspace, repository or selected physical worktree. */
+export function resolveLegacyRepositoryAssignments(
+  repositories:NonNullable<OwnedWorkspaceRecord['repositories']>,
+  assignedRepos:readonly string[]|undefined,assignedRepoGroups:readonly string[]|undefined,
+):readonly string[] {
+  requireFact(repositories.length>0&&repositories.length<=32&&new Set(repositories.map(row=>row.repoName)).size===repositories.length,
+    'ownership-mismatch','Legacy repository topology is missing or ambiguous');
+  requireFact(assignedRepos!==undefined&&assignedRepoGroups!==undefined&&assignedRepos.length<=32&&assignedRepoGroups.length<=32&&
+    new Set(assignedRepos).size===assignedRepos.length&&new Set(assignedRepoGroups).size===assignedRepoGroups.length,
+    'incomplete-pages','Actual legacy repository assignments are missing or duplicated');
+  // Source WorkspaceAgentInfo uses names and groups. Only BOTH empty grants
+  // the complete finite owned set (gitops.go), never a missing observation.
+  const names=assignedRepos.length||assignedRepoGroups.length
+    ? [...new Set([...assignedRepos,...repositories.filter(repository=>repository.groups.some(group=>assignedRepoGroups.includes(group))).map(repository=>repository.repoName)])]
+    : repositories.map(repository=>repository.repoName);
+  requireFact(names.length>0&&names.every(name=>repositories.some(repository=>repository.repoName===name)),
+    'ownership-mismatch','Legacy actor targets a foreign repository or source');
+  return Object.freeze(names);
+}
 function validateTopology(record:Topology):void {
   requireFact((record.repositories===undefined)===(record.agentSources===undefined),
     'ownership-mismatch','Named repository topology requires actor source associations');
@@ -66,16 +86,7 @@ function factSources(record:Topology,fact:WorkspaceAgentFact|LegacyWorkspaceAgen
     requireFact(observed.length===1,'ownership-mismatch','Actor physical source has no exact owned repository');
     return [observed[0]!.repoName];
   }
-  requireFact(fact.assignedRepos!==undefined&&fact.assignedRepoGroups!==undefined&&new Set(fact.assignedRepos).size===fact.assignedRepos.length&&
-    new Set(fact.assignedRepoGroups).size===fact.assignedRepoGroups.length,
-    'incomplete-pages','Actual legacy repository assignments are missing or duplicated');
-  // Source WorkspaceAgentInfo uses workspace-scoped names and group membership.
-  // Only no Repos AND no RepoGroups means all repositories (gitops.go).
-  const names=fact.assignedRepos.length||fact.assignedRepoGroups.length
-    ? [...new Set([...fact.assignedRepos,...record.repositories.filter(repository=>repository.groups.some(group=>fact.assignedRepoGroups!.includes(group))).map(repository=>repository.repoName)])]
-    : record.repositories.map(repository=>repository.repoName);
-  requireFact(names.length>0&&names.every(name=>record.repositories!.some(repository=>repository.repoName===name)),
-    'ownership-mismatch','Legacy actor targets a foreign repository or source');
+  const names=resolveLegacyRepositoryAssignments(record.repositories,fact.assignedRepos,fact.assignedRepoGroups);
   // Membership does not select a physical worktree. The topology anchor belongs
   // to the workspace, and cannot stand in for an actor's observed source.
   if(fact.repo!==null)requireFact(observed.length===1&&names.includes(observed[0]!.repoName),
