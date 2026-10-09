@@ -69,18 +69,26 @@ export function createRegisteredProcessPort(pythonBinary:string,helperFile:strin
   }};
  }};
 }
-export interface ProductProcessRegistration { id:string;pid:number;executable:string;configurationRoot:string; }
+export interface ProductProcessRegistration { id:string;pid:number;executable:string;configurationRoot:string;
+ argvSha256?:string;parentPid?:number;parentPids?:readonly number[]; }
 export class OwnedDescendants {
  private readonly handles=new Map<string,RegisteredProcessHandle>();
  constructor(private readonly port:RegisteredProcessPort,private readonly record:(resource:Resource)=>void){}
  async enroll(registration:ProductProcessRegistration){
   check(registration.id&&registration.pid>0&&registration.configurationRoot&&path.isAbsolute(registration.executable));
   const old=this.handles.get(registration.id);
-  if(old){const current=await old.inspect();check(current.state==='running'&&current.pid===registration.pid&&current.executable===registration.executable&&current.configurationRoot===registration.configurationRoot);return current;}
+  if(old){const current=await old.inspect();check(current.state==='running'&&current.pid===registration.pid&&current.executable===registration.executable&&current.configurationRoot===registration.configurationRoot&&
+   current.generation===old.identity.generation&&current.argvSha256===old.identity.argvSha256&&
+   (registration.argvSha256===undefined||current.argvSha256===registration.argvSha256)&&
+   (registration.parentPid===undefined||current.parentPid===registration.parentPid)&&
+   (registration.parentPids===undefined||registration.parentPids.filter(pid=>pid===current.parentPid).length===1));return current;}
   // The intent survives failures to inspect or pin a product-launched resource.
   this.record({id:registration.id,kind:'process',generation:`unverified:${registration.pid}`});
   const handle=await this.port.capture(registration.pid);const identity=Identity.parse(handle.identity);
-  if(!(identity.pid===registration.pid&&identity.executable===registration.executable&&identity.configurationRoot===registration.configurationRoot)){await handle.abandon();throw new FixtureError('ownership-mismatch');}
+  if(!(identity.state==='running'&&identity.pid===registration.pid&&identity.executable===registration.executable&&identity.configurationRoot===registration.configurationRoot&&
+   (registration.argvSha256===undefined||identity.argvSha256===registration.argvSha256)&&
+   (registration.parentPid===undefined||identity.parentPid===registration.parentPid)&&
+   (registration.parentPids===undefined||registration.parentPids.filter(pid=>pid===identity.parentPid).length===1))){await handle.abandon();throw new FixtureError('ownership-mismatch');}
   this.handles.set(registration.id,handle);this.record({id:registration.id,kind:'process',generation:identity.generation});return identity;
  }
  async inspect(id:string,generation:string){const handle=this.handles.get(id);check(handle&&handle.identity.generation===generation);const current=Identity.parse(await handle!.inspect());check(['pid','generation','executable','argvSha256','configurationRoot'].every(key=>current[key as keyof RegisteredIdentity]===handle!.identity[key as keyof RegisteredIdentity]));return current;}
@@ -92,11 +100,22 @@ export class OwnedDescendants {
  has(id:string){return this.handles.has(id);}
  initial(id:string){const handle=this.handles.get(id);check(handle);return handle!.identity;}
 }
+/** Only an observed fixed-TERM predecessor may have a product-created
+ * successor. All maps here are private generation history, not lease authority. */
+export interface ServiceSuccession {
+ currentIds:Map<string,string>;
+ terminated:Set<string>;
+ pending:Map<string,{id:string;registration:string}>;
+ nextId():string;
+ parents():Promise<readonly {id:string;pid:number;generation:string}[]>;
+ verifyParents(parents:readonly {id:string;pid:number;generation:string}[]):Promise<void>;
+ argvSha256:string;
+}
 /** These are the product's two fixed service registration locations. Actor
  * workers, terminals and session harnesses have separate registration contracts;
  * this reader never represents their absence or discovers them by PID scans. */
 export async function readRegisteredHostServices(configurationRoot:string,
- fleetExecutable:string,nativeExecutable:string,descendants:OwnedDescendants,retained:Map<string,unknown>){
+ fleetExecutable:string,nativeExecutable:string,descendants:OwnedDescendants,retained:Map<string,unknown>,succession?:ServiceSuccession){
  const rows=[{path:'fleet-db/runtime.json',id:'registered-fleet-db',executable:fleetExecutable},
   {path:'agents-opencode/state/opencode/service.json',id:'registered-opencode-service',executable:nativeExecutable}];
  const observed:RegisteredIdentity[]=[];
@@ -105,14 +124,36 @@ export async function readRegisteredHostServices(configurationRoot:string,
   if(before===null)continue;
   const value=z.object({pid:z.number().int().positive(),url:z.string().min(1)}).passthrough().parse(before);
   const url=new URL(value.url);check(url.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(url.hostname)&&!url.username&&!url.password);
-  let identity:RegisteredIdentity;
-  if(retained.has(row.id)){
-    check(JSON.stringify(before)===JSON.stringify(retained.get(row.id)));
-    const initial=descendants.initial(row.id);check(initial.pid===value.pid);
-    identity=await descendants.inspect(row.id,initial.generation);
-  }else identity=await descendants.enroll({id:row.id,pid:value.pid,executable:row.executable,configurationRoot});
+  let identity:RegisteredIdentity,id=succession?.currentIds.get(row.id)??row.id;
+  let successor:{predecessor:string;parents:readonly {id:string;pid:number;generation:string}[]}|undefined;
+  if(retained.has(id)){
+    const initial=descendants.initial(id);
+    if(JSON.stringify(before)===JSON.stringify(retained.get(id))){
+      check(initial.pid===value.pid);identity=await descendants.inspect(id,initial.generation);
+    }else{
+      check(row.id==='registered-opencode-service'&&succession?.terminated.has(id)&&
+       (await descendants.inspect(id,initial.generation)).state==='exited');
+      const parents=await succession!.parents();check(parents.length>0&&parents.length<=2);
+      const predecessor=id,raw=JSON.stringify(before),pending=succession!.pending.get(predecessor);
+      check(!pending||pending.registration===raw);
+      const next=pending??{id:`${row.id}:successor-${succession!.nextId()}`,registration:raw};succession!.pending.set(predecessor,next);
+      // Capture before resolving parent association. The exact kernel identity
+      // chooses its one parent; never pick a parent from a PID/name listing.
+      identity=await descendants.enroll({id:next.id,pid:value.pid,executable:row.executable,configurationRoot,argvSha256:succession!.argvSha256,parentPids:parents.map(parent=>parent.pid)});
+      check(identity.generation!==initial.generation&&parents.filter(parent=>parent.pid===identity.parentPid).length===1);
+      await succession!.verifyParents(parents);
+      const after=await productRegistrationFile(configurationRoot,row.path);check(JSON.stringify(after)===raw);
+      const current=await descendants.inspect(next.id,identity.generation);check(current.state==='running'&&current.parentPid===identity.parentPid);
+      id=next.id;successor={predecessor,parents};
+    }
+  }else identity=await descendants.enroll({id,pid:value.pid,executable:row.executable,configurationRoot});
   const after=await productRegistrationFile(configurationRoot,row.path);
-  check(JSON.stringify(after)===JSON.stringify(before));retained.set(row.id,before);observed.push(identity);
+  check(JSON.stringify(after)===JSON.stringify(before));
+  if(successor){await succession!.verifyParents(successor.parents);const current=await descendants.inspect(id,identity.generation);
+    check(current.state==='running'&&current.parentPid===identity.parentPid);}
+  retained.set(id,before);succession?.currentIds.set(row.id,id);
+  if(successor){succession!.terminated.delete(successor.predecessor);succession!.pending.delete(successor.predecessor);}
+  observed.push(identity);
  }
  return observed;
 }

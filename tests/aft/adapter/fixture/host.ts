@@ -9,7 +9,7 @@ import { initializeCodex, type CodexProtocolProbe } from './codex-probe.js';
 import { prepareRenderer, type PreparedRenderer } from './renderer.js';
 import { fixtureRouting, fixtureOperationAuthority } from './routing.js';
 import type { FixtureAuthorityOwner } from '../authority.js';
-import {OwnedDescendants,createRegisteredProcessPort,readRegisteredHostServices,type RegisteredProcessPort} from './descendants.js';
+import {OwnedDescendants,createRegisteredProcessPort,readRegisteredHostServices,type RegisteredProcessPort,type ServiceSuccession} from './descendants.js';
 import { StartupBaselines, type BaselineTarget } from './baseline.js';
 import { HostWorkspaceRecords } from './workspace-records.js';
 import { seedOwnedRepository } from './repository.js';
@@ -46,6 +46,10 @@ export class HostFixtureDriver implements FixtureDriver {
   private readonly handles = new Map<string, OwnedProcess>();
   private descendants?:OwnedDescendants;
   private readonly retainedServiceRegistrations=new Map<string,unknown>();
+  private readonly serviceIds=new Map<string,string>();
+  private readonly terminatedServices=new Set<string>();
+  private readonly pendingSuccessors:ServiceSuccession['pending']=new Map();
+  private readonly parentHandles=new Map<string,{id:string;handle:OwnedProcess;generation:string}>();
   private workspaceRecords?:HostWorkspaceRecords;
   private workspaceOwner?:Readonly<FixtureAuthorityOwner>;
   private workspaceEvidence?:EvidenceStore;
@@ -183,14 +187,43 @@ export class HostFixtureDriver implements FixtureDriver {
   private async drainCleanups() {
     while (this.cleanups.length) { await this.cleanups[this.cleanups.length - 1]!(); this.cleanups.pop(); }
   }
-  async prepareObserve(signal:AbortSignal){
+  private async registeredParents(signal:AbortSignal){
+    signal.throwIfAborted();const identities=[];
+    for(const name of ['serve','daemon']){const handle=this.handles.get(name);if(!handle||handle.state()!=='running')continue;
+      let recorded=this.parentHandles.get(name);
+      if(!recorded||recorded.handle!==handle){
+        const id=`registered-parent-${name}-${this.uuid()}`;
+        await this.descendants!.enroll({id,pid:handle.pid,executable:this.config.loomBinary,configurationRoot:this.configurationRoot,
+          argvSha256:hash(Buffer.from([this.config.loomBinary,...handle.argv].join('\0')+'\0'))});
+        recorded={id,handle,generation:handle.generation};this.parentHandles.set(name,recorded);
+      }
+      this.requireCurrentHandle(name,recorded.handle);check(recorded.handle.state()==='running'&&recorded.handle.generation===recorded.generation);
+      const initial=this.descendants!.initial(recorded.id),actual=await this.descendants!.inspect(recorded.id,initial.generation);
+      check(actual.state==='running'&&actual.pid===handle.pid);identities.push({id:recorded.id,pid:actual.pid,generation:actual.generation});
+    }
+    return identities;
+  }
+  private async verifyRegisteredParents(parents:Parameters<ServiceSuccession['verifyParents']>[0],signal:AbortSignal){
+    signal.throwIfAborted();for(const parent of parents){
+      const matches=[...this.parentHandles.entries()].filter(([,value])=>value.id===parent.id);check(matches.length===1);
+      const [name,recorded]=matches[0]!;this.requireCurrentHandle(name,recorded.handle);check(recorded.handle.state()==='running'&&recorded.handle.generation===recorded.generation);
+      const actual=await this.descendants!.inspect(parent.id,parent.generation);
+      check(actual.state==='running'&&actual.pid===parent.pid);this.requireCurrentHandle(name,recorded.handle);check(recorded.handle.state()==='running'&&recorded.handle.generation===recorded.generation);
+    }
+  }
+  private async observeRegisteredServices(signal:AbortSignal){
     signal.throwIfAborted();if(this.descendants&&!this.runtimeRemoved){
       const root=this.configurationRoot,stamp=this.stamps.get(root),before=await this.files.lstat(root);
       check(stamp&&!before.isSymbolicLink()&&before.isDirectory()&&await this.files.realpath(root)===root&&stamp.dev===before.dev&&stamp.ino===before.ino);
-      await readRegisteredHostServices(root,this.config.fleetBinary,this.profile==='legacy-real-opencode'?this.config.realBinaries.opencode!.executable:this.config.pinnedOpenCodeBinary,this.descendants,this.retainedServiceRegistrations);
+      const executable=this.profile==='legacy-real-opencode'?this.config.realBinaries.opencode!.executable:this.config.pinnedOpenCodeBinary;
+      await readRegisteredHostServices(root,this.config.fleetBinary,executable,this.descendants,this.retainedServiceRegistrations,{
+        currentIds:this.serviceIds,terminated:this.terminatedServices,pending:this.pendingSuccessors,nextId:()=>this.uuid(),
+        parents:()=>this.registeredParents(signal),verifyParents:parents=>this.verifyRegisteredParents(parents,signal),
+        argvSha256:hash(Buffer.from([executable,'serve','--service'].join('\0')+'\0'))});
       const after=await this.files.lstat(root);check(!after.isSymbolicLink()&&before.dev===after.dev&&before.ino===after.ino);
     }
   }
+  async prepareObserve(signal:AbortSignal){return this.withServiceOperation('registered-services',()=>this.observeRegisteredServices(signal));}
   async prepareCleanup(signal:AbortSignal){await this.drainCleanups();await this.prepareObserve(signal);}
   async inspectOwnedProcess(id: string, generation: string, signal: AbortSignal) {
     signal.throwIfAborted();if(this.descendants?.has(id)){const identity=await this.descendants.inspect(id,generation);return {id,generation:identity.generation,pid:identity.pid,state:identity.state};}
@@ -233,26 +266,29 @@ export class HostFixtureDriver implements FixtureDriver {
     return {beforeGeneration:generation,afterGeneration:null,affectedIds:[id],complete:true as const};
   }
   async stopOwnedProcess(id: string, generation: string, signal: AbortSignal) {
-    return this.withServiceOperation(id,()=>this.stopCapturedProcess(id,generation,signal));
+    const stop=()=>this.stopCapturedProcess(id,generation,signal);
+    return this.withServiceOperation(id,()=>this.descendants?.has(id)||id==='serve'||id==='daemon'?this.withServiceOperation('registered-services',stop):stop());
   }
   async terminateRegisteredNativeService(id:string,generation:string,signal:AbortSignal){
-    check(id==='registered-opencode-service'&&this.descendants?.has(id),'unsupported-capability');
-    return this.withServiceOperation(id,async()=>{
-      signal.throwIfAborted();await this.prepareObserve(signal);check((await this.descendants!.inspect(id,generation)).state==='running');signal.throwIfAborted();
+    check(id===this.serviceIds.get('registered-opencode-service')&&this.descendants?.has(id),'unsupported-capability');
+    return this.withServiceOperation('registered-services',async()=>{
+      signal.throwIfAborted();await this.observeRegisteredServices(signal);check(id===this.serviceIds.get('registered-opencode-service')&&(await this.descendants!.inspect(id,generation)).state==='running');signal.throwIfAborted();
       await this.descendants!.terminateGracefully(id,generation);
       check((await this.descendants!.inspect(id,generation)).state==='exited');
+      this.terminatedServices.add(id);
       return {beforeGeneration:generation,afterGeneration:null,affectedIds:[id],complete:true as const};
     });
   }
   async restartOwnedProcess(id: string, generation: string, signal: AbortSignal) {
-    const result=await this.withServiceOperation(id,async()=>{
+    const restart=async()=>{
       const saved=this.commands.get(id);check(saved&&this.record,'unsupported-capability');
       const handle=this.requireHandle(id,generation);
       await this.stopCapturedProcess(id,generation,signal);this.requireCurrentHandle(id,handle);
       await this.start(id,saved!.command,saved!.readiness,this.record!,signal,false);
       const after=this.handles.get(id)!.generation;check(after!==generation,'identity-mismatch');
       return {beforeGeneration:generation,afterGeneration:after,affectedIds:[id],complete:true as const};
-    });
+    };
+    const result=await this.withServiceOperation(id,()=>id==='serve'||id==='daemon'?this.withServiceOperation('registered-services',restart):restart());
     if(id==='fake-model'||id==='fake-github')await this.baselines.captureSuccessfulStart(id,result.afterGeneration,signal);
     return result;
   }
