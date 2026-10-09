@@ -23,11 +23,12 @@ export const WorkspaceAgentFact = z.object({kind:z.literal('agent-enrolled'),ide
   revision:z.number().int().nonnegative()}).strict();
 export type WorkspaceAgentFact=z.infer<typeof WorkspaceAgentFact>;
 export const LegacyWorkspaceAgentFact = z.object({kind:z.literal('legacy-agent-enrolled'),identityKind:z.literal('legacy-agent-name'),
-  leaseId:Id,runId:Id,suiteId:Id,scope:z.enum(['suite','case']),caseId:Id,profile:Id,workspaceId:Id,name:Id,repo:Id,commonDir:Id,
+  leaseId:Id,runId:Id,suiteId:Id,scope:z.enum(['suite','case']),caseId:Id,profile:Id,workspaceId:Id,name:Id,repo:Id.nullable(),commonDir:Id.nullable(),
   storeId:Id,storeGeneration:Id,parentName:Id.nullable(),createdAt:Id,updatedAt:Id,
-  assignedRepos:z.array(Id).max(32).optional(),assignedRepoGroups:z.array(Id).max(32).optional()}).strict();
+  assignedRepos:z.array(Id).max(32).optional(),assignedRepoGroups:z.array(Id).max(32).optional()}).strict()
+  .refine(fact=>(fact.repo===null)===(fact.commonDir===null),'Legacy physical source must be an explicit selected or unselected pair');
 export type LegacyWorkspaceAgentFact=z.infer<typeof LegacyWorkspaceAgentFact>;
-const ActorFact=z.discriminatedUnion('kind',[WorkspaceAgentFact,LegacyWorkspaceAgentFact]);
+const ActorFact=z.union([WorkspaceAgentFact,LegacyWorkspaceAgentFact]);
 const RecordSchema = z.object({...Fields,creationReceipt:ArtifactRefSchema,enrollmentReceipts:z.array(ArtifactRefSchema).max(1000).default([])}).strict();
 export type OwnedWorkspaceRecord = Readonly<Omit<z.infer<typeof RecordSchema>,'agentIds'|'enrollmentReceipts'|'repositories'|'agentSources'> & {
   readonly agentIds:readonly string[];readonly enrollmentReceipts:readonly z.infer<typeof ArtifactRefSchema>[];
@@ -61,8 +62,10 @@ function factSources(record:Topology,fact:WorkspaceAgentFact|LegacyWorkspaceAgen
     return undefined;
   }
   const observed=record.repositories.filter(repository=>repository.repo===fact.repo&&repository.commonDir===fact.commonDir);
-  requireFact(observed.length===1,'ownership-mismatch','Actor physical source has no exact owned repository');
-  if(fact.kind==='agent-enrolled')return [observed[0]!.repoName];
+  if(fact.kind==='agent-enrolled') {
+    requireFact(observed.length===1,'ownership-mismatch','Actor physical source has no exact owned repository');
+    return [observed[0]!.repoName];
+  }
   requireFact(fact.assignedRepos!==undefined&&fact.assignedRepoGroups!==undefined&&new Set(fact.assignedRepos).size===fact.assignedRepos.length&&
     new Set(fact.assignedRepoGroups).size===fact.assignedRepoGroups.length,
     'incomplete-pages','Actual legacy repository assignments are missing or duplicated');
@@ -71,8 +74,12 @@ function factSources(record:Topology,fact:WorkspaceAgentFact|LegacyWorkspaceAgen
   const names=fact.assignedRepos.length||fact.assignedRepoGroups.length
     ? [...new Set([...fact.assignedRepos,...record.repositories.filter(repository=>repository.groups.some(group=>fact.assignedRepoGroups!.includes(group))).map(repository=>repository.repoName)])]
     : record.repositories.map(repository=>repository.repoName);
-  requireFact(names.every(name=>record.repositories!.some(repository=>repository.repoName===name))&&names.includes(observed[0]!.repoName),
+  requireFact(names.length>0&&names.every(name=>record.repositories!.some(repository=>repository.repoName===name)),
     'ownership-mismatch','Legacy actor targets a foreign repository or source');
+  // Membership does not select a physical worktree. The topology anchor belongs
+  // to the workspace, and cannot stand in for an actor's observed source.
+  if(fact.repo!==null)requireFact(observed.length===1&&names.includes(observed[0]!.repoName),
+    'ownership-mismatch','Legacy selected physical source is not an assigned owned repository');
   return [...names];
 }
 /** Trusted finite fixture setup calls this only after actual owned creation.
