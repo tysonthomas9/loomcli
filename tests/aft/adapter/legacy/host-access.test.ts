@@ -67,6 +67,8 @@ async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClau
   const worktrees = new Map<string, string>();
   let seedHead = revision.commit, seedExit = 0;
   const handles: OwnedProcess[] = [];
+  const startedCommands = new Map<number, HostCommand>();
+  const parentTokenOverrides = new Map<number, string | undefined>();
   const processes: HostProcesses = {
     async run(command) {
       if (command.argv[0] === 'init') { await fs.mkdir(path.join(command.cwd, '.git')); return ''; }
@@ -87,6 +89,7 @@ async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClau
           }
         }, async stop() { alive = false; stops.push(command.argv[0]!); } };
       handles.push(handle);
+      startedCommands.set(handle.pid, structuredClone(command));
       return handle;
     },
     launch(command, stdin, generation) {
@@ -148,14 +151,21 @@ async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClau
     await fs.rm(filename, options);
   } };
   const registeredPort: RegisteredProcessPort = { async capture(pid: number) {
-    assert.equal(pid, 999); let alive = true;
-    const identity = { pid, generation: 'injected-captured-store', executable: config.fleetBinary, argvSha256: 'e'.repeat(64),
-      parentPid: handles.find(handle => handle.argv[0] === 'serve')!.pid, configurationRoot: driver.configurationRoot, state: 'running' as const };
-    return { identity, async inspect() { return { ...identity, state: alive ? 'running' as const : 'exited' as const }; },
-      async stop() { alive = false; }, async abandon() { assert.fail('Owned store must stay enrolled'); } };
+    const parent = handles.find(handle => handle.pid === pid), command = startedCommands.get(pid);
+    assert.ok(pid === 999 || parent && command); let alive = true;
+    const identity = { pid, generation: pid === 999 ? 'injected-captured-store' : `injected-kernel-${parent!.generation}`,
+      executable: pid === 999 ? config.fleetBinary : command!.executable,
+      argvSha256: pid === 999 ? 'e'.repeat(64) : hash([command!.executable, ...command!.argv].join('\0') + '\0'),
+      parentPid: handles.find(handle => handle.argv[0] === 'serve')!.pid,
+      configurationRoot: pid === 999 ? driver.configurationRoot : command!.env.LOOM_CONFIG_DIR!,
+      ...(pid === 999 ? {} : { fixtureRunId: command!.env.RUN_ID }), state: 'running' as const };
+    return { identity, async inspect() { return { ...identity,
+      ...(parentTokenOverrides.has(pid) ? { fixtureRunId: parentTokenOverrides.get(pid) } : {}),
+      state: alive && (!parent || parent.state() === 'running') ? 'running' as const : 'exited' as const }; },
+      async stop() { alive = false; if (parent) await parent.stop(); }, async abandon() { assert.fail('Owned captured process must stay enrolled'); } };
   } };
   const driver: HostFixtureDriver = new HostFixtureDriver(config, processes, files, http, () => `injected-${++count}`, async () => ({ port: port++, async release() {} }), undefined,
-    registeredPort);
+    registeredPort, () => 1700000000123);
   const adapterRoot = fileURLToPath(new URL('..', import.meta.url));
   const pin = calculateImplementationPin(adapterRoot, ['fixture/providers.ts'], 'fixture/providers.ts', 'createFixtureProviders');
   const legacyPin = calculateImplementationPin(adapterRoot, ['legacy/providers.ts','legacy/host-access.ts','legacy/cli-plan.ts'], 'legacy/providers.ts', 'createLegacyProviders');
@@ -176,6 +186,8 @@ async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClau
       JSON.stringify({ availability: acquired.availability, error: acquired.error, evidenceClass: 'deterministic injected setup' }) + '\n', { flag: 'wx', mode: 0o600 });
   }
   assert.equal(acquired.availability, 'observed', JSON.stringify(acquired.error));
+  assert.equal((acquired.data as { fixtureRunId: string }).fixtureRunId, '1700000000');
+  assert.notEqual((acquired.data as { fixtureRunId: string }).fixtureRunId, context.runId);
   const leaseId = (acquired.data as { lease: { id: string } }).lease.id;
   const fixture = getRegisteredResource(context, `${fixturesKey}:${leaseId}`, leaseId) as OwnedFixture;
   if (options.seedWorktree) for (const workspaceId of ['E2E-WS', 'E2E-WS-2']) {
@@ -183,12 +195,28 @@ async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClau
     await fs.mkdir(worktree, { recursive: true }); worktrees.set(workspaceId, worktree);
   }
   return { root, driver, fixture, evidenceStore: getFixtureEvidenceStore(context, leaseId), leaseId, invoke, launches, stops, factories: () => factories,
+    changeParentToken(value: string | undefined) {
+      parentTokenOverrides.set(driver.processesById.get('serve')!.pid, value);
+    },
     worktree: (workspaceId = 'E2E-WS') => worktrees.get(workspaceId)!, seedFailure: () => { seedExit = 17; },
     fixtureRequests, queued: () => queued, malformedReset: (value: boolean) => { malformedReset = value; },
     badAgents: () => { badAgents = true; }, badRoles: () => { badRoles = true; }, failLaunch: (kind: 'proven' | 'uncertain' = 'proven') => { failLaunch = kind; },
     processFailure: () => { exitCode = 17; stderr = 'exact process diagnostic'; }, restored: () => restoredBytes,
     async cleanup() { await fs.rm(root, { recursive: true, force: true }); } };
 }
+
+test('canonical host binding refuses changed or missing captured serve RUN_ID before CLI effects', async t => {
+  const r = await setup(t);
+  for (const token of ['foreign-token', undefined]) {
+    r.changeParentToken(token);
+    await assert.rejects(r.driver.runtimeIdentity(new AbortController().signal), /ownership-mismatch|identity-mismatch/);
+    const result = await r.invoke('loom.cli.role', { leaseId: r.leaseId, workspaceId: 'E2E-WS', operation: 'list', name: null });
+    assert.equal(result.availability, 'error'); assert.equal(r.factories(), 0); assert.equal(r.launches.length, 0);
+  }
+  r.changeParentToken('1700000000');
+  assert.deepEqual(await r.driver.runtimeIdentity(new AbortController().signal), { fixtureRunId: '1700000000' });
+  assert.equal((await r.invoke('loom.fixture.release', { leaseId: r.leaseId })).availability, 'observed');
+});
 
 test('production host binding preserves managed workspace and source/config identities for original CLI actors', async t => {
   const r = await setup(t);
