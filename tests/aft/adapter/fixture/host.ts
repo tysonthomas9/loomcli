@@ -42,6 +42,7 @@ export class HostFixtureDriver implements FixtureDriver {
   private root = '';
   private profile = '';
   private leaseId = '';
+  private provisionedRunId='';
   private readonly stamps = new Map<string, { dev: number; ino: number }>();
   private readonly handles = new Map<string, OwnedProcess>();
   private descendants?:OwnedDescendants;
@@ -81,7 +82,8 @@ export class HostFixtureDriver implements FixtureDriver {
   constructor(config: HostConfig, private readonly processes: HostProcesses = nodeProcesses,
     private readonly files: typeof fs = fs, private readonly http: Http = readHttp,
     private readonly uuid: () => string = randomUUID, private readonly reserve: () => Promise<PortReservation> = reservePort,
-    private readonly codexProtocol: CodexProtocolProbe = initializeCodex,private readonly registeredPort?:RegisteredProcessPort) { this.config = structuredClone(config); }
+    private readonly codexProtocol: CodexProtocolProbe = initializeCodex,private readonly registeredPort?:RegisteredProcessPort,
+    private readonly clock:()=>number=Date.now) { this.config = structuredClone(config); }
   get runtimeRoot() { return this.root; }
   get workspaceRoot() { return path.join(this.root, 'runtime', 'e2e-workspace'); }
   get processesById(): ReadonlyMap<string, OwnedProcess> { return this.handles; }
@@ -89,6 +91,15 @@ export class HostFixtureDriver implements FixtureDriver {
   get cliRegistration() { return { binary: this.config.loomBinary, cwd: this.workspaceRoot, env: this.env() }; }
   get executionRouting() { check(this.plan); return fixtureRouting(this.plan!); }
   createOperationAuthority(owner:FixtureAuthorityOwner) {check(this.plan);return fixtureOperationAuthority(owner,this.plan!);}
+  async runtimeIdentity(signal:AbortSignal){
+    return this.withServiceOperation('registered-services',async()=>{
+      const parents=await this.registeredParents(signal),serve=this.parentHandles.get('serve');check(serve,'unsupported-capability');
+      const parent=parents.find(value=>value.id===serve!.id);check(parent,'identity-mismatch');
+      const actual=await this.descendants!.inspect(parent!.id,parent!.generation);
+      check(actual.fixtureRunId===this.provisionedRunId&&this.provisionedRunId.length>0,'identity-mismatch');
+      await this.verifyRegisteredParents(parents,signal);return {fixtureRunId:this.provisionedRunId};
+    });
+  }
   async ownedWorkspaceRoster(owner:FixtureAuthorityOwner,store:EvidenceStore,signal:AbortSignal){
     check(owner.leaseId===this.leaseId&&owner.profile===this.profile&&this.workspaceRecords,'unsupported-capability');
     check(!this.workspaceOwner||JSON.stringify(this.workspaceOwner)===JSON.stringify(fixtureOwnerIdentity(owner)));
@@ -188,7 +199,7 @@ export class HostFixtureDriver implements FixtureDriver {
     while (this.cleanups.length) { await this.cleanups[this.cleanups.length - 1]!(); this.cleanups.pop(); }
   }
   private async registeredParents(signal:AbortSignal){
-    signal.throwIfAborted();const identities=[];
+    signal.throwIfAborted();check(this.descendants,'unsupported-capability');const identities=[];
     for(const name of ['serve','daemon']){const handle=this.handles.get(name);if(!handle||handle.state()!=='running')continue;
       let recorded=this.parentHandles.get(name);
       if(!recorded||recorded.handle!==handle){
@@ -314,7 +325,7 @@ export class HostFixtureDriver implements FixtureDriver {
     const backendConfig = c.realBinaries[this.backend as keyof HostConfig['realBinaries']];
     const real = this.profile !== 'legacy-deterministic';
     const farm = real ? `stubs-real-${this.backend}` : 'stubs';
-    return { HOME: real ? c.hostHome : path.join(runtime, 'home'),
+    return { RUN_ID:this.provisionedRunId,HOME: real ? c.hostHome : path.join(runtime, 'home'),
       PATH: `${path.join(runtime, 'bin')}:${path.join(c.loom.source.root, 'e2e', farm)}:${c.toolPath}`,
       LOOM_CONFIG_DIR: configRoot, LOOM_DISABLE_H2C: '1', LOOM_ISSUE_BACKEND: 'fleetdb', LOOM_FLEET_DB_ACTOR: 'loom-e2e',
       FLEET_DB_BIN: c.fleetBinary, FLEET_RATE_LIMIT_ENABLED: 'false', FLEET_REDIS_POOL_SIZE: '200', FLEET_REDIS_MIN_IDLE_CONNS: '10',
@@ -344,6 +355,9 @@ export class HostFixtureDriver implements FixtureDriver {
   async preflight(plan: FixturePlan, signal: AbortSignal): Promise<void> {
     check(legacyProfiles.includes(plan.profile as typeof legacyProfiles[number]), 'unsupported-capability');
     this.plan = structuredClone(plan); this.profile = plan.profile;
+    check(this.config.fixtureRunId===undefined||/^[A-Za-z0-9_-]{1,128}$/.test(this.config.fixtureRunId),'identity-mismatch');
+    const timestamp=this.clock();check(Number.isSafeInteger(timestamp)&&timestamp>=0,'identity-mismatch');
+    this.provisionedRunId=this.config.fixtureRunId??String(Math.floor(timestamp/1000));
     fixtureRouting(plan);
     this.backend = plan.profile.replace('legacy-real-', '');
     check(this.profile === 'legacy-deterministic' ? plan.model === 'aft/m' : /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(plan.model) && !plan.model.startsWith('aft/'), 'identity-mismatch');
