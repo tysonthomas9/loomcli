@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { z } from 'zod';
 import { fileURLToPath } from 'node:url';
-import { readdir, mkdtemp, realpath, rm, readFile } from 'node:fs/promises';
+import { readdir, mkdtemp, realpath, rm, readFile, writeFile, symlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createEvidenceStore, putEvidenceStore } from './evidence.js';
@@ -180,6 +180,41 @@ test('failed cleanup retains the exact owned fixture for a final retry after exp
   assert.equal(attempts, 2);
 });
 
+test('native registration captures only validated owned facts and rejects changed or foreign bootstrap evidence', async t => {
+  const h = await setup(t); const agent = h.fixture.agents.get('agt_owned')!; const row = agent.row;
+  let registrations = 0, changed = false;
+  const current = {agent_id:row.agent_id,harness:'opencode' as const,native_root:'',native_id:'ses_owned'};
+  let refs = [current,{...current,native_id:'ses_prior'}];
+  agent.native = {pinnedExecutable:'/owned/opencode',
+    registration:async()=>{registrations++; return {url:'http://127.0.0.1:4123/',password:'private-password',pid:42,
+      generation:changed && registrations > 1 ? 'replacement' : 'generation',endpointId:'endpoint'};},
+    process:async()=>({pid:42,generation:'generation',executable:'/owned/opencode',argv:['/owned/opencode','serve','--service']}),
+    agent:async()=>row,sessions:async()=>refs,read:async()=>({status:200,body:{pid:42}})};
+  const request = {agent:input.agent,maxRegistrations:10};
+  await assert.rejects(h.invoke('loom.native.registration',{...request,expectedGeneration:'guessed'}));
+  assert.equal((await h.invoke('loom.native.registration',{...request,agent:{...input.agent,fixtureLeaseId:'foreign'}})).availability,'error');
+  assert.equal(registrations,0);
+  const captured = await h.invoke('loom.native.registration',request);
+  assert.equal(captured.availability,'observed');
+  const facts = NativeOutput.options[6].parse(captured.data);
+  assert.equal(facts.serviceGeneration,'generation'); assert.equal(facts.servicePid,42); assert.equal(facts.registeredEndpointId,'endpoint');
+  assert.deepEqual(facts.records.map(ref=>ref.nativeSessionId),['ses_owned','ses_prior']);
+  assert.ok(!JSON.stringify(captured).includes('private-password')); assert.ok(!JSON.stringify(captured).includes('127.0.0.1'));
+  for (const invalid of [[current,current],[{...current,native_root:'foreign'}],[{...current,agent_id:'foreign'}]]) {
+    refs=invalid; const rejected=await h.invoke('loom.native.registration',request);
+    assert.equal(rejected.availability,'error'); assert.equal(rejected.data,undefined);
+  }
+  refs=[current]; changed=true; registrations=0;
+  assert.equal((await h.invoke('loom.native.registration',request)).availability,'error');
+  changed=false; agent.native.agent=async()=>({...row,repo:'/foreign/store'});
+  assert.equal((await h.invoke('loom.native.registration',request)).availability,'error');
+  agent.native.agent=async()=>row;
+  agent.native.process=async()=>({pid:42,generation:'replacement',executable:'/owned/opencode',argv:['/owned/opencode','serve','--service']});
+  assert.equal((await h.invoke('loom.native.observe',{agent:input.agent,view:'registrations',nativeSessionId:facts.currentNativeSessionId,
+    nativeRoot:facts.currentNativeRoot,expectedGeneration:facts.serviceGeneration,expectedServicePid:facts.servicePid,
+    expectedEndpointId:facts.registeredEndpointId,maxMessages:1,maxRegistrations:10})).availability,'error');
+});
+
 test('revoked canonical authority denies observations while exact owned cleanup remains available', async t => {
   const harness = await setup(t); revokeCapabilityContext(harness.context);
   const unavailable = await harness.invoke('loom.api.savedEvents', input);
@@ -323,4 +358,44 @@ test('later UI native child binds through actual scoped identity facts without l
   assert.equal(resolves,1);
   const observed=await h.invoke('loom.agent.observe',{agent:{fixtureLeaseId:'lease',workspaceId:'workspace',agentId:'agt_child'}});
   assert.equal(observed.availability,'observed');assert.equal(observed.provenance.identity.parentAgentId,'agt_owned');
+});
+
+
+test('fixed temporary namespace reads preserve exact marker paths and cannot turn unavailable stat into absence', async t => {
+  const {ContainerObservationRequest,containerFilesystemObserver,readContainerObservation}=await import('./container-observations.js');
+  const {observeFilesystem}=await import('./filesystem.js');
+  const h=await setup(t); const directory=await realpath(await mkdtemp(path.join(os.tmpdir(),'loom-temp-reader-')));
+  t.after(()=>rm(directory,{recursive:true}));
+  // The fake namespace is backed by exact local test-owned files. Host /tmp is never read.
+  const originalRun='original-provisioned-run'; const marker='cov-controls-stop-effect-'+originalRun;
+  assert.notEqual(originalRun,h.context.runId);
+  const stamp={path:'/tmp',device:12,inode:34}; let changed=false, unavailable=false, calls=0;
+  h.fixture.roots.set('fixture-temporary',{...stamp,remoteObserve:containerFilesystemObserver(async request=>{
+    calls++; assert.equal(request.operation,'filesystem-observe');
+    if(request.operation!=='filesystem-observe')throw new Error('Wrong closed request');
+    assert.deepEqual(request.root,{kind:'fixture-temporary'}); assert.deepEqual(request.relativePaths,[marker]);
+    if(unavailable)throw new Error('Injected unavailable stat');
+    const data=await observeFilesystem({leaseId:'lease',rootId:'fake-owned-namespace',relativePaths:request.relativePaths,
+      view:request.view,maxBytes:request.maxBytes,maxEntries:request.maxEntries},directory);
+    return {root:{...stamp,inode:changed?35:34},data};
+  },{kind:'fixture-temporary'},stamp)});
+  const request={leaseId:'lease',rootId:'fixture-temporary',relativePaths:[marker],view:'presence',maxBytes:100,maxEntries:1};
+  const missing=await h.invoke('loom.filesystem.observe',request);
+  assert.equal(missing.availability,'observed'); assert.equal(missing.provenance.identity.fixtureLeaseId,'lease');
+  assert.equal(z.object({entries:z.array(z.object({exists:z.boolean()}))}).parse(missing.data).entries[0]!.exists,false);
+  await writeFile(path.join(directory,marker),'actual effect');
+  assert.equal(z.object({entries:z.array(z.object({exists:z.boolean()}))}).parse((await h.invoke('loom.filesystem.observe',request)).data).entries[0]!.exists,true);
+  for(const invalid of ['unavailable','changed'] as const) {
+    unavailable=invalid==='unavailable'; changed=invalid==='changed';
+    const rejected=await h.invoke('loom.filesystem.observe',request); assert.equal(rejected.availability,'error'); assert.equal(rejected.data,undefined);
+  }
+  unavailable=false;changed=false; await rm(path.join(directory,marker)); await symlink('missing-target',path.join(directory,marker));
+  assert.equal((await h.invoke('loom.filesystem.observe',request)).availability,'error');
+  const before=calls;
+  await assert.rejects(h.invoke('loom.filesystem.observe',{...request,relativePaths:['../foreign']})); assert.equal(calls,before);
+  assert.throws(()=>ContainerObservationRequest.parse({operation:'filesystem-root',root:{kind:'fixture-temporary',path:'/host/tmp'}}));
+  const never=async():Promise<never>=>{throw new Error('Native access must not run');};
+  await assert.rejects(readContainerObservation({operation:'filesystem-root',root:{kind:'fixture-temporary'}},
+    {pinnedExecutable:'/owned/opencode',agent:never,sessions:never,registration:never,process:never,read:never},
+    {workspaceId:'workspace',repo:'/owned/repo',worktreeParent:'/owned/worktrees',commonDir:'/owned/repo/.git'}));
 });

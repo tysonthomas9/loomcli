@@ -102,9 +102,11 @@ else if (command[0] === 'network') console.log(JSON.stringify({requests:[]}));
   providers.push(acquire, foreignRun); for (const provider of providers) registry.register(provider);
   await writeFile(path.join(root,'aft.policy.json'),JSON.stringify({requiredProfile:'declarative',registry:providers.map(provider =>
     ({id:provider.id,version:provider.version,implementationSha256:provider.implementationSha256}))}));
-  const native = (agent: unknown, probe: unknown) => ({capability:{request:{id:'loom.native.observe',version:1,input:{
+  const native = (agent: unknown, probe: unknown, registration?: string) => ({capability:{request:{id:'loom.native.observe',version:1,input:{
     agent,view:literal('tools'),nativeSessionId:literal('ses_owned'),
-    nativeRoot:literal(''),expectedGeneration:literal('generation'),maxMessages:literal(200),probeHandle:probe}},as:'tools'}});
+    nativeRoot:literal(''),expectedGeneration:registration ? ref(registration,'/serviceGeneration') : literal('generation'),
+    ...(registration ? {expectedServicePid:ref(registration,'/servicePid'),expectedEndpointId:ref(registration,'/registeredEndpointId')} : {}),
+    maxMessages:literal(200),probeHandle:probe}},as:'tools'}});
   const positive = (name: string, outputOccurrences: number) => ({name,steps:[
     {bind:{as:'sentinel',value:{op:'concat',args:[literal('ghp_AFTONLY'),ref('runToken'),literal(suffix)]}}},
     {replace:{locator:{selector:'#editor'},value:ref('sentinel')}}, native(ref('agent'),ref('probe')),
@@ -122,6 +124,11 @@ else if (command[0] === 'network') console.log(JSON.stringify({requests:[]}));
         {assert:{op:'eq',args:[ref('observedAgent','/agentId'),literal('agt_bound')]}},
         {assert:{op:'eq',args:[ref('boundAgent','/agentRef/fixtureLeaseId'),ref('lease')]}},
       ]},
+      {name:'native registration chain',steps:[
+        {capability:{request:{id:'loom.native.registration',version:1,input:{agent:ref('agent'),maxRegistrations:literal(10)}},as:'registered'}},
+        native(ref('agent'),ref('probe'),'registered'),
+        {assert:{op:'eq',args:[ref('tools','/serviceGeneration'),ref('registered','/serviceGeneration')]}},
+      ]},
       {name:'missing reference projection',steps:[{capability:{request:{id:'loom.agent.observe',version:1,input:{agent:ref('agent','/agentRef')}},as:'missing'}}]},
       {name:'foreign reference identity',steps:[{capability:{request:{id:'loom.agent.observe',version:1,input:{agent:literal({fixtureLeaseId:'lease-A',workspaceId:'foreign',agentId:'agt_bound'})}},as:'foreign'}}]},
       {name:'unexported reference scope',steps:[{capability:{request:{id:'loom.agent.bind',version:1,input:{leaseId:ref('otherLease'),workspaceId:literal('workspace'),agentId:literal('agt_bound')}},as:'unowned'}}]},
@@ -133,11 +140,11 @@ else if (command[0] === 'network') console.log(JSON.stringify({requests:[]}));
     screenshots:false,retries:0,stepTimeoutMs:500,pollIntervalMs:1,budgetWarn:0,budgets:{},reportDir:path.join(root,'reports'),a11y:false,
     a11yBaselines:path.join(root,'baselines'),a11yImpact:'serious',testidAttribute:'data-testid'};
   const result = await runFiles([suiteFile], options);
-  for (const name of ['first','second','bind reference chain']) assert.equal(result.tests.find(item=>item.name===name)?.status,'passed',name);
+  for (const name of ['first','second','bind reference chain','native registration chain']) assert.equal(result.tests.find(item=>item.name===name)?.status,'passed',name);
   for (const name of ['independent wrong expectation','cross fixture probe','data grants no authority','cross run',
     'missing reference projection','foreign reference identity','unexported reference scope'])
     assert.equal(result.tests.find(item=>item.name===name)?.status,'failed',name);
-  assert.deepEqual(nativeInputs,[expectedToken,expectedToken,expectedToken]);
+  assert.deepEqual(nativeInputs,[expectedToken,expectedToken,expectedToken,expectedToken]);
   const calls = (await readFile(commands,'utf8')).trim().split('\n').map(line=>JSON.parse(line) as string[]);
   assert.deepEqual(calls.filter(call=>call.includes('inserttext')).map(call=>call.at(-1)),[expectedToken,expectedToken,expectedToken]);
   assert.equal(agentReads,2); assert.equal(cleanup,2); assert.equal(owners.length,1);

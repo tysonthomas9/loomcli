@@ -61,6 +61,15 @@ them. Mixed deterministic and external task routes require separate compositions
 Backend and operation permissions are checked again against the owned fixture
 before transport creation. YAML cannot choose the execution class or permissions.
 
+`loom.native.registration` captures safe service generation, PID, endpoint ID and
+the complete owned native registration list. Bind those facts and pass them as
+the expected identity to later `loom.native.observe` calls. A restarted or
+replaced service fails the comparison; the adapter never silently rebinds it.
+The `fixture-temporary` filesystem selector is available only when the fixture
+attests `/tmp` inside its exact owned container. It has no host fallback. Use the
+original provisioned run token for relative marker names; the canonical engine
+run ID may differ. Unreadable roots or failed reads cannot prove marker absence.
+
 Saved-event and native tool observations report sanitization paths explicitly.
 An omitted credential field differs from a source field that was absent; replaced
 text differs from text already redacted by the product. Only the code-owned,
