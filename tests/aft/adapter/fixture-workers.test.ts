@@ -7,9 +7,9 @@ import { fileURLToPath } from 'node:url';
 import { CapabilityRegistry, createCapabilityContext, calculateImplementationPin, revokeCapabilityContext } from '@tysonthomas9/aft/capabilities';
 import { createFixtureOperationAuthority } from './authority.js';
 import { createEvidenceStore, putEvidenceStore } from './evidence.js';
-import { defineOperation } from './operation.js';
+import { createCoreProviders } from './index.js';
 import { putFixture, getFixtureAuthority, getFixture, type OwnedFixture } from './ownership.js';
-import { FixtureWorkersId, FixtureWorkersEffects, FixtureWorkersInput, FixtureWorkersOutput, authorizeFixtureWorkers } from './fixture-workers.js';
+import { FixtureWorkersId, FixtureWorkersEffects, FixtureWorkersOutput } from './fixture-workers.js';
 
 async function setup(t: { after(fn: () => Promise<void>): void }, missingStart = false, replacedDuringVerification = false, changedGrant = false) {
   const root = fileURLToPath(new URL('.', import.meta.url));
@@ -18,17 +18,7 @@ async function setup(t: { after(fn: () => Promise<void>): void }, missingStart =
   const registry = new CapabilityRegistry(); let verifies = 0; let factories = 0;
   // Producer is an explicit unit double. This exercises canonical registry and
   // resource authority, not a Host worker read, API stop or process proof.
-  registry.register(defineOperation({ id: FixtureWorkersId, implementation: pin, implementationSha256: pin.sha256,
-    inputSchema: FixtureWorkersInput, outputSchema: FixtureWorkersOutput, effects: [...FixtureWorkersEffects],
-    retry: 'never', cleanup: 'none', evidenceClasses: ['deterministic'],
-    async run(input, context) {
-      const { fixture, grant } = await authorizeFixtureWorkers(context, input); factories++;
-      return { value: { fixtureLeaseId: fixture.leaseId, coverage: 'registered-builtin-running-workers' as const,
-        serve: { id: 'serve' as const, pid: 23, generation: 'owned-serve', state: 'running' as const },
-        workers: [{ id: 'retained-worker', generation: 'owned-worker', kind: 'worker' as const,
-          identityKind: 'legacy-agent-name' as const, workspaceId: fixture.workspaceId, agentId: 'owned-name', sessionName: null }] },
-        identity: { fixtureLeaseId: fixture.leaseId }, evidenceClass: grant.evidenceClass };
-    } }));
+  for(const provider of createCoreProviders(pin))registry.register(provider);
   const context = createCapabilityContext({ file: 'workers-unit.test.yaml', line: 1 }, registry);
   const evidenceRoot = await realpath(await mkdtemp(path.join(os.tmpdir(), 'loom-worker-authority-')));
   t.after(() => rm(evidenceRoot, { recursive: true }));
@@ -46,6 +36,13 @@ async function setup(t: { after(fn: () => Promise<void>): void }, missingStart =
         [FixtureWorkersId]: { evidenceClass: 'deterministic', effects: [...FixtureWorkersEffects] } });
     },
     dispose: async () => {} };
+  fixture.observeWorkers=async()=>{
+    factories++;
+    return {fixtureLeaseId:fixture.leaseId,coverage:'registered-builtin-running-workers',
+      serve:{id:'serve',pid:23,generation:'owned-serve',state:'running'},
+      workers:[{id:'retained-worker',generation:'owned-worker',kind:'worker',identityKind:'legacy-agent-name',
+        workspaceId:fixture.workspaceId,agentId:'owned-name',sessionName:null}]};
+  };
   fixture.operationAuthority = createFixtureOperationAuthority(fixture, { [FixtureWorkersId]: {
     evidenceClass: 'deterministic', effects: missingStart ? ['read-api', 'read-filesystem'] : [...FixtureWorkersEffects] } });
   putFixture(context, fixture);
@@ -86,4 +83,44 @@ test('replacement during awaited verification denies the worker factory', async 
 test('replacement of the trusted operation grant during verification denies the worker factory', async t => {
   const h = await setup(t, false, false, true); assert.equal((await h.invoke()).availability, 'error');
   assert.deepEqual(h.counts(), { verifies: 1, factories: 0 });
+});
+test('default worker provider rejects an absent private route before verification',async t=>{
+  const h=await setup(t);delete h.fixture.observeWorkers;
+  assert.equal((await h.invoke()).availability,'unsupported');
+  assert.deepEqual(h.counts(),{verifies:0,factories:0});
+});
+test('default worker provider refuses callback replacement during verification',async t=>{
+  const h=await setup(t);const original=h.fixture.verify;
+  h.fixture.verify=async signal=>{await original(signal);h.fixture.observeWorkers=async()=>{assert.fail('Replacement cannot run');};};
+  assert.equal((await h.invoke()).availability,'error');
+  assert.deepEqual(h.counts(),{verifies:1,factories:0});
+});
+test('default worker provider refuses grant replacement during observation without crediting output',async t=>{
+  const h=await setup(t);const original=h.fixture.observeWorkers!;
+  h.fixture.observeWorkers=async signal=>{
+    const value=await original(signal);
+    h.fixture.operationAuthority=createFixtureOperationAuthority(h.fixture,{[FixtureWorkersId]:{evidenceClass:'deterministic',effects:[...FixtureWorkersEffects]}});
+    return value;
+  };
+  const result=await h.invoke();assert.equal(result.availability,'error');assert.equal(result.data,undefined);
+  assert.deepEqual(h.counts(),{verifies:1,factories:1});
+});
+test('default worker provider refuses foreign receipt identity and malformed rows',async t=>{
+  const h=await setup(t);const original=h.fixture.observeWorkers!;
+  h.fixture.observeWorkers=async signal=>({...await original(signal),fixtureLeaseId:'foreign'});
+  const foreign=await h.invoke();assert.equal(foreign.availability,'error');assert.equal(foreign.data,undefined);
+  h.fixture.observeWorkers=async signal=>{const value=await original(signal);return {...value,workers:[...value.workers,...value.workers]};};
+  const malformed=await h.invoke();assert.equal(malformed.availability,'error');assert.equal(malformed.data,undefined);
+});
+test('default worker provider checks the grant before accessing a private producer getter',async t=>{
+  const h=await setup(t,true);let getters=0;
+  Object.defineProperty(h.fixture,'observeWorkers',{get(){getters++;assert.fail('Ungrantable producer cannot be accessed');}});
+  assert.equal((await h.invoke()).availability,'unsupported');assert.equal(getters,0);
+  assert.deepEqual(h.counts(),{verifies:0,factories:0});
+});
+test('default worker provider refuses callback replacement after its awaited observation',async t=>{
+  const h=await setup(t);const original=h.fixture.observeWorkers!;
+  h.fixture.observeWorkers=async signal=>{const value=await original(signal);h.fixture.observeWorkers=original;return value;};
+  const result=await h.invoke();assert.equal(result.availability,'error');assert.equal(result.data,undefined);
+  assert.deepEqual(h.counts(),{verifies:1,factories:1});
 });

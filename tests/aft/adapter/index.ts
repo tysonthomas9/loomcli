@@ -7,6 +7,7 @@ import { getFixtureEvidenceStore } from './evidence.js';
 import { enrollOwnedWorkspaceAgent, requireOwnedWorkspaceRecord, requireOwnedWorkspace } from './workspaces.js';
 import { defineOperation } from './operation.js';
 import { getSyntheticProbe } from './synthetic-probe.js';
+import { FixtureWorkersId,FixtureWorkersEffects,FixtureWorkersInput,FixtureWorkersOutput,observeFixtureWorkers } from './fixture-workers.js';
 import { getFixture, getAgent, type OwnedFixture } from './ownership.js';
 import { CorrelationInput, CorrelationOutput, correlateEvents } from './correlation.js';
 import { FailureInput, FailureOutput, observeNativeFailure } from './native-failure.js';
@@ -66,6 +67,13 @@ export function createCoreProviders(implementation: ImplementationPin & { sha256
     evidenceClasses: ['deterministic', 'persisted-public-api', 'real-native', 'live-provider'] as const };
   const common = { implementation, implementationSha256: implementation.sha256, ...read, evidenceClasses: [...read.evidenceClasses] };
   return [
+    defineOperation({...common,id:FixtureWorkersId,effects:[...FixtureWorkersEffects],retry:'never',
+      inputSchema:FixtureWorkersInput,outputSchema:FixtureWorkersOutput,
+      async run(input,context) {
+        const {fixture,grant,value}=await observeFixtureWorkers(context,input);
+        return {value,identity:identity(fixture),evidenceClass:grant.evidenceClass,secrets:fixture.secrets};
+      },
+    }),
     defineOperation({...common,id:'loom.native.registration',effects:['read-native'],inputSchema:NativeRegistrationInput,outputSchema:NativeRegistrationOutput,
       async run(input,context) {
         const {fixture,agent} = await getAgent(context,input.agent);
