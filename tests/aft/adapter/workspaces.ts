@@ -112,7 +112,7 @@ function factSources(record:Topology,fact:WorkspaceAgentFact|LegacyWorkspaceAgen
 async function readWorkspaceOwnershipReceipt(receipt:z.infer<typeof ArtifactRefSchema>,store:EvidenceStore):Promise<unknown> {
   ArtifactRefSchema.parse(receipt);
   requireFact(receipt.bytes>0&&receipt.bytes<=4_000_000,'incomplete-pages','Repository creation receipt exceeds the evidence bound');
-  const filename=await store.resolve(receipt.id),handle=await open(filename,constants.O_RDONLY|constants.O_NOFOLLOW);
+  const filename=await store.resolveBounded(receipt,4_000_000),handle=await open(filename,constants.O_RDONLY|constants.O_NOFOLLOW);
   let bytes:Buffer;
   try {
     const before=await handle.stat();
@@ -126,7 +126,7 @@ async function readWorkspaceOwnershipReceipt(receipt:z.infer<typeof ArtifactRefS
     requireFact(extra.bytesRead===0&&before.dev===after.dev&&before.ino===after.ino&&before.size===after.size&&
       await sha256(bytes)===receipt.sha256,'identity-mismatch','Repository creation receipt bytes changed');
   } finally {await handle.close();}
-  await store.resolve(receipt.id);
+  await store.resolveBounded(receipt,4_000_000);
   const serialized=bytes.toString('utf8');
   requireFact(redact(serialized)===serialized,'observation-failed','Repository creation receipt contains private material');
   return JSON.parse(serialized) as unknown;
@@ -297,7 +297,7 @@ export async function enrollOwnedLegacyAgent(fixture:OwnedFixture,workspaceId:st
   for(const receipt of record.enrollmentReceipts) {
     signal.throwIfAborted();
     requireFact(receipt.bytes>0&&receipt.bytes<=4_000_000,'incomplete-pages','Legacy enrollment receipt exceeds the evidence bound');
-    const file=await store.resolve(receipt.id),handle=await open(file,constants.O_RDONLY|constants.O_NOFOLLOW);
+    const file=await store.resolveBounded(receipt,4_000_000),handle=await open(file,constants.O_RDONLY|constants.O_NOFOLLOW);
     let bytes:Buffer;
     try {
       const before=await handle.stat();
@@ -311,7 +311,7 @@ export async function enrollOwnedLegacyAgent(fixture:OwnedFixture,workspaceId:st
       requireFact(extra.bytesRead===0&&before.dev===after.dev&&before.ino===after.ino&&before.size===after.size&&
         await sha256(bytes)===receipt.sha256,'identity-mismatch','Legacy enrollment receipt bytes changed');
     } finally {await handle.close();}
-    await store.resolve(receipt.id);
+    await store.resolveBounded(receipt,4_000_000);
     const serialized=bytes.toString('utf8');
     requireFact(redact(serialized,fixture.secrets)===serialized,'observation-failed','Legacy enrollment receipt contains private material');
     const original=LegacyWorkspaceAgentFact.parse(JSON.parse(serialized));

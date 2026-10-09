@@ -261,7 +261,8 @@ test('creation membership without an immutable legacy enrollment receipt cannot 
 test('missing serialized identity kind fails before receipt lookup and cannot grant native authority',async t=>{
   const {WorkspaceCreationFact,WorkspaceAgentFact}=await import('./workspaces.js');const {store,record}=await setup(t);
   const first=await record();const missing={...first};Reflect.deleteProperty(missing,'identityKind');let reads=0;
-  await assert.rejects(createOwnedWorkspaceRoster(owner,[missing],{retain:store.retain,resolve:async id=>{reads++;return store.resolve(id);}}));
+  await assert.rejects(createOwnedWorkspaceRoster(owner,[missing],{retain:store.retain,resolve:async id=>{reads++;return store.resolve(id);},
+    resolveBounded:async(receipt,maxBytes)=>{reads++;return store.resolveBounded(receipt,maxBytes);}}));
   assert.equal(reads,0);
   const withoutKind={kind:'workspace-created',...owner,...fields};Reflect.deleteProperty(withoutKind,'identityKind');
   assert.equal(WorkspaceCreationFact.safeParse(withoutKind).success,false);
@@ -461,4 +462,14 @@ test('ordinary and repository-added creation receipts accept the exact bound and
     await assert.rejects(createOwnedWorkspaceRoster(owner,[{...record,creationReceipt:{...creationReceipt,bytes:4_000_001}}],counted));
     assert.equal(resolutions,0);
   }
+});
+
+test('parent review understated final receipt cannot trigger oversized store allocation',async t=>{
+ const {store}=await setup(t);const initialCreationReceipt=await store.retain(JSON.stringify(emptyCreation()));
+ const value={kind:'workspace-repositories-added',...owner,...addedFields,httpStatus:201,initialCreationReceipt};
+ const authentic=await store.retain(JSON.stringify(value)+' '.repeat(4_000_001));
+ const creationReceipt={...authentic,bytes:1};const original=Buffer.alloc;let largeAllocations=0;
+ Buffer.alloc=((size:number,...args:unknown[])=>{if(size>4_000_000)largeAllocations++;return Reflect.apply(original,Buffer,[size,...args]);}) as typeof Buffer.alloc;
+ try{await assert.rejects(createOwnedWorkspaceRoster(owner,[{...addedFields,creationReceipt}],store));}finally{Buffer.alloc=original;}
+ assert.equal(largeAllocations,0,'retained store bound must precede full verification allocation even with understated external metadata');
 });
