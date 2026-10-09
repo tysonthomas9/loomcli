@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createLegacyOperations, LegacyError, type LegacyLease, type LegacyAccess, type Invocation,
   type CliCommand, type ProcessResult } from './operations.js';
 import { scenarioCatalog as catalog } from './catalog.js';
+import { literalPayloads, parameterizedGoldens } from './source-goldens.js';
 import type { Json } from '../protocol.js';
 
 function setup(overrides: Partial<LegacyAccess> = {}) {
@@ -125,18 +126,23 @@ test('seed rejects traversal, Git internals, options, controls and symlink escap
   await assert.rejects(escaped.ops.seedWorktree(seed, escaped.call()), reject('ownership-mismatch')); assert.equal(escaped.commands.length, 0);
   s.lease.evidence = 'live'; await assert.rejects(s.ops.seedWorktree(seed, s.call()), reject('unsupported-capability')); assert.equal(s.commands.length, 0);
 });
-test('every finite source-grounded model and backend stimulus uses exact protocol bytes', async () => {
+test('all finite stimuli match independent source goldens, including every parameterized payload', async () => {
   const s = setup();
+  assert.deepEqual(catalog.entries.map(entry => entry.id).sort(), [...Object.keys(literalPayloads), ...Object.keys(parameterizedGoldens)].sort());
+  assert.equal(Object.keys(parameterizedGoldens).length, 9);
   for (const entry of catalog.entries) {
-    const parameters: Record<string, string> = {};
-    for (const key of entry.parameters ?? []) parameters[key] = key === 'headSha' ? '1'.repeat(40) : key === 'baseSha' ? '0'.repeat(40) :
-      (entry.agentPrefixes?.[key as 'agentName' | 'secondAgentName'] ?? '') + s.lease.runId;
+    const golden = parameterizedGoldens[entry.id];
+    const parameters = golden?.parameters ?? {};
+    const expected = golden?.payload ?? literalPayloads[entry.id];
+    assert.notEqual(expected, undefined, entry.id);
+    assert.deepEqual([...(entry.parameters ?? [])].sort(), Object.keys(parameters).sort(), entry.id);
     await s.ops.configure({ leaseId: 'lease', setting: `${entry.fixtureId}-scenario`, fixtureId: entry.fixtureId,
       scenarioId: entry.id, parameters, agentId: entry.fixtureId === 'scripted-backend' ? 'agt_1' : null }, s.call());
     if (entry.fixtureId === 'scripted-backend') {
       const last = s.writes.at(-1) as { value: { turns: unknown[] } };
-      assert.deepEqual(last.value.turns, entry.reset ? [] : Array.isArray(entry.payload) ? entry.payload : [entry.payload]);
-    } else if (!entry.parameters?.length) assert.deepEqual((s.requests.at(-1) as { body: unknown }).body, entry.payload);
+      assert.deepEqual(last.value.turns, entry.id === 'scripted-backend-reset' ? [] : Array.isArray(expected) ? expected : [expected], entry.id);
+    } else assert.deepEqual(s.requests.at(-1), { id: 'lease', target: entry.fixtureId, method: 'POST',
+      path: entry.id.endsWith('-reset') ? '/__reset' : entry.fixtureId === 'fake-model' ? '/__script' : '/__fixture', body: expected }, entry.id);
   }
   assert.equal(s.cleanups.length, 3);
 });
