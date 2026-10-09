@@ -5,8 +5,11 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import os from 'node:os';
 import { CapabilityRegistry, createCapabilityContext } from '@tysonthomas9/aft/capabilities';
-import { registerLoomAdapter, pinLoomImplementation } from './composition.js';
-import { createEvidenceStore } from './evidence.js';
+import { registerLoomAdapter, pinLoomImplementation, selectLegacyProviderOptions } from './composition.js';
+import { createEvidenceStore, putEvidenceStore } from './evidence.js';
+import { putFixture, type OwnedFixture } from './ownership.js';
+import { createFixtureOperationAuthority } from './authority.js';
+import { legacyTaskEffects } from './legacy/effects.js';
 import { AcquireOutput } from './fixture/providers.js';
 import type { FixturePlan, FixtureDriver } from './fixture/lifecycle.js';
 
@@ -43,4 +46,57 @@ test('one composition registers closed schemas and shares acquired authority wit
   await assert.rejects(invoke('loom.runtime.stimulate',{leaseId,command:'unsafe'})); assert.equal(legacyFactories,0);
   assert.equal((await invoke('loom.fixture.release',{leaseId})).availability,'observed');
   assert.deepEqual(calls,['preflight','remove']);
+});
+
+const routeRevision = {repository:'loom',commit:'a'.repeat(40),tree:'b'.repeat(40),sourceManifestSha256:'c'.repeat(64),buildManifestSha256:'d'.repeat(64)};
+const routePlan = (profile: string): FixturePlan => ({profile,loomRevision:routeRevision,fleetRevision:routeRevision,
+  engineRevision:routeRevision,adapterRevision:routeRevision,model:'openai/model',maxCases:1,caseCount:1,
+  selectionSha256:'e'.repeat(64),leaseDurationMs:10000});
+
+test('trusted composition selects only authorized legacy task routes before factory or driver access', async t => {
+  const stub = routePlan('legacy-deterministic');
+  const native = routePlan('agents-real-opencode');
+  const real = routePlan('legacy-real-codex');
+  const external = {...real,liveProvider:{backend:'codex' as const,model:real.model}};
+  assert.deepEqual(selectLegacyProviderOptions([stub,native,real]),{taskExecution:'deterministic'});
+  assert.deepEqual(selectLegacyProviderOptions([native,real]),{taskExecution:'deterministic'});
+  assert.deepEqual(selectLegacyProviderOptions([external,native]),{taskExecution:'live-provider'});
+  assert.throws(()=>selectLegacyProviderOptions([stub,external]));
+  assert.throws(()=>selectLegacyProviderOptions([stub,stub]));
+  assert.throws(()=>selectLegacyProviderOptions([{...real,liveProvider:{backend:'claude',model:real.model}}]));
+  assert.throws(()=>selectLegacyProviderOptions([routePlan('unknown-profile')]));
+  const root = fileURLToPath(new URL('.',import.meta.url));
+  const pin = await pinLoomImplementation(root,'source'); let factoryCalls=0, driverCalls=0;
+  const unused = async (): Promise<never> => {throw new Error('Unused test transport');};
+  const options = (plans: readonly FixturePlan[]) => ({implementation:pin,legacyAccess(){factoryCalls++;throw new Error('Unused factory');},
+    fixtures:{plans,driver(){driverCalls++;throw new Error('Unused driver');},bind:unused,evidenceAfterFailure:unused}});
+  assert.throws(()=>registerLoomAdapter(new CapabilityRegistry(),options([stub,external])));
+  const deterministic = registerLoomAdapter(new CapabilityRegistry(),options([stub]));
+  assert.ok(!deterministic.get('loom.cli.task',1).effects.includes('external-provider'));
+  assert.ok(deterministic.get('loom.cli.task',1).effects.includes('start-owned-process'));
+  assert.ok(deterministic.get('loom.cli.role',1).effects.includes('start-owned-process'));
+  const live = registerLoomAdapter(new CapabilityRegistry(),options([external]));
+  assert.ok(live.get('loom.cli.task',1).effects.includes('external-provider'));
+  assert.ok(!live.get('loom.cli.role',1).effects.includes('external-provider'));
+  const directory = await realpath(await mkdtemp(path.join(os.tmpdir(),'loom-route-evidence-')));
+  t.after(()=>rm(directory,{recursive:true}));
+  const evidence = await createEvidenceStore(directory);
+  for (const [registry, profile, evidenceClass] of [
+    [deterministic,external.profile,'live-provider'],
+    [live,stub.profile,'deterministic'],
+  ] as const) {
+    const context = createCapabilityContext({file:'route.test.yaml',line:1},registry);
+    putEvidenceStore(context,evidence);
+    const fixture: OwnedFixture = {leaseId:'lease',runId:context.runId,suiteId:context.suiteId,scope:context.scope,
+      caseId:context.caseId,profile,workspaceId:'WS',repo:'/injected/source',expiresAtUtcMs:Number.MAX_SAFE_INTEGER,
+      evidenceClass,roots:new Map(),agents:new Map(),secrets:[],readApi:unused,readFiles:unused,resolveAgent:unused,
+      verify:async()=>{},dispose:async()=>{}};
+    fixture.operationAuthority = createFixtureOperationAuthority(fixture,{'loom.cli.task':{evidenceClass,
+      effects:[...legacyTaskEffects({taskExecution:evidenceClass})]}});
+    putFixture(context,fixture);
+    const denied = await registry.invoke({id:'loom.cli.task',version:1,input:{}},
+      {leaseId:'lease',workspaceId:'WS',agentName:'worker',backend:'codex',mode:'once',issueId:null},context);
+    assert.equal(denied.availability,'error'); assert.equal(denied.error?.code,'source-mismatch');
+  }
+  assert.equal(factoryCalls,0); assert.equal(driverCalls,0);
 });
