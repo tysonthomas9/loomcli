@@ -91,7 +91,11 @@ export class FixtureLifecycle {
       expiresAt: this.now() + expected.leaseDurationMs, released: false, busy: true };
     this.leases.set(id, lease);
     const record = (resource: Resource) => {
-      fail(!lease.resources.some(existing => existing.id === resource.id), 'ownership-mismatch');
+      const previous = lease.resources.find(existing => existing.id === resource.id);
+      if (previous) {
+        fail(previous.kind === 'process' && resource.kind === 'process', 'ownership-mismatch');
+        previous.generation = resource.generation; return;
+      }
       lease.resources.push(structuredClone(resource));
     };
     try {

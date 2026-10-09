@@ -56,10 +56,17 @@ async function setup(profile: string) {
       if (command.argv[0] === 'ls-files') return sourceEntries.map(entry => entry.relativePath).join('\0') + '\0';
       return '';
     },
-    start(command, readiness) {
+    launch(command, stdin, generation) {
+      runs.push(command); let alive = true;
+      const handle = { pid: ++count + 100, generation, executable: command.executable, argv: command.argv,
+        state: () => alive ? 'running' as const : 'exited' as const, async ready() {}, async stop() { alive = false; stopped.push('cli'); },
+        async completion() { alive = false; return { exitCode: 0, stdout: stdin || '{"owned":true}', stderr: '', complete: true }; } };
+      handles.set('cli', handle); return handle;
+    },
+    start(command, readiness, generation) {
       const id = command.argv[0] === 'serve' ? 'serve' : command.argv.includes('preview') ? 'frontend' : command.argv[0]?.endsWith('/fake-model/server.mjs') ? 'fake-model' : 'daemon';
       starts.push({ id, command, readiness }); let alive = true;
-      const handle: OwnedProcess = { pid: ++count + 40, generation: `generation-${count}`, executable: command.executable, argv: command.argv,
+      const handle: OwnedProcess = { pid: ++count + 40, generation: generation ?? `generation-${count}`, executable: command.executable, argv: command.argv,
         state: () => alive ? 'running' : 'exited', async ready() { if (id === failService) throw new Error('Bearer private-ready-token'); },
         async stop() { if (id === failStop) throw new Error('secret=private-stop-token'); alive = false; stopped.push(id); } };
       handles.set(id, handle); return handle;
@@ -154,5 +161,44 @@ test('failed readiness response remains unverified and triggers cleanup', async 
   try {
     await assert.rejects(r.lifecycle.acquire(r.request, new AbortController().signal));
     assert.deepEqual(r.stopped, ['serve', 'fake-model']);
+  } finally { await r.cleanup(); }
+});
+
+test('private CLI hooks enroll owned commands and reject executable or auth override inputs', async () => {
+  const r = await setup('legacy-deterministic');
+  try {
+    const acquired = await r.lifecycle.acquire(r.request, new AbortController().signal);
+    const result = await r.driver.launchOwnedCli(['usage','--format','json','--agent','owned'], { LOOM_WORKSPACE_ID:'E2E-WS' }, '', true, new AbortController().signal);
+    assert.equal(result.completion.exitCode, 0); assert.equal(result.completion.complete, true);
+    const services = (await r.lifecycle.observe(acquired.lease.id, 'test-run')).services;
+    assert.ok(services.some(s => s.id === result.id && s.generation === result.generation));
+    await assert.rejects(r.driver.launchOwnedCli(['bash','-c','bad'],{},'',true,new AbortController().signal));
+    await assert.rejects(r.driver.launchOwnedCli(['usage'],{ OPENAI_API_KEY:'private' },'',true,new AbortController().signal));
+    assert.equal(r.driver.cliRegistration.binary, r.config.loomBinary);
+    assert.equal((await r.lifecycle.release(acquired.lease.id, 'test-run')).released, true);
+  } finally { await r.cleanup(); }
+});
+test('owned restart replaces the recorded generation; stale and foreign actions never stop a process', async () => {
+  const r = await setup('legacy-deterministic');
+  try {
+    const acquired = await r.lifecycle.acquire(r.request, new AbortController().signal);
+    const before = r.driver.processesById.get('serve')!.generation;
+    await assert.rejects(r.driver.stopOwnedProcess('serve','foreign',new AbortController().signal)); assert.deepEqual(r.stopped, []);
+    const restarted = await r.driver.restartOwnedProcess('serve',before,new AbortController().signal);
+    assert.notEqual(restarted.afterGeneration,before);
+    const observed = await r.lifecycle.observe(acquired.lease.id,'test-run');
+    assert.equal(observed.services.find(s => s.id === 'serve')!.generation,restarted.afterGeneration);
+    await assert.rejects(r.driver.restartOwnedProcess('serve',before,new AbortController().signal));
+    assert.equal((await r.lifecycle.release(acquired.lease.id,'test-run')).released,true);
+  } finally { await r.cleanup(); }
+});
+test('restoration failure blocks process/path cleanup and retries after cancellation', async () => {
+  const r = await setup('legacy-deterministic'); let fails = true; let attempts = 0;
+  try {
+    const acquired = await r.lifecycle.acquire(r.request,new AbortController().signal);
+    r.driver.enrollCleanup(async () => { attempts++; if(fails) throw new Error('Bearer private-restore-token'); });
+    const first = await r.lifecycle.release(acquired.lease.id,'test-run'); assert.equal(first.released,false); assert.deepEqual(r.stopped,[]);
+    assert.ok(await fs.lstat(r.driver.workspaceRoot)); assert.equal((await fs.readFile(first.receipt.id,'utf8')).includes('private-restore-token'),false);
+    fails=false; assert.equal((await r.lifecycle.release(acquired.lease.id,'test-run')).released,true); assert.equal(attempts,2);
   } finally { await r.cleanup(); }
 });

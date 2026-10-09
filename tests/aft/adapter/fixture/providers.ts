@@ -6,6 +6,8 @@ import { ArtifactRefSchema, type EvidenceClass } from '@tysonthomas9/aft/types';
 import { defineOperation } from '../operation.js';
 import { putFixture, getFixture, releaseFixture, fixturesKey, type OwnedFixture, type OwnedAgent } from '../ownership.js';
 import { createNativeHostAccess } from '../native-host.js';
+import { createSyntheticProbe } from '../synthetic-probe.js';
+import { ContainerRootIdentity, containerFilesystemObserver, containerGitObserver, type ContainerObservationRead } from '../container-observations.js';
 import { AgentRow, NativeRef, ServiceRegistration, HttpResponse, Id, Digest, ObservationError, requireFact,
   type NativeAccess, type ProcessIdentity, type ReadTransport } from '../protocol.js';
 import { FixtureLifecycle, FixtureError, type FixtureDriver, type FixturePlan, type AcquireRequest } from './lifecycle.js';
@@ -25,11 +27,11 @@ export const AcquireInput = z.object({ runId: Id, profile: Profiles, loomRevisio
 export const LeaseInput = z.object({ leaseId: Id }).strict();
 const Lease = z.object({ id: Id, runId: Id, resourceManifestSha256: Digest, source: Revision, engine: Revision, adapter: Revision, expiresAt: Id }).strict();
 export const AcquireOutput = z.object({ lease: Lease, apiOrigin: Id, filesOrigin: Id, workspaceId: Id, repo: Id,
-  browserLeaseId: Id, ownershipArtifact: ArtifactRefSchema }).strict();
+  browserLeaseId: Id, ownershipArtifact: ArtifactRefSchema, syntheticProbeHandle: Id, syntheticProbeRunId: Id }).strict();
+const ProvisionedOutput = AcquireOutput.omit({ syntheticProbeHandle: true, syntheticProbeRunId: true });
 export const ReleaseOutput = z.object({ released: z.boolean(), remainingOwnedResources: z.array(Id), receipt: ArtifactRefSchema }).strict();
 export const ObserveOutput = z.object({ owned: z.boolean(), sourceMatches: z.boolean(), services: z.array(z.object({
   id: Id, pid: z.number().int().nonnegative(), generation: Id, state: Id }).strict()), inventory: ArtifactRefSchema }).strict();
-type Acquired = z.infer<typeof AcquireOutput>;
 type Released = z.infer<typeof ReleaseOutput>;
 interface PrivateFixture {
   manager: FixtureLifecycle; driver: FixtureDriver; lastRelease?: Released;
@@ -43,7 +45,7 @@ export interface FixtureProviderOptions {
   implementation: ImplementationPin; implementationSha256: string;
   plans: readonly FixturePlan[];
   driver(profile: string): FixtureDriver;
-  bind(driver: FixtureDriver, acquired: Acquired, input: AcquireRequest, context: CapabilityContext): Promise<{
+  bind(driver: FixtureDriver, acquired: z.infer<typeof ProvisionedOutput>, input: AcquireRequest, context: CapabilityContext): Promise<{
     evidenceClass: EvidenceClass; roots: OwnedFixture['roots']; secrets: readonly string[];
     readApi: ReadTransport; readFiles: ReadTransport; resolveAgent: OwnedFixture['resolveAgent'];
     evidenceStore: EvidenceStore;
@@ -70,7 +72,7 @@ export function createFixtureProviders(options: FixtureProviderOptions): Capabil
         let driver: FixtureDriver | undefined;
         const manager = new FixtureLifecycle(options.plans, () => { driver = options.driver(input.profile); return driver; },
           () => context.clock.epochUtcMs + context.clock.now());
-        let acquired: Acquired;
+        let acquired: z.infer<typeof ProvisionedOutput>;
         const registerIncomplete = async (leaseId: string) => {
             if (!context.resources.has(evidenceKey)) putEvidenceStore(context, await options.evidenceAfterFailure(driver!));
             // Cleanup-only registration is never an available fixture. It lets
@@ -100,7 +102,7 @@ export function createFixtureProviders(options: FixtureProviderOptions): Capabil
           const fixture: OwnedFixture = { leaseId: acquired.lease.id, runId: context.runId, caseId: context.caseId,
             suiteId: context.suiteId, scope: context.scope, profile: input.profile,
             workspaceId: acquired.workspaceId, repo: acquired.repo, expiresAtUtcMs: Date.parse(acquired.lease.expiresAt),
-            agents: new Map(), ...transport,
+            agents: new Map(), syntheticProbe: createSyntheticProbe(context.runId, acquired.lease.id), ...transport,
             async verify(signal) { signal.throwIfAborted(); await checked(() => manager.observe(acquired.lease.id, input.runId)); },
             async dispose() {
               const state = privateFixtures.get(fixture)!;
@@ -110,7 +112,7 @@ export function createFixtureProviders(options: FixtureProviderOptions): Capabil
           };
           privateFixtures.set(fixture, { manager, driver: driver! });
           putFixture(context, fixture);
-          return { value: acquired, evidenceClass: fixture.evidenceClass,
+          return { value: { ...acquired, syntheticProbeHandle: fixture.syntheticProbe!.handle, syntheticProbeRunId: fixture.syntheticProbe!.runId }, evidenceClass: fixture.evidenceClass,
             identity: { fixtureLeaseId: fixture.leaseId, workspaceId: fixture.workspaceId } };
         } catch (error) {
           const released = await manager.release(acquired.lease.id, input.runId);
@@ -191,10 +193,18 @@ export function productionFixtureOptions(implementation: ImplementationPin, impl
       if (isCompose) {
         const pinnedExecutable = input.profile === 'agents-emulator' ? '/opt/fixture/loom-harness-emu' : '/usr/local/bin/opencode';
         const native = containerNative(driver, pinnedExecutable);
+        const read: ContainerObservationRead = (request, signal) => driver.nativeRead(request, signal);
+        const managed = ContainerRootIdentity.parse(await read({ operation: 'filesystem-root', root: { kind: 'managed-repo' } }, new AbortController().signal));
+        roots.set('managed-repo', { ...managed, remoteObserve: containerFilesystemObserver(read, { kind: 'managed-repo' }, managed) });
         resolveAgent = async (agentId, signal): Promise<OwnedAgent> => {
           const row = await native.agent(agentId);
           const common = z.object({ commonDir: Id }).strict().parse(await driver.nativeRead({ operation: 'git-common-dir', agentId }, signal));
-          return { row, commonDir: common.commonDir, native };
+          const selector = { kind: 'agent-worktree' as const, agentId };
+          const stamp = ContainerRootIdentity.parse(await read({ operation: 'filesystem-root', root: selector }, signal));
+          roots.set(`agent-worktree:${agentId}`, { ...stamp, remoteObserve: containerFilesystemObserver(read, selector, stamp) });
+          return { row, commonDir: common.commonDir, native, gitObserve: containerGitObserver(read,
+            { fixtureLeaseId: acquired.lease.id, workspaceId: acquired.workspaceId, agentId },
+            { worktree: row.worktree_path, commonDir: common.commonDir, branch: row.branch }) };
         };
       } else {
         const native = createNativeHostAccess({ configRoot: path.join(driver.workspaceRoot, '.loom-config'), workspaceId: acquired.workspaceId,
