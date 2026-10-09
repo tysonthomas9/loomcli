@@ -8,11 +8,11 @@ import type { OwnedFixture } from './ownership.js';
 
 export const WorkspaceIdentityKind=z.enum(['native-agent-id','legacy-agent-name']);
 export type WorkspaceIdentityKind=z.infer<typeof WorkspaceIdentityKind>;
-const Fields = { identityKind:WorkspaceIdentityKind.default('native-agent-id'),workspaceId:Id,repo:Id,commonDir:Id,storeId:Id,storeGeneration:Id,
+const Fields = { identityKind:WorkspaceIdentityKind,workspaceId:Id,repo:Id,commonDir:Id,storeId:Id,storeGeneration:Id,
   agentIds:z.array(Id).max(1000) };
 export const WorkspaceCreationFact = z.object({kind:z.literal('workspace-created'),leaseId:Id,runId:Id,suiteId:Id,
   scope:z.enum(['suite','case']),caseId:Id,profile:Id,...Fields}).strict();
-export const WorkspaceAgentFact = z.object({kind:z.literal('agent-enrolled'),identityKind:z.literal('native-agent-id').default('native-agent-id'),leaseId:Id,runId:Id,suiteId:Id,
+export const WorkspaceAgentFact = z.object({kind:z.literal('agent-enrolled'),identityKind:z.literal('native-agent-id'),leaseId:Id,runId:Id,suiteId:Id,
   scope:z.enum(['suite','case']),caseId:Id,profile:Id,workspaceId:Id,agentId:Id,repo:Id,commonDir:Id,storeId:Id,storeGeneration:Id,
   parentAgentId:Id.nullable(),rootAgentId:Id.nullable(),createdByKind:z.enum(['user','agent']),createdById:Id.nullable(),
   revision:z.number().int().nonnegative()}).strict();

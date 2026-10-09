@@ -47,10 +47,24 @@ test('owned renderer composition rejects matching versions in an unrelated root 
     { leaseId: 'lease', mode: 'motion', answer: '**owned** source', frames: [], arrivals: [] }, context);
   assert.equal(actual.availability, 'observed'); assert.equal(actual.provenance.identity.fixtureLeaseId, 'lease');
   const measured = await measureFixtureProjection(context, 'lease'); assert.equal(measured.target!.generation, receipt.generation);
+  await writeFile(path.join(build,'assets/unlisted.svg'),'<svg/>');
+  await assert.rejects(measured.verify());
+  await rm(path.join(build,'assets/unlisted.svg'));
   const original = roots.get('installed')!;
   roots.set('installed', await stamp(path.join(root, 'node_modules')));
   await assert.rejects(measureFixtureProjection(context, 'lease'));
   roots.set('installed', original);
   fixture.rendererTarget!.generation = 'foreign-generation'; await assert.rejects(measured.verify());
   await assert.rejects(measureFixtureProjection({ ...context, runId: 'foreign-run' }, 'lease'));
+});
+
+test('complete renderer output receipts include assets and reject unlisted or symbolic entries',async t=>{
+  const {rendererBuildClosure}=await import('./renderer-target.js');
+  const {symlink}=await import('node:fs/promises');
+  const build=await realpath(await mkdtemp(path.join(os.tmpdir(),'loom-renderer-closure-')));t.after(()=>rm(build,{recursive:true,force:true}));
+  await mkdir(path.join(build,'assets'));await writeFile(path.join(build,'app.js'),'actual compiled fixture bytes');
+  await writeFile(path.join(build,'assets/icon.svg'),'<svg/>');await writeFile(path.join(build,'assets/font.woff2'),Buffer.from([0,1,2,3]));
+  const entries=await rendererBuildClosure(build);assert.deepEqual(entries.map(entry=>entry.relativePath),['app.js','assets/font.woff2','assets/icon.svg']);
+  assert.equal(entries[1]!.sha256,await sha256(Buffer.from([0,1,2,3])));
+  await symlink(path.join(build,'app.js'),path.join(build,'foreign.js'));await assert.rejects(rendererBuildClosure(build));
 });
