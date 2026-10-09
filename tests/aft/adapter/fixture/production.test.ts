@@ -15,13 +15,14 @@ import { ArchiveAgentId,ArchiveAgentEffects } from '../agent-archive.js';
 import { createFixtureOperationAuthority } from '../authority.js';
 import { getFixture } from '../ownership.js';
 const hash = (v: string | Uint8Array) => createHash('sha256').update(v).digest('hex');
-async function setup(profile = 'agents-real-opencode',fixtureRunId?:string,useProductionReadiness=false,requestTime?:()=>number,archivePorts?:{read:Http;write:NativeArchiveHttp;timeout:(ms:number)=>AbortSignal}) {
+async function setup(profile = 'agents-real-opencode',fixtureRunId?:string,useProductionReadiness=false,requestTime?:()=>number,archivePorts?:{read:Http;write:NativeArchiveHttp;timeout:(ms:number)=>AbortSignal},symlinkCase?:'correct'|'changed'|'manifest') {
  const root = await fs.mkdtemp(path.join(path.dirname(new URL(import.meta.url).pathname), 'test-artifacts-'));
  const source = path.join(root,'source'), build = path.join(root,'build');
  for (const dir of [source,build,path.join(root,'home'),path.join(root,'locks')]) await fs.mkdir(dir);
  await fs.writeFile(path.join(source,'tracked'),'source');
  const digest = (es: {relativePath:string;sha256:string}[]) => hash([...es].sort((a,b)=>a.relativePath<b.relativePath?-1:1).map(e=>`${e.sha256}  ${e.relativePath}\n`).join(''));
  const se = [{relativePath:'tracked',sha256:hash('source')}];
+ if(symlinkCase){await fs.symlink(symlinkCase==='changed'?'other':'tracked',path.join(source,'source-link'));if(symlinkCase==='manifest')se.push({relativePath:'source-link',sha256:hash('tracked')});}
  const image = 'sha256:'+'f'.repeat(64), receipt = JSON.stringify({imageId:image,sourceManifestSha256:digest(se)});
  await fs.writeFile(path.join(build,'container-image.json'),receipt);
  const elf=Buffer.from([0x7f,0x45,0x4c,0x46,1,2]); await fs.writeFile(path.join(build,'emulator'),elf);
@@ -49,7 +50,7 @@ async function setup(profile = 'agents-real-opencode',fixtureRunId?:string,usePr
  const services=cloud?['redis','fleet-auth-seed','fleet-db','loom-serve','worker','stub-upstream']:['redis','fleet-db','loom-local','ui-local'];
  const run=async (r:ProcessRequest)=>{
   calls.push(r); await onCommand?.(r); const a=r.args;
-  if(r.binary==='git') return a[0]==='rev-parse'?(a[1]==='HEAD'?revision.commit:revision.tree):a[0]==='ls-files'?se.map(e=>e.relativePath).join('\0')+'\0':'';
+  if(r.binary==='git') return a[0]==='rev-parse'?(a[1]==='HEAD'?revision.commit:revision.tree):a[0]==='cat-file'?'tracked':a[0]==='ls-files'?se.filter(e=>e.relativePath!=='source-link').map(e=>'100644 '+'c'.repeat(40)+' 0\t'+e.relativePath).concat(symlinkCase?['120000 '+'d'.repeat(40)+' 0\tsource-link']:[]).join('\0')+'\0':'';
   project=r.env.LOCAL_MODE_COMPOSE_PROJECT||r.env.LOOM_STACK_PROJECT||project;
   if(r.binary==='bash') return '';
   if(a[0]==='system') return JSON.stringify([{...connection,URI:change==='connection'?'ssh://foreign':connection.URI}]);
@@ -716,3 +717,12 @@ for(const phase of ['GET','POST'])test(`GF1 public Compose archive enforces inde
    }finally{await r.cleanup();}
   }
  });
+
+test('source identity verifies Git symlink targets without admitting symlinks into manifests',async()=>{
+ for(const value of ['correct','changed','manifest'] as const){
+  const r=await setup('agents-real-opencode',undefined,false,undefined,undefined,value);try{
+   assert.equal(await r.driver.identity(r.plan),value==='correct');
+   assert.equal(r.calls.some(call=>call.binary==='bash'||call.args.includes('up')),false);
+  }finally{await r.cleanup();}
+ }
+});

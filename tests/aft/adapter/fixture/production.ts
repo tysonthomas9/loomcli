@@ -287,8 +287,20 @@ export class ComposeFixtureDriver implements FixtureDriver {
         const tree = (await git(['rev-parse', 'HEAD^{tree}'])).trim();
         const dirty = await git(['status', '--porcelain', '--untracked-files=no']);
         check(head === expected.commit && tree === expected.tree && !dirty.trim(), 'source-mismatch');
-        const tracked = (await git(['ls-files', '-z'])).split('\0').filter(Boolean).sort();
-        check(JSON.stringify(tracked) === JSON.stringify(build.source.entries.map(entry => entry.relativePath).sort()), 'source-mismatch');
+        const tracked: string[] = [];
+        for (const record of (await git(['ls-files', '-s', '-z'])).split('\0').filter(Boolean)) {
+          const parsed = /^(100644|100755|120000) ([a-f0-9]{40}) 0\t(.+)$/.exec(record);
+          check(parsed, 'source-mismatch');
+          const [, mode, oid, relativePath] = parsed!;
+          check(relativePath!.split('/').every(part => part && part !== '.' && part !== '..') && !path.isAbsolute(relativePath!), 'source-mismatch');
+          if (mode === '120000') {
+            const filename = path.join(build.source.root, relativePath!);
+            check((await this.files.lstat(filename)).isSymbolicLink(), 'source-mismatch');
+            const target = await this.files.readlink(filename);
+            check(target === await git(['cat-file', 'blob', oid!]), 'source-mismatch');
+          } else tracked.push(relativePath!);
+        }
+        check(JSON.stringify(tracked.sort()) === JSON.stringify(build.source.entries.map(entry => entry.relativePath).sort()), 'source-mismatch');
         await verifyManifest(build.source, expected.sourceManifestSha256, signal);
         await verifyManifest(build.build, expected.buildManifestSha256, signal);
       }
