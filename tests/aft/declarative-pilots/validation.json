@@ -1,6 +1,6 @@
 {
   "status": "incomplete-raw-admission-failed",
-  "at": "2026-10-09T08:59:11.898Z",
+  "at": "2026-10-09T09:02:57.612Z",
   "evidenceClass": "static source mapping plus deterministic adapter-interface controls only",
   "engineBuild": {
     "head": "e8eee6bb6d8d5d2c8e65bae36154732a74742212",
@@ -9,7 +9,7 @@
     "receipt": "/private/tmp/aft-interface-a43468f0/final-e8eee6bb/source-build-receipt.json"
   },
   "rawAdmission": {
-    "at": "2026-10-09T08:56:27.065Z",
+    "at": "2026-10-09T09:01:01.826Z",
     "status": "failed",
     "engine": "e8eee6bb6d8d5d2c8e65bae36154732a74742212",
     "adapterSource": "77ba247c0f85b86dd70c02651e2fed4b86127eb0",
@@ -25,7 +25,7 @@
       },
       {
         "file": "files-save-reload.test.yaml",
-        "sha256": "b4d548e783266ee02c6c50c420b9ce2b2a497c3cf032c8dd7687dfd0d967c5a9"
+        "sha256": "e4cf23de94b4a36a63886ccf05d12421d96db034e1f6a36f5cd3376268ca2954"
       },
       {
         "file": "sse-cursor.test.yaml",
@@ -61,7 +61,7 @@
       },
       {
         "file": "files-save-reload.test.yaml",
-        "sha256": "b4d548e783266ee02c6c50c420b9ce2b2a497c3cf032c8dd7687dfd0d967c5a9"
+        "sha256": "e4cf23de94b4a36a63886ccf05d12421d96db034e1f6a36f5cd3376268ca2954"
       },
       {
         "file": "sse-cursor.test.yaml",

@@ -28,6 +28,20 @@
         "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/48",
         "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/52"
       ],
+      "coveredCallerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/16",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/20",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/24",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/30",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/31",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/32",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/39",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/44",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/48",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/52"
+      ],
+      "unresolvedCallerOldStepIds": [],
       "callers": [
         {
           "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8",
@@ -250,6 +264,28 @@
         "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/48",
         "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/52"
       ],
+      "coveredCallerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8"
+      ],
+      "unresolvedCallerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/16",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/20",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/24",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/30",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/31",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/32",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/39",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/44",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/48",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/52"
+      ],
+      "invocationGap": {
+        "sourceHelper": "campaign:tests/aft/scripts/coverage-git-files-evidence.py",
+        "sourceLine": 67,
+        "required": "agent['agent_id'] == agent_id",
+        "canonicalAttempt": "Initial typed bind and exact public Agent row comparison at original step8.",
+        "missingObservation": "Original helper re-reads current Agent identity at each later selected caller. Fresh row identity/repo/workspace/harness readback at those later checkpoints is not yet authored; initial comparison receives no credit for them."
+      },
       "callers": [
         {
           "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8",
@@ -472,6 +508,28 @@
         "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/48",
         "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/52"
       ],
+      "coveredCallerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8"
+      ],
+      "unresolvedCallerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/16",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/20",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/24",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/30",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/31",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/32",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/39",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/44",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/48",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/52"
+      ],
+      "invocationGap": {
+        "sourceHelper": "campaign:tests/aft/scripts/coverage-git-files-evidence.py",
+        "sourceLine": 68,
+        "required": "agent['workspace_id'] == WS and agent['repo'] == REPO",
+        "canonicalAttempt": "Initial typed bind and exact public Agent row comparison at original step8.",
+        "missingObservation": "Original helper re-reads current Agent identity at each later selected caller. Fresh row identity/repo/workspace/harness readback at those later checkpoints is not yet authored; initial comparison receives no credit for them."
+      },
       "callers": [
         {
           "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8",
@@ -694,6 +752,28 @@
         "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/48",
         "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/52"
       ],
+      "coveredCallerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8"
+      ],
+      "unresolvedCallerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/16",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/20",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/24",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/30",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/31",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/32",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/39",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/44",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/48",
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/52"
+      ],
+      "invocationGap": {
+        "sourceHelper": "campaign:tests/aft/scripts/coverage-git-files-evidence.py",
+        "sourceLine": 69,
+        "required": "agent['harness'] == env('AFT_REAL_BACKEND')",
+        "canonicalAttempt": "Initial typed bind and exact public Agent row comparison at original step8.",
+        "missingObservation": "Original helper re-reads current Agent identity at each later selected caller. Fresh row identity/repo/workspace/harness readback at those later checkpoints is not yet authored; initial comparison receives no credit for them."
+      },
       "callers": [
         {
           "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8",
@@ -906,6 +986,10 @@
       "callerOldStepIds": [
         "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8"
       ],
+      "coveredCallerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8"
+      ],
+      "unresolvedCallerOldStepIds": [],
       "callers": [
         {
           "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8",
@@ -958,6 +1042,10 @@
       "callerOldStepIds": [
         "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8"
       ],
+      "coveredCallerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8"
+      ],
+      "unresolvedCallerOldStepIds": [],
       "callers": [
         {
           "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8",
@@ -1010,6 +1098,10 @@
       "callerOldStepIds": [
         "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8"
       ],
+      "coveredCallerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8"
+      ],
+      "unresolvedCallerOldStepIds": [],
       "callers": [
         {
           "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8",
@@ -1062,6 +1154,10 @@
       "callerOldStepIds": [
         "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8"
       ],
+      "coveredCallerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8"
+      ],
+      "unresolvedCallerOldStepIds": [],
       "callers": [
         {
           "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8",
@@ -1114,6 +1210,10 @@
       "callerOldStepIds": [
         "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/7"
       ],
+      "coveredCallerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/7"
+      ],
+      "unresolvedCallerOldStepIds": [],
       "callers": [
         {
           "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/7",
@@ -1177,6 +1277,11 @@
         "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
         "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13"
       ],
+      "coveredCallerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13"
+      ],
+      "unresolvedCallerOldStepIds": [],
       "callers": [
         {
           "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
@@ -1256,6 +1361,11 @@
         "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
         "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13"
       ],
+      "coveredCallerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13"
+      ],
+      "unresolvedCallerOldStepIds": [],
       "callers": [
         {
           "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
@@ -1335,6 +1445,11 @@
         "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
         "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13"
       ],
+      "coveredCallerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13"
+      ],
+      "unresolvedCallerOldStepIds": [],
       "callers": [
         {
           "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
@@ -1414,6 +1529,11 @@
         "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
         "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13"
       ],
+      "coveredCallerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13"
+      ],
+      "unresolvedCallerOldStepIds": [],
       "callers": [
         {
           "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
@@ -1514,6 +1634,12 @@
         "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
         "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
       ],
+      "coveredCallerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+      ],
+      "unresolvedCallerOldStepIds": [],
       "callers": [
         {
           "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
@@ -1710,6 +1836,12 @@
         "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
         "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
       ],
+      "coveredCallerOldStepIds": [
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/13",
+        "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/17"
+      ],
+      "unresolvedCallerOldStepIds": [],
       "callers": [
         {
           "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/chat-controls-stop.test.yaml#tests/0/steps/10",

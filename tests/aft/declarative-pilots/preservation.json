@@ -68,7 +68,7 @@
       ],
       "id": "files-save-reload",
       "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-      "sha256": "b4d548e783266ee02c6c50c420b9ce2b2a497c3cf032c8dd7687dfd0d967c5a9",
+      "sha256": "e4cf23de94b4a36a63886ccf05d12421d96db034e1f6a36f5cd3376268ca2954",
       "skipped": true,
       "oldSteps": [
         {
@@ -3815,6 +3815,28 @@
                 "callerDefaultStepMs": 30000,
                 "publicApiRequestMs": 15000,
                 "acceptance": "authored-unvalidated; no raw-suite loader, execution or runtime preservation credit"
+              },
+              "coveredCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8"
+              ],
+              "unresolvedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/16",
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/20",
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/24",
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/30",
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/31",
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/32",
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/39",
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/44",
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/48",
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/52"
+              ],
+              "invocationGap": {
+                "sourceHelper": "campaign:tests/aft/scripts/coverage-git-files-evidence.py",
+                "sourceLine": 67,
+                "required": "agent['agent_id'] == agent_id",
+                "canonicalAttempt": "Initial typed bind and exact public Agent row comparison at original step8.",
+                "missingObservation": "Original helper re-reads current Agent identity at each later selected caller. Fresh row identity/repo/workspace/harness readback at those later checkpoints is not yet authored; initial comparison receives no credit for them."
               }
             },
             {
@@ -3860,6 +3882,28 @@
                 "callerDefaultStepMs": 30000,
                 "publicApiRequestMs": 15000,
                 "acceptance": "authored-unvalidated; no raw-suite loader, execution or runtime preservation credit"
+              },
+              "coveredCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8"
+              ],
+              "unresolvedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/16",
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/20",
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/24",
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/30",
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/31",
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/32",
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/39",
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/44",
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/48",
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/52"
+              ],
+              "invocationGap": {
+                "sourceHelper": "campaign:tests/aft/scripts/coverage-git-files-evidence.py",
+                "sourceLine": 68,
+                "required": "agent['workspace_id'] == WS and agent['repo'] == REPO",
+                "canonicalAttempt": "Initial typed bind and exact public Agent row comparison at original step8.",
+                "missingObservation": "Original helper re-reads current Agent identity at each later selected caller. Fresh row identity/repo/workspace/harness readback at those later checkpoints is not yet authored; initial comparison receives no credit for them."
               }
             },
             {
@@ -3905,6 +3949,28 @@
                 "callerDefaultStepMs": 30000,
                 "publicApiRequestMs": 15000,
                 "acceptance": "authored-unvalidated; no raw-suite loader, execution or runtime preservation credit"
+              },
+              "coveredCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/8"
+              ],
+              "unresolvedCallerOldStepIds": [
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/16",
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/20",
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/24",
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/30",
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/31",
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/32",
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/39",
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/44",
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/48",
+                "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/52"
+              ],
+              "invocationGap": {
+                "sourceHelper": "campaign:tests/aft/scripts/coverage-git-files-evidence.py",
+                "sourceLine": 69,
+                "required": "agent['harness'] == env('AFT_REAL_BACKEND')",
+                "canonicalAttempt": "Initial typed bind and exact public Agent row comparison at original step8.",
+                "missingObservation": "Original helper re-reads current Agent identity at each later selected caller. Fresh row identity/repo/workspace/harness readback at those later checkpoints is not yet authored; initial comparison receives no credit for them."
               }
             },
             {
@@ -41208,6 +41274,7 @@
     "reachableCandidatePredicates": 474,
     "classificationMethod": "Conservative static selected invocation/function-call closure and external helper filename references, with selected branch obligations explicitly unresolved. Unknown dynamic paths receive no preservation credit; selected closure is a conservative candidate set, not a completed branch-specific acceptance denominator.",
     "reviewedAuthoredUnvalidatedPredicates": 15,
+    "partiallyMappedRepeatedPredicates": 3,
     "fullPreservationAcceptance": false
   },
   "dependencies": {

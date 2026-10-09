@@ -687,7 +687,7 @@ tests:
                     binding: baseline
                     pointer: /body/content
                 - literal: |-
-                    
+
                     $
             - op: ne
               args:
