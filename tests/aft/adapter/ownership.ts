@@ -5,6 +5,7 @@ import type { GitInput, GitOutput } from './git.js';
 import type { OwnedRendererTarget } from './renderer-target.js';
 import type { SyntheticProbe } from './synthetic-probe.js';
 import type { EvidenceClass } from '@tysonthomas9/aft/types';
+import { validateFixtureOperationAuthority, type FixtureOperationAuthority } from './authority.js';
 import { bindEvidenceStore, evidenceKey } from './evidence.js';
 import { AgentRow, AgentRef, requireFact, type NativeAccess, type ReadTransport } from './protocol.js';
 
@@ -35,6 +36,7 @@ export interface OwnedFixture {
   secrets: readonly string[];
   syntheticProbe?: SyntheticProbe;
   rendererTarget?: OwnedRendererTarget;
+  operationAuthority?: FixtureOperationAuthority;
   readApi: ReadTransport;
   readFiles: ReadTransport;
   resolveAgent(agentId: string, signal: AbortSignal): Promise<OwnedAgent>;
@@ -47,6 +49,7 @@ export function putFixture(context: CapabilityContext, fixture: OwnedFixture): v
   requireFact(fixture.runId === context.runId && fixture.suiteId === context.suiteId && fixture.scope === context.scope &&
     (fixture.scope === 'suite' || fixture.caseId === context.caseId) && fixture.leaseId && !context.resources.has(resourceKey(fixture.leaseId)),
     'ownership-mismatch', 'Fixture ownership is invalid or duplicated');
+  if (fixture.operationAuthority) validateFixtureOperationAuthority(fixture.operationAuthority,fixture);
   bindEvidenceStore(context, fixture.leaseId);
   context.resources.set(resourceKey(fixture.leaseId), fixture);
   try { context.registerResource(fixture.leaseId, [resourceKey(fixture.leaseId), `${evidenceKey}:${fixture.leaseId}`]); }
