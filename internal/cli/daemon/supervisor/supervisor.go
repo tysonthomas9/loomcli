@@ -432,6 +432,9 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 		if err := s.recoverAgent(ap, 0, false); err != nil {
 			slog.Warn("pre-flight recovery failed", "worktree", ap.Entry.Worktree, "err", err)
 		}
+		if !s.startFromLead(ap) {
+			return false
+		}
 	}
 	ap.Mu.Lock()
 	ap.RecoveryMode = mode // consumed by recordResumeOutcome after the run
@@ -447,6 +450,53 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 	}
 	s.createAgentSession(ap, epicID)
 	return true
+}
+
+// startAttemptFromLead moves a reused checkout to the lead's head; tests replace it.
+var startAttemptFromLead = agentcapture.StartFromLead
+
+// startFromLead puts a cold-started agent's reused checkout on its lead's
+// current working-area head, so the new attempt's base is the lead's state and
+// not an earlier attempt's leftover commits (P1.28, D23). Unsaved work in the
+// checkout refuses the start instead of being carried or discarded.
+func (s *Supervisor) startFromLead(ap *AgentProcess) bool {
+	if s.WorkspaceID == "" {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	source := ""
+	if ap.RepoConfig != nil {
+		source = s.freezeSourcePath(ap)
+	}
+	lead := s.attemptLead(ctx, ap)
+	result, err := startAttemptFromLead(ctx, source, ap.WorktreePath, s.WorkspaceID, lead, s.freezeRepoName(ap))
+	if err != nil {
+		s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.SpawnFailureOutcome),
+			"start from lead working area: "+err.Error())
+		slog.Error("agent checkout cannot start from the lead's working area; not starting",
+			"worktree", ap.Entry.Worktree, "lead", lead, "err", err)
+		return false
+	}
+	if result.Moved {
+		slog.Info("agent checkout moved to the lead's working-area head",
+			"worktree", ap.Entry.Worktree, "lead", lead, "base", result.BaseSHA)
+	}
+	return true
+}
+
+// attemptLead is the lead whose working area an attempt starts from: the
+// requesting lead session's agent, else the workspace lead Apply uses.
+func (s *Supervisor) attemptLead(ctx context.Context, ap *AgentProcess) string {
+	ap.Mu.Lock()
+	parent := ap.ParentSessionID
+	ap.Mu.Unlock()
+	if parent != "" && s.ControlStore != nil {
+		if session, err := s.ControlStore.AgentSessions().Get(ctx, s.WorkspaceID, parent); err == nil && session != nil && session.AgentID != "" {
+			return session.AgentID
+		}
+	}
+	return "lead"
 }
 
 // assignEpic assigns and emits an epic for the agent.

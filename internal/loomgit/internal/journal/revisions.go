@@ -161,4 +161,17 @@ func (s *SQLite) RevisionByRequest(ctx context.Context, requestID string) (loomg
 		WHERE request_id = ?`, requestID))
 }
 
+// HasFrozenSource reports whether a complete revision in workspace was frozen
+// from source commit sha, so that commit's work is kept as a revision.
+func (s *SQLite) HasFrozenSource(ctx context.Context, workspace, sha string) (bool, error) {
+	var found int
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM change_revisions
+		WHERE workspace = ? AND source_head_sha = ? AND ready = 1 AND incomplete = 0 LIMIT 1`,
+		workspace, sha).Scan(&found)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 var _ loomgit.RevisionStore = (*SQLite)(nil)
