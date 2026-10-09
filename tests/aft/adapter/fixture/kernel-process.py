@@ -70,7 +70,8 @@ def identity(pid):
         raise RuntimeError('platform unsupported')
     return {'pid': pid, 'generation': generation, 'executable': os.path.realpath(executable),
             'argvSha256': hashlib.sha256(argv).hexdigest(), 'parentPid': parent,
-            'configurationRoot': os.fsdecode(env.get(b'LOOM_CONFIG_DIR', b''))}
+            'configurationRoot': os.fsdecode(env.get(b'LOOM_CONFIG_DIR', b'')),
+            'fixtureRunId': os.fsdecode(env.get(b'RUN_ID', b''))}
 
 
 class RegisteredProcess:
@@ -101,7 +102,7 @@ class RegisteredProcess:
 
     def same(self, current):
         return all(current[key] == self.before[key] for key in
-                   ('pid', 'generation', 'executable', 'argvSha256', 'configurationRoot'))
+                   ('pid', 'generation', 'executable', 'argvSha256', 'configurationRoot', 'fixtureRunId'))
 
     def inspect(self):
         if not self.exited:

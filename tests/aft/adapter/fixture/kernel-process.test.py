@@ -25,7 +25,7 @@ def registered(results, status):
     owned = kernel.RegisteredProcess.__new__(kernel.RegisteredProcess)
     owned.pid = 501
     owned.before = dict(pid=501, generation='known-start', executable='/owned/native',
-                        argvSha256='a' * 64, configurationRoot='/owned/config')
+                        argvSha256='a' * 64, configurationRoot='/owned/config', fixtureRunId='')
     owned.exited = False
     owned.fd = None
     owned.task = types.SimpleNamespace(value=7)
@@ -37,6 +37,13 @@ def registered(results, status):
 
 
 class DarwinExitTests(unittest.TestCase):
+    def test_changed_launcher_token_cannot_rebind_captured_process(self):
+        owned, calls = registered([[]], 0)
+        with patch.object(kernel, 'identity', return_value={**owned.before, 'fixtureRunId': 'changed'}):
+            with self.assertRaises(RuntimeError):
+                owned.inspect()
+        self.assertEqual(calls, [])
+
     def test_failed_terminate_and_concurrent_exit_consumes_notification_once(self):
         owned, calls = registered([[], ['exit'], []], 5)
         with patch.object(kernel, 'identity', return_value=owned.before) as identity:

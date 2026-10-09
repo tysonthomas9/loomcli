@@ -17,7 +17,7 @@ import { createFixtureProviders, productionFixtureOptions } from './providers.js
 import type { RegisteredIdentity } from './descendants.js';
 
 const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
-async function setup(profile: string,registeredServices=false,nativeService=false) {
+async function setup(profile: string,registeredServices=false,nativeService=false,fixtureRunId?:string) {
   const root = await fs.mkdtemp(path.join(path.dirname(new URL(import.meta.url).pathname), 'test-artifacts-'));
   const source = path.join(root, 'source'); const build = path.join(root, 'build');
   await fs.mkdir(source); await fs.mkdir(build); await fs.mkdir(path.join(root, 'locks')); await fs.mkdir(path.join(root, 'home'));
@@ -48,7 +48,7 @@ async function setup(profile: string,registeredServices=false,nativeService=fals
   const config: HostConfig = {
     loom: registered, fleet: registered, engine: registered, adapter: registered,
     tempParent: root, lockParent: path.join(root, 'locks'), hostHome: path.join(root, 'home'), toolPath: '/attested/toolchain',
-    connection: 'test', connectionFingerprint: 'c'.repeat(64), minimumFreeBytes: 1, attestedImages: false,
+    connection: 'test', connectionFingerprint: 'c'.repeat(64), minimumFreeBytes: 1, attestedImages: false,fixtureRunId,
     loomBinary: path.join(build, 'loom'), fleetBinary: path.join(build, 'fleet'), nodeBinary: path.join(build, 'node'), gitBinary: path.join(build, 'git'),
     pinnedOpenCodeBinary: path.join(build, 'opencode'), realBinaries: Object.fromEntries(['codex', 'claude', 'cursor', 'opencode'].map(name => [name,
       { executable: realBinary, sha256: hash('real-binary'), authRoot }])), daemon: false, fakeGitHub: false, maxBudgetUsd: '5.00',
@@ -113,7 +113,8 @@ async function setup(profile: string,registeredServices=false,nativeService=fals
     const identity:RegisteredIdentity={pid,generation:pid===999?'actual-kernel-start':pid===1001?'actual-native-start':pid===1002?'actual-native-successor':`actual-parent-${pid}`,
       executable:pid===999?config.fleetBinary:parent?config.loomBinary:config.pinnedOpenCodeBinary,
       argvSha256:parent?hash(Buffer.from([config.loomBinary,...parent.argv].join('\0')+'\0')):pid===1002?hash(Buffer.from([config.pinnedOpenCodeBinary,'serve','--service'].join('\0')+'\0')):'a'.repeat(64),
-      parentPid:handles.get('serve')!.pid,configurationRoot:driver.configurationRoot,state:'running',...registrationOverrides.get(pid)};
+      parentPid:handles.get('serve')!.pid,configurationRoot:driver.configurationRoot,
+      fixtureRunId:parent?starts.find(start=>start.command.argv===parent.argv)!.command.env.RUN_ID:undefined,state:'running',...registrationOverrides.get(pid)};
     await onCapture?.(pid);
     return {identity,async inspect(){return {...identity,parentPid:handles.get('serve')!.state()==='exited'?1:identity.parentPid,
       state:registeredRunning.get(pid)&&(!parent||parent.state()==='running')?'running' as const:'exited' as const,...registrationOverrides.get(pid)};},
@@ -123,7 +124,7 @@ async function setup(profile: string,registeredServices=false,nativeService=fals
       async abandon(){abandoned.push(pid);}};
   }};
   const protocols:string[]=[];
-  const driver: HostFixtureDriver = new HostFixtureDriver(config, processes, fs, http, () => `fixture-${++count}`, async () => ({ port: port++, async release() {} }),async endpoint=>{protocols.push(endpoint);if(failService==='codex-protocol')throw new Error('private probe failure');},registeredServices?registeredPort:undefined);
+  const driver: HostFixtureDriver = new HostFixtureDriver(config, processes, fs, http, () => `fixture-${++count}`, async () => ({ port: port++, async release() {} }),async endpoint=>{protocols.push(endpoint);if(failService==='codex-protocol')throw new Error('private probe failure');},registeredServices?registeredPort:undefined,()=>1700000000123);
   const lifecycle = new FixtureLifecycle([plan], () => driver, () => 1000, () => 'opaque-fixture');
   return { root, source, config, plan, starts, runs, stopped, handles, driver, lifecycle, protocols, requests,
     registeredStops,captures,abandoned,failRegisteredCleanup(value:boolean){failRegisteredStop=value;},
@@ -136,6 +137,33 @@ async function setup(profile: string,registeredServices=false,nativeService=fals
     failSpawn() { spawnFails = true; }, failService(value: string) { failService = value; }, failStop(value: string) { failStop = value; }, failHttp() { failHttp = true; },
     async cleanup() { await fs.rm(root, { recursive: true }); } };
 }
+
+test('host RUN_ID receipt reads the exact configured or clock-derived token from its owned process',async()=>{
+ for(const token of [undefined,'original-launch-token']){const r=await setup('legacy-deterministic',true,false,token);try{
+  const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal),expected=token??'1700000000';
+  assert.equal(r.starts.find(start=>start.id==='serve')!.command.env.RUN_ID,expected);
+  assert.notEqual(expected,r.request.runId);assert.deepEqual(await r.driver.runtimeIdentity(signal),{fixtureRunId:expected});
+  const pid=r.handles.get('serve')!.pid;r.registration(pid,{fixtureRunId:'foreign-token'});
+  await assert.rejects(r.driver.runtimeIdentity(signal),/identity-mismatch|ownership-mismatch/);
+  r.registration(pid,{fixtureRunId:expected});assert.equal((await r.lifecycle.release(a.lease.id,r.request.runId)).released,true);
+ }finally{await r.cleanup();}}
+});
+
+test('host RUN_ID binding rejects missing readback and invalid input before launch',async()=>{
+ const r=await setup('legacy-deterministic',true);try{
+  const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal);
+  r.registration(r.handles.get('serve')!.pid,{fixtureRunId:undefined});
+  await assert.rejects(r.driver.runtimeIdentity(signal),/identity-mismatch/);
+  r.registration(r.handles.get('serve')!.pid,{fixtureRunId:'1700000000'});
+  assert.equal((await r.lifecycle.release(a.lease.id,r.request.runId)).released,false);
+  r.registration(r.handles.get('serve')!.pid,{fixtureRunId:undefined});
+  assert.equal((await r.lifecycle.release(a.lease.id,r.request.runId)).released,true);
+ }finally{await r.cleanup();}
+ const invalid=await setup('legacy-real-codex',true,false,'Bearer unsafe token');try{
+  await assert.rejects(invalid.lifecycle.acquire(invalid.request,new AbortController().signal),/identity-mismatch/);
+  assert.equal(invalid.starts.length,0);assert.equal(invalid.runs.length,0);assert.equal(invalid.captures.length,0);
+ }finally{await invalid.cleanup();}
+});
 
 test('host publishes creation receipts for both owned workspaces and enrolls only actual legacy store rows',async()=>{
  const r=await setup('legacy-deterministic',true);try{
@@ -173,6 +201,8 @@ test('canonical registry production binding retains both actual host workspaces 
   const context=createCapabilityContext({file:'owned-workspaces.test.yaml',line:1},registry,'00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000002');
   const acquired=await registry.invoke({id:'loom.fixture.acquire',version:1,input:{}},{...r.request,runId:context.runId},context);
   assert.equal(acquired.availability,'observed');const leaseId=(acquired.data as {lease:{id:string}}).lease.id;
+  assert.equal((acquired.data as {fixtureRunId:string}).fixtureRunId,'1700000000');
+  assert.notEqual((acquired.data as {fixtureRunId:string}).fixtureRunId,context.runId);
   const fixture=await getFixture(context,leaseId);assert.equal(fixture.ownedWorkspaces!.length,2);
   assert.equal(requireOwnedWorkspace(fixture,'E2E-WS-2',undefined,'legacy-agent-name').workspaceId,'E2E-WS-2');
   const before=r.requests.length;await assert.rejects(fixture.readWorkspaceLegacyAgent!('foreign','nova',context.signal));assert.equal(r.requests.length,before);
