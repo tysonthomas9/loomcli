@@ -9,6 +9,7 @@ import { FixtureComposeServeId,RestartComposeServeId,FixtureComposeServeEffects,
   observeComposeServe,restartComposeServe } from './fixture-compose.js';
 import { beginNativeOperation } from './native-operation-authority.js';
 import { NativeOperationEffects } from './native-operation-effects.js';
+import { ArchiveAgentId,ArchiveAgentEffects,ArchiveAgentInput,ArchiveAgentOutput,archiveAgent } from './agent-archive.js';
 import { captureNativeAgent, guardedEnrollmentStore, ownedNativeInvocation } from './native-invocation.js';
 import { retainSavedCapture } from './saved-capture.js';
 export { SavedCaptureInput, rereadSavedCapture } from './saved-capture.js';
@@ -40,6 +41,7 @@ export * from './renderer-contract.js';
 export * from './composition.js';
 export * from './redaction.js';
 export * from './authority.js';
+export * from './agent-archive.js';
 export * from './fixture-workers.js';
 export * from './fixture-worker-state.js';
 export * from './fixture-compose.js';
@@ -79,6 +81,14 @@ export function createCoreProviders(implementation: ImplementationPin & { sha256
     evidenceClasses: ['deterministic', 'persisted-public-api', 'real-native', 'live-provider'] as const };
   const common = { implementation, implementationSha256: implementation.sha256, ...read, evidenceClasses: [...read.evidenceClasses] };
   return [
+    defineOperation({...common,id:ArchiveAgentId,effects:[...ArchiveAgentEffects],retry:'never',
+      inputSchema:ArchiveAgentInput,outputSchema:ArchiveAgentOutput,
+      async run(input,context) {
+        const {fixture,grant,value,retention}=await archiveAgent(context,input);
+        return {value,identity:{...identity(fixture),workspaceId:input.agent.workspaceId,agentId:input.agent.agentId},
+          evidenceClass:grant.evidenceClass,secrets:fixture.secrets,retention};
+      },
+    }),
     defineOperation({...common,id:FixtureComposeServeId,effects:[...FixtureComposeServeEffects],retry:'never',
       inputSchema:FixtureComposeServeInput,outputSchema:FixtureComposeServeOutput,
       async run(input,context) {
