@@ -7,7 +7,7 @@ import { RegisteredBuiltinWorkers } from './workers.js';
 import { OwnedDescendants, type RegisteredIdentity, type RegisteredProcessHandle } from './descendants.js';
 import type { Resource } from './lifecycle.js';
 
-async function setup(){
+async function setup(exitObservation=false){
  const root=await fs.mkdtemp(path.resolve('fixture/test-artifacts-workers-'));
  const config=path.join(root,'config'),cwd=path.join(root,'project'),stateRoot=path.join(cwd,'custom-state');
  await fs.mkdir(path.join(config,'workspaces','E2E-WS'),{recursive:true});await fs.mkdir(stateRoot,{recursive:true});
@@ -23,24 +23,26 @@ async function setup(){
  const identity:RegisteredIdentity={pid:41,generation:'kernel-worker-1',executable:exe,
   argvSha256:createHash('sha256').update(Buffer.from(argv.join('\0')+'\0')).digest('hex'),parentPid:40,configurationRoot:config,state:'running'};
  const parent={id:'owned-daemon',identity:{...identity,pid:40,generation:'kernel-daemon-1'}};
- let current={...identity},parentGeneration=parent.identity.generation,captures=0,abandons=0,stops=0,count=0;
+ let current={...identity},parentGeneration=parent.identity.generation,captures=0,abandons=0,stops=0,count=0,apiStops=0;
  let onCapture:(()=>Promise<void>)|undefined,onActor:(()=>Promise<void>)|undefined;
  const resources:Resource[]=[];const handles:RegisteredProcessHandle[]=[];
  const descendants=new OwnedDescendants({async capture(pid){captures++;assert.equal(resources.at(-1)?.generation,`unverified:${pid}`);
   await onCapture?.();const original={...current};let exited=false;
   const handle={identity:original,async inspect(){return {...original,state:exited?'exited' as const:'running' as const};},
-   async stop(){stops++;exited=true;},async abandon(){abandons++;}};handles.push(handle);return handle;
+   async stop(){stops++;exited=true;},async abandon(){abandons++;},
+   ...(exitObservation?{async awaitExit(){exited=true;}}:{})};handles.push(handle);return handle;
  }},resource=>resources.push(resource));
  const stamp=async(filename:string)=>{const s=await fs.lstat(filename);return {path:filename,device:s.dev,inode:s.ino};};
  const registry=new RegisteredBuiltinWorkers({configurationRoot:await stamp(config),runtimeRoot:await stamp(root),
   workspaceId:'E2E-WS',daemonCwd:cwd,loomExecutable:exe},{
   async parent(){return parent;},async verifyParent(p){assert.equal(p.identity.generation,parentGeneration);},
-  async verifyActor(name,actual){assert.equal(name,'nova');assert.equal(actual,worktree);await onActor?.();},nextId:()=>String(++count)
+  async verifyActor(name,actual){assert.equal(name,'nova');assert.equal(actual,worktree);await onActor?.();},nextId:()=>String(++count),
+  async stop(fact,generation){assert.equal(fact.agentId,'nova');assert.equal(fact.workspaceId,'E2E-WS');assert.equal(generation,'owned-serve');apiStops++;return {status:202,body:{success:true}};}
  },descendants);
  return {root,config,stateRoot,stateFile,sidecarFile,sidecar,row,state,identity,parent,registry,descendants,resources,handles,write,
   setIdentity:(value:Partial<RegisteredIdentity>)=>{current={...current,...value};},
   replaceParent:()=>{parentGeneration='foreign-parent';},onCapture:(value:()=>Promise<void>)=>{onCapture=value;},
-  onActor:(value:()=>Promise<void>)=>{onActor=value;},counts:()=>({captures,abandons,stops}),remove:()=>fs.rm(root,{recursive:true,force:true})};
+  onActor:(value:()=>Promise<void>)=>{onActor=value;},apiStops:()=>apiStops,counts:()=>({captures,abandons,stops}),remove:()=>fs.rm(root,{recursive:true,force:true})};
 }
 const signal=()=>new AbortController().signal;
 
@@ -123,5 +125,23 @@ test('retains predecessor and enrolls a source-registered successor only after o
   const second=(await s.registry.refresh(signal()))[0]!;assert.notEqual(second.id,first.id);
   assert.equal(second.generation,'kernel-worker-2');assert.equal(s.descendants.initial(first.id).generation,first.generation);
   await s.descendants.stop(second.id,second.generation);assert.equal(s.counts().stops,2);
+ }finally{await s.remove();}
+});
+
+test('product worker stop requires an available exact exit observer before any API effect',async()=>{
+ const s=await setup();try{
+  const fact=(await s.registry.refresh(signal()))[0]!;
+  await assert.rejects(s.registry.stop(fact.id,fact.generation,'owned-serve',signal()),/unsupported-capability/);
+  assert.equal(s.apiStops(),0);assert.equal(s.counts().stops,0);
+ }finally{await s.remove();}
+});
+
+test('product worker stop retains the API outcome and observed exit without invoking cleanup',async()=>{
+ const s=await setup(true);try{
+  const fact=(await s.registry.refresh(signal()))[0]!;
+  const result=await s.registry.stop(fact.id,fact.generation,'owned-serve',signal());
+  assert.equal(result.response.status,202);assert.equal(result.transition.afterGeneration,null);
+  assert.equal((await s.descendants.inspect(fact.id,fact.generation)).state,'exited');
+  assert.equal(s.apiStops(),1);assert.equal(s.counts().stops,0);
  }finally{await s.remove();}
 });

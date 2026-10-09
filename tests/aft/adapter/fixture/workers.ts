@@ -28,6 +28,7 @@ export interface WorkerPorts {
  verifyParent(parent:WorkerParent,signal:AbortSignal):Promise<void>;
  verifyActor(name:string,worktree:string,signal:AbortSignal):Promise<void>;
  nextId():string;
+ stop?(fact:Readonly<OwnedWorkerFact>,serveGeneration:string,signal:AbortSignal):Promise<{status:number;body:unknown}>;
 }
 /** Narrow builtin worker registration. No enumeration by PID/name, process
  * launch, force-stop actor, terminal exit or native-session association. */
@@ -35,6 +36,7 @@ export class RegisteredBuiltinWorkers {
  private active=false;
  private readonly current=new Map<string,{id:string;row:z.infer<typeof Row>;generation:string}>();
  private readonly pending=new Map<string,{id:string;row:z.infer<typeof Row>}>();
+ private readonly stopAttempts=new Set<string>();
  constructor(private readonly coordinates:WorkerCoordinates,private readonly ports:WorkerPorts,
   private readonly descendants:OwnedDescendants,private readonly files:typeof fs=fs){
   this.coordinates=Object.freeze({...coordinates,configurationRoot:Object.freeze({...coordinates.configurationRoot}),
@@ -51,6 +53,30 @@ export class RegisteredBuiltinWorkers {
  async refresh(signal:AbortSignal):Promise<readonly OwnedWorkerFact[]>{
   signal.throwIfAborted();check(!this.active);this.active=true;
   try{return await this.refreshChecked(signal);}finally{this.active=false;}
+ }
+ /** The product API actor and the kernel exit observation are separate facts.
+  * No force-cleanup or saved-command restart substitutes for either one. */
+ async stop(id:string,generation:string,serveGeneration:string,signal:AbortSignal){
+  signal.throwIfAborted();check(!this.active&&serveGeneration.length>0);this.active=true;
+  try{
+   if(!this.ports.stop)throw new FixtureError('unsupported-capability');
+   const key=JSON.stringify([id,generation]);check(!this.stopAttempts.has(key));
+   const facts=await this.refreshChecked(signal),fact=facts.find(value=>value.id===id&&value.generation===generation);
+   check(fact);this.descendants.requireExitObservation(id,generation);
+   const parent=await this.ports.parent(signal);await this.ports.verifyParent(parent,signal);
+   check(parent.identity.state==='running'&&(await this.descendants.inspect(id,generation)).parentPid===parent.identity.pid);
+   signal.throwIfAborted();this.stopAttempts.add(key);
+   const response=await this.ports.stop(fact!,serveGeneration,signal);
+   check(Number.isInteger(response.status)&&response.status>=200&&response.status<300);
+   await this.ports.verifyParent(parent,signal);signal.throwIfAborted();
+   await this.descendants.awaitExit(id,generation);
+   signal.throwIfAborted();check((await this.descendants.inspect(id,generation)).state==='exited');
+   await this.ports.verifyParent(parent,signal);
+   const row=this.current.get(fact!.agentId);check(row?.id===id&&row.generation===generation&&row.row.worktree_path);
+   await this.ports.verifyActor(fact!.agentId,row!.row.worktree_path!,signal);
+   await this.ports.verifyParent(parent,signal);
+   return {response,transition:{beforeGeneration:generation,afterGeneration:null,affectedIds:[id],complete:true as const}};
+  }finally{this.active=false;}
  }
  private async refreshChecked(signal:AbortSignal){
   const c=this.coordinates;
