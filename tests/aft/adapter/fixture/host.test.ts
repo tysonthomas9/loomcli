@@ -8,6 +8,12 @@ import { FixtureLifecycle, FixtureError, type FixturePlan } from './lifecycle.js
 import { LaunchNotStarted, type HostProcesses, type HostCommand, type OwnedProcess } from './process.js';
 import { type RegisteredBuild, verifyManifest } from './production.js';
 import { materializeRenderer } from './renderer-fixtures.test.js';
+import { createEvidenceStore } from '../evidence.js';
+import { enrollOwnedLegacyAgent, requireOwnedWorkspace } from '../workspaces.js';
+import type { OwnedFixture } from '../ownership.js';
+import { getFixture } from '../ownership.js';
+import { CapabilityRegistry, createCapabilityContext, calculateImplementationPin } from '@tysonthomas9/aft/capabilities';
+import { createFixtureProviders, productionFixtureOptions } from './providers.js';
 
 const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
 async function setup(profile: string,registeredServices=false,nativeService=false) {
@@ -54,6 +60,8 @@ async function setup(profile: string,registeredServices=false,nativeService=fals
   const processes: HostProcesses = {
     async run(command) {
       runs.push(command);
+      if(command.argv[0]==='init'){await fs.mkdir(path.join(command.cwd,'.git'),{recursive:true});return '';}
+      if(command.argv[0]==='rev-parse'&&command.argv[1]==='--git-common-dir')return '.git';
       if (command.argv[0] === 'rev-parse') return command.argv[1] === 'HEAD' ? revision.commit : revision.tree;
       if (command.argv[0] === 'ls-files') return sourceEntries.map(entry => entry.relativePath).join('\0') + '\0';
       return '';
@@ -77,14 +85,19 @@ async function setup(profile: string,registeredServices=false,nativeService=fals
     },
   };
   let onHttp:((method:string,relative:string)=>Promise<void>)|undefined;
+  let responseOverride:((relative:string)=>unknown)|undefined;
   const requests:{method:string;relative:string}[]=[];
-  const http: Http = async (_origin, method, relative) => {
+  const createdWorkspaces=new Map<string,{id:string;repos:{path:string}[]}>();
+  const http: Http = async (_origin, method, relative,body) => {
     requests.push({method,relative});await onHttp?.(method,relative);
+    if(responseOverride){const overridden=responseOverride(relative);if(overridden!==undefined)return {status:200,body:overridden};}
     if (failHttp) return { status: 503, body: { message: 'Bearer private-http-token' } };
     if(relative==='/__requests')return {status:200,body:{requests:[],queued:0}};
     if(relative==='/__reset')return {status:200,body:{ok:true}};
+    if(method==='POST'&&relative==='/api/workspaces'){const input=body as {name:string;repos:string[]},data={id:input.name.toUpperCase(),repos:input.repos.map(path=>({path}))};createdWorkspaces.set(data.id,data);return {status:201,body:{success:true,data}};}
     if (method === 'POST') return { status: 201, body: {} };
-    return { status: 200, body: relative.endsWith('/E2E-WS') ? { data: { id: 'E2E-WS', repos: [{ path: driver.workspaceRoot }] } } : {} };
+    const data=createdWorkspaces.get(relative.split('/').at(-1)!);
+    return { status: 200, body: data?{success:true,data}:{} };
   };
   const registeredRunning=new Map<number,boolean>();let failRegisteredStop=false;const registeredStops:string[]=[];
   const registeredPort={async capture(pid:number){assert.ok([999,1001].includes(pid));registeredRunning.set(pid,true);const identity={pid,generation:pid===999?'actual-kernel-start':'actual-native-start',executable:pid===999?config.fleetBinary:config.pinnedOpenCodeBinary,argvSha256:'a'.repeat(64),parentPid:handles.get('serve')!.pid,configurationRoot:driver.configurationRoot,state:'running' as const};return {identity,async inspect(){return {...identity,parentPid:handles.get('serve')!.state()==='exited'?1:identity.parentPid,state:registeredRunning.get(pid)?'running' as const:'exited' as const};},async terminateGracefully(){assert.equal(pid,1001);registeredRunning.set(pid,false);registeredStops.push('opencode-term');},async stop(){if(!registeredRunning.get(pid))return;if(failRegisteredStop)throw new Error('private child cleanup');registeredRunning.set(pid,false);registeredStops.push(pid===999?'fleet':'opencode-force');},async abandon(){assert.fail('owned child');}};}};
@@ -95,9 +108,63 @@ async function setup(profile: string,registeredServices=false,nativeService=fals
     registeredStops,failRegisteredCleanup(value:boolean){failRegisteredStop=value;},
     request: { runId: 'test-run', profile, loomRevision: revision, fleetRevision: revision, model: plan.model, maxCases: 1, selectionSha256: plan.selectionSha256 },
     onHttp(callback:(method:string,relative:string)=>Promise<void>){onHttp=callback;},
+    overrideResponse(callback:(relative:string)=>unknown){responseOverride=callback;},
     failSpawn() { spawnFails = true; }, failService(value: string) { failService = value; }, failStop(value: string) { failStop = value; }, failHttp() { failHttp = true; },
     async cleanup() { await fs.rm(root, { recursive: true }); } };
 }
+
+test('host publishes creation receipts for both owned workspaces and enrolls only actual legacy store rows',async()=>{
+ const r=await setup('legacy-deterministic',true);try{
+  const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal);
+  const owner={leaseId:a.lease.id,runId:'test-run',suiteId:'suite',scope:'case' as const,caseId:'case',profile:r.plan.profile};
+  const store=await createEvidenceStore(path.join(r.driver.runtimeRoot,'evidence'));
+  const roster=await r.driver.ownedWorkspaceRoster(owner,store,signal);
+  assert.deepEqual(roster.map(value=>value.workspaceId),['E2E-WS-2','E2E-WS']);
+  for(const record of roster){const fact=JSON.parse(await fs.readFile(await store.resolve(record.creationReceipt.id),'utf8'));
+    assert.equal(fact.storeGeneration,'actual-kernel-start');assert.deepEqual(fact.agentIds,[]);assert.equal(fact.repo,record.repo);}
+  const fixture:OwnedFixture={...owner,workspaceId:a.workspaceId,repo:a.repo,ownedWorkspaces:roster,secrets:[],verify:async()=>{await r.driver.prepareObserve(signal);},
+   expiresAtUtcMs:Number.MAX_SAFE_INTEGER,evidenceClass:'deterministic',roots:new Map(),agents:new Map(),
+   readApi:async()=>{throw new Error('unused');},readFiles:async()=>{throw new Error('unused');},resolveAgent:async()=>{throw new Error('unused');},dispose:async()=>{},
+   readWorkspaceLegacyAgent:(ws:string,name:string,abort:AbortSignal)=>r.driver.readWorkspaceLegacyAgent(owner,ws,name,abort)};
+  assert.equal(requireOwnedWorkspace(fixture,'E2E-WS-2',undefined,'legacy-agent-name').workspaceId,'E2E-WS-2');
+  assert.throws(()=>requireOwnedWorkspace(fixture,'foreign',undefined,'legacy-agent-name'));
+  assert.throws(()=>requireOwnedWorkspace(fixture,'E2E-WS','nova','legacy-agent-name'));
+  r.overrideResponse(relative=>relative==='/api/workspaces/E2E-WS/agents'?{success:true,total:1,data:[{workspace_key:'E2E-WS',name:'nova',parent:'',created_at:'2026-10-09T00:00:00Z',updated_at:'2026-10-09T00:01:00Z'}]}:undefined);
+  await enrollOwnedLegacyAgent(fixture,'E2E-WS','nova',signal,store);
+  assert.equal(requireOwnedWorkspace(fixture,'E2E-WS','nova','legacy-agent-name').workspaceId,'E2E-WS');
+  const enrolled=fixture.ownedWorkspaces!.find(value=>value.workspaceId==='E2E-WS')!;
+  const fact=JSON.parse(await fs.readFile(await store.resolve(enrolled.enrollmentReceipts[0]!.id),'utf8'));
+  assert.equal(fact.name,'nova');assert.equal(fact.createdAt,'2026-10-09T00:00:00Z');assert.equal(fact.parentName,null);
+  const before=r.requests.length;
+  await assert.rejects(r.driver.readWorkspaceLegacyAgent(owner,'foreign','nova',signal));assert.equal(r.requests.length,before);
+  await r.lifecycle.release(a.lease.id,r.request.runId);
+ }finally{await r.cleanup();}
+});
+test('canonical registry production binding retains both actual host workspaces and refuses foreign store reads',async()=>{
+ const r=await setup('legacy-deterministic',true);try{
+  const root=path.dirname(path.dirname(new URL(import.meta.url).pathname));
+  const pin=calculateImplementationPin(root,['fixture/providers.ts','fixture/host.ts','fixture/workspace-records.ts'],'fixture/providers.ts','createFixtureProviders');
+  const options=productionFixtureOptions(pin,pin.sha256,[r.plan],r.config,r.config);options.driver=()=>r.driver;
+  const registry=new CapabilityRegistry();for(const provider of createFixtureProviders(options))registry.register(provider);
+  const context=createCapabilityContext({file:'owned-workspaces.test.yaml',line:1},registry,'00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000002');
+  const acquired=await registry.invoke({id:'loom.fixture.acquire',version:1,input:{}},{...r.request,runId:context.runId},context);
+  assert.equal(acquired.availability,'observed');const leaseId=(acquired.data as {lease:{id:string}}).lease.id;
+  const fixture=await getFixture(context,leaseId);assert.equal(fixture.ownedWorkspaces!.length,2);
+  assert.equal(requireOwnedWorkspace(fixture,'E2E-WS-2',undefined,'legacy-agent-name').workspaceId,'E2E-WS-2');
+  const before=r.requests.length;await assert.rejects(fixture.readWorkspaceLegacyAgent!('foreign','nova',context.signal));assert.equal(r.requests.length,before);
+  assert.equal((await registry.invoke({id:'loom.fixture.release',version:1,input:{}},{leaseId},context)).availability,'observed');
+ }finally{await r.cleanup();}
+});
+test('host workspace ownership rejects replaced store before actor discovery',async()=>{
+ const r=await setup('legacy-deterministic',true);try{
+  const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal);
+  const owner={leaseId:a.lease.id,runId:'test-run',suiteId:'suite',scope:'case' as const,caseId:'case',profile:r.plan.profile};
+  const filename=path.join(r.driver.configurationRoot,'fleet-db/runtime.json'),original=await fs.readFile(filename,'utf8');
+  await fs.writeFile(filename,original.replace('999','998'));const before=r.requests.length;
+  await assert.rejects(r.driver.readWorkspaceLegacyAgent(owner,'E2E-WS','nova',signal));assert.equal(r.requests.length,before);
+  await fs.writeFile(filename,original);await r.lifecycle.release(a.lease.id,r.request.runId);
+ }finally{await r.cleanup();}
+});
 
 for (const profile of legacyProfiles) test(`${profile}: production host driver uses owned paths and fixed profile startup`, async () => {
   const r = await setup(profile);
