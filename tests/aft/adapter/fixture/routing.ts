@@ -3,6 +3,7 @@ import { createFixtureOperationAuthority, type FixtureAuthorityOwner } from '../
 import type { FixturePlan } from './lifecycle.js';
 import { FixtureError } from './lifecycle.js';
 import { LegacyOperationEffects, legacyTaskEffects } from '../legacy/effects.js';
+export type FixtureModelSelection = {readonly kind:'backend-default'} | {readonly kind:'exact-model';readonly model:string;readonly selector:'agent-env'|'opencode-env'|'opencode-config'|'native-model'};
 const profiles = {
  'agents-real-opencode':{backend:'opencode',observation:'real-native'},
  'agents-emulator':{backend:'opencode',observation:'deterministic'},
@@ -15,9 +16,13 @@ const profiles = {
 } as const;
 export function fixtureRouting(plan:FixturePlan) {
  const route=profiles[plan.profile as keyof typeof profiles];if(!route)throw new FixtureError('unsupported-capability');
+ if(route.backend==='cursor'&&plan.model!=='backend-default')throw new FixtureError('unsupported-capability');
+ if(route.backend!=='cursor'&&plan.model==='backend-default')throw new FixtureError('identity-mismatch');
  if(plan.liveProvider&&(route.backend!==plan.liveProvider.backend||plan.liveProvider.model!==plan.model))throw new FixtureError('identity-mismatch');
  if(route.observation==='deterministic'&&plan.liveProvider)throw new FixtureError('identity-mismatch');
- return Object.freeze({profile:plan.profile,backend:route.backend,model:plan.model,evidenceClass:route.observation as EvidenceClass,externalProvider:!!plan.liveProvider,
+ const modelSelection:FixtureModelSelection=route.backend==='cursor'?{kind:'backend-default'}:{kind:'exact-model',model:plan.model,
+   selector:plan.profile==='legacy-deterministic'?'opencode-config':plan.profile.startsWith('agents-')?'native-model':route.backend==='opencode'?'opencode-env':'agent-env'};
+ return Object.freeze({profile:plan.profile,backend:route.backend,model:plan.model,modelSelection:Object.freeze(modelSelection),evidenceClass:route.observation as EvidenceClass,externalProvider:!!plan.liveProvider,
    allowedTaskBackends:Object.freeze(route.backend?[route.backend]:['codex','claude','cursor','opencode'])});
 }
 export function fixtureOperationAuthority(owner:FixtureAuthorityOwner,plan:FixturePlan) {

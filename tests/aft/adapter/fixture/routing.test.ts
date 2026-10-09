@@ -38,3 +38,9 @@ test('fixture grants preserve the shared API/filesystem/CLI effect contract for 
  assert.equal(getFixtureOperationAuthority(paid,'loom.cli.task',legacyTaskEffects({taskExecution:'live-provider'})).evidenceClass,'live-provider');
  assert.throws(()=>getFixtureOperationAuthority(fixture,'loom.cli.task',legacyTaskEffects({taskExecution:'live-provider'})));
 });
+test('Cursor exposes backend-default selection; a named model cannot be attested by its source backend',()=>{
+ assert.throws(()=>fixtureRouting({...plan,profile:'legacy-real-cursor'}));
+ assert.deepEqual(fixtureRouting({...plan,profile:'legacy-real-cursor',model:'backend-default'}).modelSelection,{kind:'backend-default'});
+ assert.deepEqual(fixtureRouting(plan).modelSelection,{kind:'exact-model',model:plan.model,selector:'agent-env'});
+ assert.deepEqual(fixtureRouting({...plan,profile:'legacy-real-opencode'}).modelSelection,{kind:'exact-model',model:plan.model,selector:'opencode-env'});
+});
