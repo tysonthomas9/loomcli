@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import { CapabilityRegistry, createCapabilityContext, calculateImplementationPin, getRegisteredResource } from '@tysonthomas9/aft/capabilities';
 import { createFixtureProviders, productionFixtureOptions } from '../fixture/providers.js';
-import { HostFixtureDriver, type HostConfig, type Http } from '../fixture/host.js';
+import { HostFixtureDriver, readHttp, type HostConfig, type Http } from '../fixture/host.js';
 import type { HostProcesses, HostCommand, OwnedProcess } from '../fixture/process.js';
 import { LaunchNotStarted } from '../fixture/process.js';
 import type { FixturePlan } from '../fixture/lifecycle.js';
@@ -19,7 +19,7 @@ import { createFixtureOperationAuthority } from '../authority.js';
 import { LegacyOperationEffects } from './providers.js';
 import { testLegacyRoster } from './test-roster.js';
 import { materializeRenderer } from '../fixture/renderer-fixtures.test.js';
-import type { RegisteredProcessPort } from '../fixture/descendants.js';
+import type { RegisteredProcessPort, RegisteredIdentity } from '../fixture/descendants.js';
 import { ObservationError } from '../protocol.js';
 import { HostWorkspaceRecords } from '../fixture/workspace-records.js';
 import { appendCreatedWorkspaces, requireOwnedWorkspace, enrollOwnedLegacyAgent } from '../workspaces.js';
@@ -30,7 +30,7 @@ import { TerminalDetachEffects } from './effects.js';
 import type { Json } from '../protocol.js';
 
 const hash = (bytes: string) => createHash('sha256').update(bytes).digest('hex');
-async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClaude?: boolean; invalidStartup?: boolean; fakeGitHub?: boolean; onRoot?: (root: string) => void; terminal?: 'default' | 'factory-probe' } = {}) {
+async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClaude?: boolean; invalidStartup?: boolean; fakeGitHub?: boolean; onRoot?: (root: string) => void; terminal?: 'default' | 'factory-probe'; worker?: 'default' | 'factory-probe' } = {}) {
   const created = await fs.mkdtemp(fileURLToPath(new URL('.seed-test-host-', import.meta.url)));
   t.after(async () => { await fs.rm(created, { recursive: true, force: true }); });
   const root = await fs.realpath(created); options.onRoot?.(root);
@@ -61,7 +61,7 @@ async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClau
     loomBinary: path.join(build, 'loom'), fleetBinary: path.join(build, 'fleet'), nodeBinary: path.join(build, 'node'), gitBinary: path.join(build, 'git'),
     pinnedOpenCodeBinary: path.join(build, 'opencode'), realBinaries: options.liveClaude ? {
       claude: { executable: path.join(build, 'claude'), sha256: hash('claude'), authRoot: path.join(root, 'home') } } : {},
-    daemon: false, fakeGitHub: options.fakeGitHub ?? false, maxBudgetUsd: '5.00' };
+    daemon: Boolean(options.worker), fakeGitHub: options.fakeGitHub ?? false, maxBudgetUsd: '5.00' };
   const plan: FixturePlan = { profile: options.liveClaude ? 'legacy-real-claude' : 'legacy-deterministic', loomRevision: { ...revision }, fleetRevision: { ...revision }, engineRevision: { ...revision },
     adapterRevision: { ...revision }, model: options.liveClaude ? 'configured-model' : 'aft/m', maxCases: 1, caseCount: 1, selectionSha256: 'd'.repeat(64), leaseDurationMs: 600000,
     ...(options.liveClaude ? { liveProvider: { backend: 'claude', model: 'configured-model' } as const } : {}) };
@@ -81,11 +81,17 @@ async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClau
   const handles: OwnedProcess[] = [];
   const startedCommands = new Map<number, HostCommand>();
   const parentTokenOverrides = new Map<number, string | undefined>();
+  const workerKernels = new Map<number, { identity: RegisteredIdentity; alive: boolean }>();
+  const workerCommonDirs = new Map<string, string>();
+  const workerRequests: { method: string; route: string; body: unknown }[] = [];
+  let workerStatus = 200, workerExits = true, workerStateFile = '', workerWireReady = false;
+  let workerRow: { worktree: string; role: string; pid: number; status: string; worktree_path: string; current_backend: string; last_start: string } | undefined;
   let storeGeneration = 'injected-captured-store';
   const processes: HostProcesses = {
     async run(command) {
       if (command.argv[0] === 'init') { await fs.mkdir(path.join(command.cwd, '.git')); return ''; }
       if (command.argv[0] === 'rev-parse' && command.argv[1] === '--git-common-dir') {
+        if (workerCommonDirs.has(command.cwd)) return workerCommonDirs.get(command.cwd)!;
         const repo = [...managed.values()].flatMap(row => row.repositories).find(row => row.path === command.cwd);
         const worktree = [...managed.entries()].find(([ws]) => worktrees.get(ws) === command.cwd)?.[1];
         return path.join(repo?.source ?? worktree?.source ?? command.cwd, '.git');
@@ -136,7 +142,19 @@ async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClau
           command.argv[2] === 'role' ? badRoles ? 'not JSON' : '[{"name":"task","model":"unused-role-model"}]' : '{"agent":"worker","cost":0}' }; } };
     },
   };
-  const http: Http = async (_origin, method, route, body) => {
+  const http: Http = async (_origin, method, route, body, signal) => {
+    if (route.endsWith('/agents/worker/stop')) {
+      assert.ok(options.worker && workerWireReady, 'Worker wire must use the injected fetch transport');
+      workerRequests.push({ method, route, body });
+      const response = await readHttp(_origin, method, route, body, signal);
+      if (response.status >= 200 && response.status < 300 && workerExits) {
+        workerKernels.get(1700)!.alive = false;
+        workerRow!.pid = 0; workerRow!.status = 'stopped';
+        await fs.writeFile(workerStateFile, JSON.stringify({ pid: driver.processesById.get('daemon')!.pid,
+          started_at: '2026-10-09T00:30:01Z', agents: [workerRow] }));
+      }
+      return response;
+    }
     if (route.includes('/terminal/tabs')) {
       tabRequests.push({ method, route });
       if (method === 'DELETE') return { status: deleteStatus, body: null };
@@ -178,6 +196,11 @@ async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClau
     await fs.rm(filename, options);
   } };
   const registeredPort: RegisteredProcessPort = { async capture(pid: number) {
+    const worker = workerKernels.get(pid);
+    if (worker) return { identity: { ...worker.identity },
+      async inspect() { return { ...worker.identity, state: worker.alive ? 'running' as const : 'exited' as const }; },
+      async awaitExit() { if (worker.alive) throw new Error('Injected worker exit remains unobserved'); },
+      async stop() { worker.alive = false; stops.push('forced-worker-cleanup'); }, async abandon() { assert.fail('Captured worker must stay enrolled'); } };
     const parent = handles.find(handle => handle.pid === pid), command = startedCommands.get(pid);
     assert.ok(pid === 999 || parent && command); let alive = true;
     const identity = { pid, generation: pid === 999 ? 'injected-captured-store' : `injected-kernel-${parent!.generation}`,
@@ -199,7 +222,7 @@ async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClau
   const legacyPin = calculateImplementationPin(adapterRoot, ['legacy/providers.ts','legacy/host-access.ts','legacy/cli-plan.ts'], 'legacy/providers.ts', 'createLegacyProviders');
   const registry = new CapabilityRegistry(); let factories = 0;
   const fixtureOptions = { ...productionFixtureOptions(pin, pin.sha256, [plan], config, config), driver: () => driver };
-  if (options.terminal === 'default') {
+  if (options.terminal === 'default' || options.worker === 'default') {
     // Exercise the actual public composition and its production default factory.
     // This unit pin is not the final emitted implementation closure receipt.
     const compositionPin = calculateImplementationPin(adapterRoot,
@@ -241,6 +264,36 @@ async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClau
   }
   return { root, driver, fixture, evidenceStore: getFixtureEvidenceStore(context, leaseId), leaseId, invoke, launches, stops, factories: () => factories,
     tabRequests,
+    workerRequests,
+    recreateWorkerActor() { actors.get('E2E-WS')![0]!.createdAt = '2026-10-09T02:00:00Z'; },
+    workerResponse(status: number, exits = true) { workerStatus = status; workerExits = exits; },
+    async registerWorker() {
+      assert.ok(options.worker); const daemon = driver.processesById.get('daemon')!;
+      const worktree = path.join(driver.runtimeRoot, 'runtime', 'registered-worker-worktree'); await fs.mkdir(worktree);
+      workerCommonDirs.set(worktree, path.join(managed.get('E2E-WS')!.source, '.git'));
+      const state = path.join(driver.workspaceRoot, 'actual-daemon-state'); await fs.mkdir(state);
+      const workspaceConfig = path.join(driver.configurationRoot, 'workspaces', 'E2E-WS'); await fs.mkdir(workspaceConfig, { recursive: true });
+      workerRow = { worktree: 'worker', role: 'task', pid: 1700, status: 'running', worktree_path: worktree,
+        current_backend: 'codex', last_start: '2026-10-09T01:00:00Z' };
+      await fs.writeFile(path.join(workspaceConfig, 'daemon.pid'), JSON.stringify({ pid: daemon.pid, cwd: driver.workspaceRoot,
+        socket: path.join(state, 'daemon.sock'), started_at: '2026-10-09T00:30:00Z' }));
+      workerStateFile = path.join(state, 'daemon-agents.json');
+      await fs.writeFile(workerStateFile, JSON.stringify({ pid: daemon.pid, started_at: '2026-10-09T00:30:01Z', agents: [workerRow] }));
+      workerKernels.set(1700, { alive: true, identity: { pid: 1700, generation: 'injected-worker-kernel-generation', executable: config.loomBinary,
+        argvSha256: hash([config.loomBinary, 'task', worktree, '--auto', '--daemon-mode', '--backend', 'codex'].join('\0') + '\0'),
+        parentPid: daemon.pid, configurationRoot: driver.configurationRoot, state: 'running' } });
+      // This is a private concrete driver observation used by the unit harness,
+      // not the missing public YAML generation producer or a launched worker.
+      return (await driver.refreshOwnedProductProcesses(new AbortController().signal))[0]!;
+    },
+    installWorkerFetch() {
+      const previous = globalThis.fetch, wire: RequestInit[] = [];
+      let active = true;
+      workerWireReady = true;
+      globalThis.fetch = async (_input, init) => { wire.push(init!); return new Response(JSON.stringify({ success: workerStatus < 300 }), { status: workerStatus }); };
+      const restore = () => { if (active) { globalThis.fetch = previous; active = false; workerWireReady = false; } };
+      t.after(restore); return Object.assign(wire, { restore });
+    },
     tabResponses(bodies: Json[], status = 204) { tabBodies = bodies; tabReads = 0; deleteStatus = status; },
     repoName: (workspaceId = 'E2E-WS') => managed.get(workspaceId)!.repositories[0]!.name,
     onTaskLaunch(callback: () => void) { taskLaunch = callback; },
@@ -270,6 +323,93 @@ async function setup(t: TestContext, options: { seedWorktree?: boolean; liveClau
     processFailure: () => { exitCode = 17; stderr = 'exact process diagnostic'; }, restored: () => restoredBytes,
     async cleanup() { await fs.rm(root, { recursive: true, force: true }); } };
 }
+
+test('default runtime worker stop preserves empty wire and kernel exit separately from HTTP 200 or 202', async t => {
+  for (const status of [200, 202]) {
+    const r = await setup(t, { worker: 'default' }), wire = r.installWorkerFetch();
+    const target = await r.registerWorker(); r.workerResponse(status);
+    const result = await r.invoke('loom.runtime.stimulate', { leaseId: r.leaseId, targetId: target.id,
+      operation: 'worker-stop', expectedGeneration: target.generation });
+    assert.equal(result.availability, 'observed', JSON.stringify({ error: result.error, requests: r.workerRequests.length }));
+    const data = result.data as { beforeGeneration: string; afterGeneration: null; affectedIds: string[]; response: { status: number; body: unknown }; complete: boolean };
+    assert.equal(data.beforeGeneration, target.generation); assert.equal(data.afterGeneration, null);
+    assert.deepEqual(data.affectedIds, [target.id]); assert.equal(data.complete, true);
+    assert.deepEqual(data.response, { status, body: { success: true } });
+    assert.deepEqual(r.workerRequests, [{ method: 'POST', route: '/api/workspaces/E2E-WS/agents/worker/stop', body: undefined }]);
+    assert.equal(wire.length, 1); assert.equal(wire[0]!.body, undefined); assert.equal(wire[0]!.headers, undefined);
+    assert.equal(r.driver.processesById.get('daemon')!.state(), 'running');
+    assert.equal(r.stops.length, 0); assert.equal(r.launches.length, 0);
+    // Row/log predicates from the frozen helper are not credited by this
+    // generation-transition output. Their concrete observation hook is open.
+    assert.equal('daemonLog' in data, false); assert.equal('stoppedRow' in data, false);
+    wire.restore();
+  }
+});
+
+test('worker stop rejects stale, foreign or recreated actor identities before its fixed HTTP effect', async t => {
+  for (const variant of ['target', 'generation', 'actor'] as const) {
+    const r = await setup(t, { worker: 'factory-probe' }), wire = r.installWorkerFetch();
+    const target = await r.registerWorker();
+    if (variant === 'actor') {
+      // Alter the actual API actor through the same harness path used by the
+      // existing canonical incarnation regressions, not the retained receipt.
+      r.recreateWorkerActor();
+    }
+    const result = await r.invoke('loom.runtime.stimulate', { leaseId: r.leaseId,
+      targetId: variant === 'target' ? 'foreign' : target.id, operation: 'worker-stop',
+      expectedGeneration: variant === 'generation' ? 'foreign' : target.generation });
+    assert.equal(result.availability, 'error'); assert.equal(result.data, undefined);
+    assert.equal(wire.length, 0); assert.equal(r.workerRequests.length, 0);
+    assert.equal(r.stops.length, 0); assert.equal(r.launches.length, 0);
+    wire.restore();
+  }
+});
+
+test('worker discovery requires its fixed process-start effect before the legacy factory', async t => {
+  const r = await setup(t, { worker: 'factory-probe' }), wire = r.installWorkerFetch();
+  const target = await r.registerWorker();
+  r.fixture.operationAuthority = createFixtureOperationAuthority(fixtureOwnerIdentity(r.fixture), {
+    'loom.runtime.stimulate': { evidenceClass: 'deterministic',
+      effects: LegacyOperationEffects['loom.runtime.stimulate'].filter(effect => effect !== 'start-owned-process') },
+  });
+  const result = await r.invoke('loom.runtime.stimulate', { leaseId: r.leaseId, targetId: target.id,
+    operation: 'worker-stop', expectedGeneration: target.generation });
+  assert.equal(result.availability, 'unsupported'); assert.equal(r.factories(), 0);
+  assert.equal(wire.length, 0); assert.equal(r.workerRequests.length, 0); assert.equal(r.launches.length, 0);
+  wire.restore();
+});
+
+test('worker HTTP failure or unobserved kernel exit cannot mint a stopped receipt or replay POST', async t => {
+  for (const variant of ['http', 'exit'] as const) {
+    const r = await setup(t, { worker: 'default' }), wire = r.installWorkerFetch();
+    const target = await r.registerWorker(); r.workerResponse(variant === 'http' ? 503 : 202, false);
+    const input = { leaseId: r.leaseId, targetId: target.id, operation: 'worker-stop', expectedGeneration: target.generation };
+    const result = await r.invoke('loom.runtime.stimulate', input);
+    assert.equal(result.availability, 'error'); assert.equal(result.data, undefined);
+    assert.equal((await r.invoke('loom.runtime.stimulate', input)).availability, 'error');
+    assert.equal(wire.length, 1); assert.equal(r.workerRequests.length, 1);
+    assert.equal(r.stops.length, 0); assert.equal(r.launches.length, 0);
+    wire.restore();
+  }
+});
+
+test('worker direct binding keeps the retained serve generation and rejects changed fixed actor requests', async t => {
+  for (const variant of ['serve', 'request', 'target-generation'] as const) {
+    const r = await setup(t, { worker: 'factory-probe' }), wire = r.installWorkerFetch();
+    const target = await r.registerWorker(), signal = new AbortController().signal;
+    const access = productionLegacyAccess(r.fixture, r.evidenceStore);
+    const lease = await access.lease(r.leaseId, signal, 'loom.runtime.stimulate');
+    const owned = lease.processes.find(row => row.id === target.id)!;
+    const request = { method: 'POST' as const, path: '/api/workspaces/E2E-WS/agents/worker/stop', body: null };
+    if (variant === 'serve') await r.driver.restartOwnedProcess('serve', lease.processes.find(row => row.id === 'serve')!.generation, signal);
+    else if (variant === 'request') request.path = '/api/workspaces/E2E-WS/agents/other/stop';
+    else owned.serveGeneration = 'foreign';
+    await assert.rejects(access.stimulate(r.leaseId, owned, 'worker-stop', request, signal));
+    assert.equal(wire.length, 0); assert.equal(r.workerRequests.length, 0);
+    assert.equal(r.stops.includes('forced-worker-cleanup'), false); assert.equal(r.launches.length, 0);
+    wire.restore();
+  }
+});
 
 test('actual Host and public legacy registry preserve unselected multi-repository membership and exact task selectors', async t => {
   const r = await setup(t), topology = await r.addMultiWorkspace();

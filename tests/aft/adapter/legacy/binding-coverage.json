@@ -27,7 +27,7 @@
     "runtime-targets": {
       "owner": "agent-b9294aeb-0c35-440a-8d2a-f1f43287248b",
       "request": "trusted product legacy/native harness/worker/terminal registration plus exact generation-at-effect transition",
-      "status": "host serve bound; other targets missing",
+      "status": "Host serve and registered builtin worker API/kernel generation transitions bound; native/harness and terminal process contracts remain incomplete.",
       "gracefulService": {
         "checkpoint": "51423f5415cb79f4f4ebd429797d5238d2d577f3",
         "sources": [
@@ -87,7 +87,7 @@
         "typedStrengthening": "Exact owned kernel exit is additional generation-transition evidence; it does not substitute daemon liveness, stopped row or same-line log predicates. Unknown or incomplete exit cannot mint afterGeneration:null.",
         "ownership": "Canonical immutable actor/store/source identity and exact worker/serve/daemon/parent generations before and after; synchronous operation reservation, uncertain mutation consumed with no automatic retry.",
         "expectedOutcomes": "Expose bounded complete observed row counts/states, daemon identities/liveness and actual log marker facts for YAML assertions; no opaque helper-success verdict.",
-        "status": "Shared f98 runtime effects include fixed Git/kernel process starts; concrete EMPTY-body API-stop/kernel-exit/row-log-alive producer and default public registry consumer remain required. Current builtin discovery approval is not original actor/oracle proof."
+        "status": "Consumes approved55162ef+90e6 fixed EMPTY-body API stop and exact captured kernel-exit hook. Legacy runtime lease admits bounded builtin registration only under shared f98 discovery effects, retains worker/serve generation pairing, and production default public registry deterministically exercises200/202/empty wire/stale-foreign-incarnation failures/uncertain no-retry. Tests obtain worker ID/generation from PRIVATE actual driver observation, not a public YAML producer; latter remains required. Full daemon-alive/unique-stopped-row/SAME-line log marker producer and authored YAML predicates remain open. Kernel transition alone grants no original helper preservation or runtime proof."
       }
     },
     "compose-mutations": {

@@ -54,6 +54,9 @@ function parse<T>(schema: z.ZodType<T, z.ZodTypeDef, unknown>, input: unknown): 
 export interface OwnedProcess {
   id: string; generation: string; kind: 'serve' | 'harness' | 'worker' | 'terminal';
   workspaceId: string | null; agentName: string | null; sessionName: string | null;
+  // Production worker targets retain the endpoint generation at their owned
+  // observation; a later lease refresh cannot replace it at mutation time.
+  serveGeneration?: string;
 }
 export interface LegacyLease {
   id: string; runId: string; active: boolean; evidence: EvidenceClass;
