@@ -134,6 +134,20 @@ class RegisteredProcess:
             raise RuntimeError('cleanup incomplete')
         return self.inspect()
 
+    def terminate_gracefully(self):
+        # The source restart actor is fixed SIGTERM. It never uses force cleanup
+        # or an adapter-spawned replacement. Only the captured Linux pidfd can
+        # implement it here; Darwin has no ownership-safe TERM port yet.
+        if self.fd is None:
+            raise NotImplementedError('graceful termination unsupported')
+        if self.inspect()['state'] == 'running':
+            signal.pidfd_send_signal(self.fd, signal.SIGTERM)
+            if not self.exited:
+                self.exited = bool(select.select([self.fd], [], [], 15)[0])
+        if not self.exited:
+            raise RuntimeError('graceful termination incomplete')
+        return self.inspect()
+
     def close(self):
         if self.task is not None and self.task.value:
             self.mach.mach_port_deallocate(self.self_port, self.task.value)
@@ -156,9 +170,12 @@ def main():
             if len(line) > 128:
                 raise RuntimeError('invalid command')
             request = json.loads(line)
-            if request in ({'operation': 'inspect'}, {'operation': 'stop'}):
+            if request in ({'operation': 'inspect'}, {'operation': 'stop'}, {'operation': 'terminate-gracefully'}):
                 try:
-                    result = owned.inspect() if request['operation'] == 'inspect' else owned.stop()
+                    operation = request['operation']
+                    result = owned.inspect() if operation == 'inspect' else owned.stop() if operation == 'stop' else owned.terminate_gracefully()
+                except NotImplementedError:
+                    result = {'error': 'unsupported-capability'}
                 except Exception:
                     # Preserve the same kernel object for an exact cleanup retry.
                     result = {'error': 'cleanup-unverified'}

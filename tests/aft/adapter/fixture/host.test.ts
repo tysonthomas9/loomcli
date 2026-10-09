@@ -10,7 +10,7 @@ import { type RegisteredBuild, verifyManifest } from './production.js';
 import { materializeRenderer } from './renderer-fixtures.test.js';
 
 const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
-async function setup(profile: string,registeredServices=false) {
+async function setup(profile: string,registeredServices=false,nativeService=false) {
   const root = await fs.mkdtemp(path.join(path.dirname(new URL(import.meta.url).pathname), 'test-artifacts-'));
   const source = path.join(root, 'source'); const build = path.join(root, 'build');
   await fs.mkdir(source); await fs.mkdir(build); await fs.mkdir(path.join(root, 'locks')); await fs.mkdir(path.join(root, 'home'));
@@ -71,7 +71,7 @@ async function setup(profile: string,registeredServices=false) {
       if(spawnFails) throw new LaunchNotStarted();
       starts.push({ id, command, readiness }); let alive = true;
       const handle: OwnedProcess = { pid: ++count + 40, generation: generation ?? `generation-${count}`, executable: command.executable, argv: command.argv,
-        state: () => alive ? 'running' : 'exited', async ready() { if(registeredServices&&id==='serve'){const dir=path.join(command.env.LOOM_CONFIG_DIR!,'fleet-db');await fs.mkdir(dir,{recursive:true});await fs.writeFile(path.join(dir,'runtime.json'),JSON.stringify({pid:999,url:'http://127.0.0.1:6001',started_at:'2026-10-09T00:00:00Z'}));} if (id === failService) throw new Error('Bearer private-ready-token'); },
+        state: () => alive ? 'running' : 'exited', async ready() { if(registeredServices&&id==='serve'){const dir=path.join(command.env.LOOM_CONFIG_DIR!,'fleet-db');await fs.mkdir(dir,{recursive:true});await fs.writeFile(path.join(dir,'runtime.json'),JSON.stringify({pid:999,url:'http://127.0.0.1:6001',started_at:'2026-10-09T00:00:00Z'}));if(nativeService){const dir=path.join(command.env.LOOM_CONFIG_DIR!,'agents-opencode/state/opencode');await fs.mkdir(dir,{recursive:true});await fs.writeFile(path.join(dir,'service.json'),JSON.stringify({pid:1001,url:'http://127.0.0.1:7001',password:'private-fixture-password'}));}} if (id === failService) throw new Error('Bearer private-ready-token'); },
         async stop() { if (id === failStop) throw new Error('secret=private-stop-token'); alive = false; stopped.push(id); } };
       handles.set(id, handle); return handle;
     },
@@ -86,8 +86,8 @@ async function setup(profile: string,registeredServices=false) {
     if (method === 'POST') return { status: 201, body: {} };
     return { status: 200, body: relative.endsWith('/E2E-WS') ? { data: { id: 'E2E-WS', repos: [{ path: driver.workspaceRoot }] } } : {} };
   };
-  let registeredRunning=true,failRegisteredStop=false;const registeredStops:string[]=[];
-  const registeredPort={async capture(pid:number){assert.equal(pid,999);const identity={pid,generation:'actual-kernel-start',executable:config.fleetBinary,argvSha256:'a'.repeat(64),parentPid:handles.get('serve')!.pid,configurationRoot:driver.configurationRoot,state:'running' as const};return {identity,async inspect(){return {...identity,parentPid:handles.get('serve')!.state()==='exited'?1:identity.parentPid,state:registeredRunning?'running' as const:'exited' as const};},async stop(){if(failRegisteredStop)throw new Error('private child cleanup');registeredRunning=false;registeredStops.push('fleet');},async abandon(){assert.fail('owned child');}};}};
+  const registeredRunning=new Map<number,boolean>();let failRegisteredStop=false;const registeredStops:string[]=[];
+  const registeredPort={async capture(pid:number){assert.ok([999,1001].includes(pid));registeredRunning.set(pid,true);const identity={pid,generation:pid===999?'actual-kernel-start':'actual-native-start',executable:pid===999?config.fleetBinary:config.pinnedOpenCodeBinary,argvSha256:'a'.repeat(64),parentPid:handles.get('serve')!.pid,configurationRoot:driver.configurationRoot,state:'running' as const};return {identity,async inspect(){return {...identity,parentPid:handles.get('serve')!.state()==='exited'?1:identity.parentPid,state:registeredRunning.get(pid)?'running' as const:'exited' as const};},async terminateGracefully(){assert.equal(pid,1001);registeredRunning.set(pid,false);registeredStops.push('opencode-term');},async stop(){if(!registeredRunning.get(pid))return;if(failRegisteredStop)throw new Error('private child cleanup');registeredRunning.set(pid,false);registeredStops.push(pid===999?'fleet':'opencode-force');},async abandon(){assert.fail('owned child');}};}};
   const protocols:string[]=[];
   const driver: HostFixtureDriver = new HostFixtureDriver(config, processes, fs, http, () => `fixture-${++count}`, async () => ({ port: port++, async release() {} }),async endpoint=>{protocols.push(endpoint);if(failService==='codex-protocol')throw new Error('private probe failure');},registeredServices?registeredPort:undefined);
   const lifecycle = new FixtureLifecycle([plan], () => driver, () => 1000, () => 'opaque-fixture');
@@ -370,5 +370,19 @@ test('partial host acquisition enrolls registered child before cleanup snapshot 
  });
  assert.equal(r.handles.get('serve')!.state(),'running');r.failRegisteredCleanup(false);
  assert.equal((await r.lifecycle.release(lease,r.request.runId)).released,true);assert.deepEqual(r.registeredStops,['fleet']);
+ }finally{await r.cleanup();}
+});
+
+test('host graceful native actor preserves exact registration and never force-kills or respawns',async()=>{
+ const r=await setup('legacy-deterministic',true,true);try{
+ const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal);
+ const before=r.starts.length;
+ await assert.rejects(r.driver.terminateRegisteredNativeService('registered-fleet-db','actual-kernel-start',signal));
+ await assert.rejects(r.driver.terminateRegisteredNativeService('registered-opencode-service','foreign',signal));assert.equal(r.registeredStops.length,0);
+ assert.deepEqual(await r.driver.terminateRegisteredNativeService('registered-opencode-service','actual-native-start',signal),
+  {beforeGeneration:'actual-native-start',afterGeneration:null,affectedIds:['registered-opencode-service'],complete:true});
+ assert.equal(r.starts.length,before);assert.deepEqual(r.registeredStops,['opencode-term']);
+ await assert.rejects(r.driver.terminateRegisteredNativeService('registered-opencode-service','actual-native-start',signal));
+ assert.equal((await r.lifecycle.release(a.lease.id,r.request.runId)).released,true);assert.equal(r.registeredStops.includes('opencode-force'),false);
  }finally{await r.cleanup();}
 });

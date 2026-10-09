@@ -146,6 +146,15 @@ export class HostFixtureDriver implements FixtureDriver {
   async stopOwnedProcess(id: string, generation: string, signal: AbortSignal) {
     return this.withServiceOperation(id,()=>this.stopCapturedProcess(id,generation,signal));
   }
+  async terminateRegisteredNativeService(id:string,generation:string,signal:AbortSignal){
+    check(id==='registered-opencode-service'&&this.descendants?.has(id),'unsupported-capability');
+    return this.withServiceOperation(id,async()=>{
+      signal.throwIfAborted();await this.prepareObserve(signal);check((await this.descendants!.inspect(id,generation)).state==='running');signal.throwIfAborted();
+      await this.descendants!.terminateGracefully(id,generation);
+      check((await this.descendants!.inspect(id,generation)).state==='exited');
+      return {beforeGeneration:generation,afterGeneration:null,affectedIds:[id],complete:true as const};
+    });
+  }
   async restartOwnedProcess(id: string, generation: string, signal: AbortSignal) {
     const result=await this.withServiceOperation(id,async()=>{
       const saved=this.commands.get(id);check(saved&&this.record,'unsupported-capability');

@@ -44,3 +44,11 @@ test('fixed kernel helper protocol never accepts an executable or command from a
  }) as unknown as typeof spawn);
  const handle=await port.capture(501);assert.equal((await handle.inspect()).generation,identity.generation);await assert.rejects(handle.stop());await handle.stop();await handle.stop();assert.deepEqual(operations,['inspect','stop','stop','close']);assert.equal(kills,0);
 });
+
+test('graceful registered service operation cannot use force cleanup as its fallback',async()=>{
+ const r=setup();await r.descendants.enroll(registration);
+ await assert.rejects(r.descendants.terminateGracefully(registration.id,identity.generation));assert.equal(r.stops,0);
+ let graceful=0;r.handle.terminateGracefully=async()=>{graceful++;r.exit();};
+ await assert.rejects(r.descendants.terminateGracefully(registration.id,'foreign-generation'));assert.equal(graceful,0);
+ await r.descendants.terminateGracefully(registration.id,identity.generation);assert.equal(graceful,1);assert.equal(r.stops,0);
+});
