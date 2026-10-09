@@ -1,10 +1,12 @@
 import type { CapabilityEffect } from '@tysonthomas9/aft/types';
 import type { LoomAuthorizedOperation } from '../authority.js';
 
+export const TerminalDetachEffects = Object.freeze(['read-api', 'read-filesystem', 'stop-owned-process'] as const satisfies readonly CapabilityEffect[]);
+
 // The host binding reads owned legacy API facts. Role/usage/seed/task also
 // launch their original CLI actor. Role discovery is lazy and absent from
 // configure/runtime; paid task discovery is covered by the task process effect.
-export const LegacyOperationEffects: Readonly<Record<LoomAuthorizedOperation, readonly CapabilityEffect[]>> = Object.freeze({
+export const LegacyOperationEffects: Readonly<Record<Exclude<LoomAuthorizedOperation, 'loom.runtime.detachTerminal'>, readonly CapabilityEffect[]>> = Object.freeze({
   'loom.cli.role': Object.freeze(['read-api', 'read-filesystem', 'start-owned-process'] as const),
   'loom.cli.usage': Object.freeze(['read-api', 'read-filesystem', 'start-owned-process'] as const),
   'loom.cli.task': Object.freeze(['read-api', 'read-filesystem', 'start-owned-process'] as const),
