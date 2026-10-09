@@ -788,5 +788,86 @@
     "engineReceiptSha256": "5974b9c2efff7ce87b9633f824ac7a3e03df46018eef1e69fb46c272a1efacf9",
     "interpretation": "Unaccepted development loader diagnostics on unchanged raw files; a bounded timeout establishes no admission result, no schema rejection, and no preservation credit. Coherent approved adapter interfaces; exact single canonical installed engine module; no effects, browser, runtime or engine pin change.",
     "followup": "Engine owner must diagnose raw-loader CPU noncompletion. Existing accepted-e8 rejection receipt remains independent. Journal/bounds still under development."
+  },
+  "acceptedC71Coherent477RawDiagnostic": {
+    "status": "accepted-engine-coherent-adapter-diagnostic-only",
+    "engineHead": "c71e785f65e5e0c53128feab8765e40a47bbc672",
+    "adapterSource": "477a2c09080739ea5825cfb1c22a916866fc6fc3",
+    "effects": 0,
+    "runtimeExecuted": 0,
+    "acceptance": false,
+    "files": [
+      {
+        "file": "child-repeat.test.yaml",
+        "sha256": "4acc0d8a8c4bfaa02046b6d9a0f9ecd95a4e6ebf760a0908267ab756d43f0112",
+        "status": "bounded-admission-timeout-diagnostic-only",
+        "guardMs": 60000,
+        "effects": 0,
+        "runtimeExecuted": 0,
+        "startedAt": "2026-10-09T10:29:58.049037+00:00",
+        "finishedAt": "2026-10-09T10:30:58.065673+00:00",
+        "phaseLog": "START child-repeat.test.yaml\nPHASE readYamlFile\nDONE readYamlFile\nPHASE admitDocument\nDONE admitDocument\nPHASE interpolateEnv\nDONE interpolateEnv\nPHASE SuiteSchema\nDONE SuiteSchema true\nPHASE loadSuiteFiles\n",
+        "phaseLogSha256": "2e54abf0991484cbd056dc95a09277b943eb9ccd150d9fdbcbaaf241f1d221b1"
+      },
+      {
+        "file": "bare-stop.test.yaml",
+        "sha256": "de0fcf6eba8f760ef13f53d7e133ee5e97bfa2ad3197b008233423510446b9b1",
+        "status": "bounded-admission-timeout-diagnostic-only",
+        "guardMs": 60000,
+        "effects": 0,
+        "runtimeExecuted": 0,
+        "startedAt": "2026-10-09T10:29:58.047853+00:00",
+        "finishedAt": "2026-10-09T10:30:58.069394+00:00",
+        "phaseLog": "START bare-stop.test.yaml\nPHASE readYamlFile\nDONE readYamlFile\nPHASE admitDocument\nDONE admitDocument\nPHASE interpolateEnv\nDONE interpolateEnv\nPHASE SuiteSchema\nDONE SuiteSchema true\nPHASE loadSuiteFiles\n",
+        "phaseLogSha256": "7071124bcbed0131ee041b863d47d8d7e183733929870e04279009cfdae3830a"
+      },
+      {
+        "file": "stream-render-clock.test.yaml",
+        "sha256": "3c4f74c82305fb4bcfa199cd1f1bbfddb2db9b92bc1fd8ccb4bd96495728340d",
+        "status": "bounded-admission-timeout-diagnostic-only",
+        "guardMs": 60000,
+        "effects": 0,
+        "runtimeExecuted": 0,
+        "startedAt": "2026-10-09T10:29:58.052448+00:00",
+        "finishedAt": "2026-10-09T10:30:58.069607+00:00",
+        "phaseLog": "START stream-render-clock.test.yaml\nPHASE readYamlFile\nDONE readYamlFile\nPHASE admitDocument\nDONE admitDocument\nPHASE interpolateEnv\nDONE interpolateEnv\nPHASE SuiteSchema\nDONE SuiteSchema true\nPHASE loadSuiteFiles\n",
+        "phaseLogSha256": "b18168899765a7c0e5b74e55a8cceab07b4a09d4fb0bc1ca26c84cc11d4df1a4"
+      },
+      {
+        "file": "sse-cursor.test.yaml",
+        "sha256": "1d4827e218db9f503906814d8dd1e39229d527e76705c765e5d564fde142c7ea",
+        "status": "bounded-admission-timeout-diagnostic-only",
+        "guardMs": 60000,
+        "effects": 0,
+        "runtimeExecuted": 0,
+        "startedAt": "2026-10-09T10:29:58.051443+00:00",
+        "finishedAt": "2026-10-09T10:30:58.069645+00:00",
+        "phaseLog": "START sse-cursor.test.yaml\nPHASE readYamlFile\nDONE readYamlFile\nPHASE admitDocument\nDONE admitDocument\nPHASE interpolateEnv\nDONE interpolateEnv\nPHASE SuiteSchema\nDONE SuiteSchema true\nPHASE loadSuiteFiles\n",
+        "phaseLogSha256": "e4e705f6eb83023932c9fc853d8d7276c0ada71ac4f41de1a8f1ea8aaefbbdee"
+      },
+      {
+        "file": "files-save-reload.test.yaml",
+        "sha256": "e4cf23de94b4a36a63886ccf05d12421d96db034e1f6a36f5cd3376268ca2954",
+        "status": "bounded-admission-timeout-diagnostic-only",
+        "guardMs": 60000,
+        "effects": 0,
+        "runtimeExecuted": 0,
+        "startedAt": "2026-10-09T10:29:58.050293+00:00",
+        "finishedAt": "2026-10-09T10:30:58.070653+00:00",
+        "phaseLog": "START files-save-reload.test.yaml\nPHASE readYamlFile\nDONE readYamlFile\nPHASE admitDocument\nDONE admitDocument\nPHASE interpolateEnv\nDONE interpolateEnv\nPHASE SuiteSchema\nDONE SuiteSchema true\nPHASE loadSuiteFiles\n",
+        "phaseLogSha256": "c9130706b46de6cb3a7fc990d1951578d9396b01b03a1ac634722dff10dc8528"
+      }
+    ],
+    "perFileGuardMs": 60000,
+    "finishedAt": "2026-10-09T10:30:58.070924+00:00",
+    "enginePackageSha256": "f90710c9244cae11136d43bd7e583f0e24fe21c1c8eca40d1d3b945df9a31a55",
+    "engineReceiptSha256": "d06a72bf70d6c4d4d0b7c019590ac5693c5fe84348aaa7a59a63de4636706242",
+    "emittedFilesMatched": 112,
+    "adapterTree": "bbaf40249d198d25ca442747ccc8d5d90509b672",
+    "retainedDirectory": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-c71-core477",
+    "diagnosticStageResult": "ALL5 canonical readYamlFile, raw admitDocument, environment interpolation and SuiteSchema completed; full raw loadSuiteFiles did not return before60000ms guard. No full-admission or preservation credit. Stage probes are diagnostics, not materialized suite acceptance.",
+    "provisioning": "task-owned dependency/emitted-source diagnostic only; zero actual source/frontend/browser/container/backend/provider provisioning",
+    "installCorrection": "Copied dependency cache initially retained prior engine bytes; byte verification rejected it. Exact task-owned aft package directory was removed, package reinstalled and112/112 verified before this probe. No stale/mixed canonical module credited.",
+    "coherentFollowup": "Parent approved maintained f3776276f88c31c5a89d6787ae824012ebb0be02 with HTTPS lock correction after this477 diagnostic; f377 not installed/run by pilot. No anonymous-network/CI transport or archive-integrity proof claimed."
   }
 }
