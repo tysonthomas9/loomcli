@@ -16195,7 +16195,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -16210,7 +16210,16 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13"
+                ],
+                "sourceReason": "bind Lead9 lists all500 incl archived; child13 lists500 incl archived under exact captured parent; any next rejects rather than accepting truncated membership",
+                "acceptance": "Selected source branch/caller only; coverage remains unresolved, no YAML/admission/runtime/preservation credit"
+              }
             },
             {
               "source": {
@@ -16254,7 +16263,13 @@
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/45",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/49",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/50"
-              ]
+              ],
+              "additionalSourceTeardownReachability": {
+                "reachable": true,
+                "sourceLines": "cleanup1410-1414 -> events55-58",
+                "required": "Successful fresh final events read for each captured exact agent,limit500,more rejects; do not call truncated final snapshot complete",
+                "coverage": "unresolved"
+              }
             },
             {
               "source": {
@@ -16267,7 +16282,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -16283,7 +16298,17 @@
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
+                ],
+                "sourceReason": "Lead9 has no parent; child13 has captured Lead parent. Inventory14 rereads both actual rows, validates Lead root and child task branches independently; cached bind alone is insufficient",
+                "acceptance": "Selected source branch/caller only; coverage remains unresolved, no YAML/admission/runtime/preservation credit"
+              }
             },
             {
               "source": {
@@ -16296,7 +16321,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -16312,7 +16337,17 @@
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
+                ],
+                "sourceReason": "Lead9 has no parent; child13 has captured Lead parent. Inventory14 rereads both actual rows, validates Lead root and child task branches independently; cached bind alone is insufficient",
+                "acceptance": "Selected source branch/caller only; coverage remains unresolved, no YAML/admission/runtime/preservation credit"
+              }
             },
             {
               "source": {
@@ -16325,7 +16360,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -16341,7 +16376,17 @@
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
+                ],
+                "sourceReason": "Lead9 has no parent; child13 has captured Lead parent. Inventory14 rereads both actual rows, validates Lead root and child task branches independently; cached bind alone is insufficient",
+                "acceptance": "Selected source branch/caller only; coverage remains unresolved, no YAML/admission/runtime/preservation credit"
+              }
             },
             {
               "source": {
@@ -16354,7 +16399,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -16370,7 +16415,17 @@
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
+                ],
+                "sourceReason": "Lead9 has no parent; child13 has captured Lead parent. Inventory14 rereads both actual rows, validates Lead root and child task branches independently; cached bind alone is insufficient",
+                "acceptance": "Selected source branch/caller only; coverage remains unresolved, no YAML/admission/runtime/preservation credit"
+              }
             },
             {
               "source": {
@@ -16383,7 +16438,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -16398,7 +16453,16 @@
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13"
+                ],
+                "sourceReason": "child-only saved child.created and native operation input selection at13; Lead9 does not read events or run child ancestry. Both bindings require exactly one actual matching listing and fresh row",
+                "acceptance": "Selected source branch/caller only; coverage remains unresolved, no YAML/admission/runtime/preservation credit"
+              }
             },
             {
               "source": {
@@ -16411,7 +16475,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -16425,7 +16489,15 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
+                ],
+                "sourceReason": "inventory14 uses exact agent-flows-native-session.sh producer and actual native owner registration, not assumed session/root",
+                "acceptance": "Selected source branch/caller only; coverage remains unresolved, no YAML/admission/runtime/preservation credit"
+              }
             },
             {
               "source": {
@@ -16438,7 +16510,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -16452,7 +16524,15 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
+                ],
+                "sourceReason": "one owned completed native create, one native turn.started, one child.created and one exact namespace execution; ordering start<inventory<child.created<create in SAME saved native session/turn",
+                "acceptance": "Selected source branch/caller only; coverage remains unresolved, no YAML/admission/runtime/preservation credit"
+              }
             },
             {
               "source": {
@@ -16465,7 +16545,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -16479,7 +16559,15 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
+                ],
+                "sourceReason": "one owned completed native create, one native turn.started, one child.created and one exact namespace execution; ordering start<inventory<child.created<create in SAME saved native session/turn",
+                "acceptance": "Selected source branch/caller only; coverage remains unresolved, no YAML/admission/runtime/preservation credit"
+              }
             },
             {
               "source": {
@@ -16492,7 +16580,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -16506,7 +16594,15 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
+                ],
+                "sourceReason": "one owned completed native create, one native turn.started, one child.created and one exact namespace execution; ordering start<inventory<child.created<create in SAME saved native session/turn",
+                "acceptance": "Selected source branch/caller only; coverage remains unresolved, no YAML/admission/runtime/preservation credit"
+              }
             },
             {
               "source": {
@@ -16519,7 +16615,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -16533,7 +16629,15 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
+                ],
+                "sourceReason": "one owned completed native create, one native turn.started, one child.created and one exact namespace execution; ordering start<inventory<child.created<create in SAME saved native session/turn",
+                "acceptance": "Selected source branch/caller only; coverage remains unresolved, no YAML/admission/runtime/preservation credit"
+              }
             },
             {
               "source": {
@@ -16546,7 +16650,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -16560,7 +16664,15 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
+                ],
+                "sourceReason": "one owned completed native create, one native turn.started, one child.created and one exact namespace execution; ordering start<inventory<child.created<create in SAME saved native session/turn",
+                "acceptance": "Selected source branch/caller only; coverage remains unresolved, no YAML/admission/runtime/preservation credit"
+              }
             },
             {
               "source": {
@@ -16573,7 +16685,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -16587,7 +16699,15 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
+                ],
+                "sourceReason": "one owned completed native create, one native turn.started, one child.created and one exact namespace execution; ordering start<inventory<child.created<create in SAME saved native session/turn",
+                "acceptance": "Selected source branch/caller only; coverage remains unresolved, no YAML/admission/runtime/preservation credit"
+              }
             },
             {
               "source": {
@@ -16600,7 +16720,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -16614,7 +16734,15 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
+                ],
+                "sourceReason": "one owned completed native create, one native turn.started, one child.created and one exact namespace execution; ordering start<inventory<child.created<create in SAME saved native session/turn",
+                "acceptance": "Selected source branch/caller only; coverage remains unresolved, no YAML/admission/runtime/preservation credit"
+              }
             },
             {
               "source": {
@@ -16627,7 +16755,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -16641,7 +16769,15 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
+                ],
+                "sourceReason": "one owned completed native create, one native turn.started, one child.created and one exact namespace execution; ordering start<inventory<child.created<create in SAME saved native session/turn",
+                "acceptance": "Selected source branch/caller only; coverage remains unresolved, no YAML/admission/runtime/preservation credit"
+              }
             },
             {
               "source": {
@@ -16654,7 +16790,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -16668,7 +16804,15 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
+                ],
+                "sourceReason": "one owned completed native create, one native turn.started, one child.created and one exact namespace execution; ordering start<inventory<child.created<create in SAME saved native session/turn",
+                "acceptance": "Selected source branch/caller only; coverage remains unresolved, no YAML/admission/runtime/preservation credit"
+              }
             },
             {
               "source": {
@@ -16681,7 +16825,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -16695,7 +16839,15 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
+                ],
+                "sourceReason": "one owned completed native create, one native turn.started, one child.created and one exact namespace execution; ordering start<inventory<child.created<create in SAME saved native session/turn",
+                "acceptance": "Selected source branch/caller only; coverage remains unresolved, no YAML/admission/runtime/preservation credit"
+              }
             },
             {
               "source": {
@@ -16708,7 +16860,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -16725,7 +16877,18 @@
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/44",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/49"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/44",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/49"
+                ],
+                "sourceReason": "Lead9 captures actual precreate HEAD/branch; child13 reads merge-base to exact saved parent HEAD; repeated44 and49 read actual child switched ref with no parent-head argument",
+                "acceptance": "Selected source branch/caller only; coverage remains unresolved, no YAML/admission/runtime/preservation credit"
+              }
             },
             {
               "source": {
@@ -16738,7 +16901,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -16751,9 +16914,16 @@
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
               "selectedCallerOldStepIds": [
-                "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13"
+                ],
+                "sourceReason": "only child bind13 verifies actual merge-base equals captured precreate parent HEAD; root binding9 and repeated44/49 do not execute this function",
+                "acceptance": "Selected source branch/caller only; coverage remains unresolved, no YAML/admission/runtime/preservation credit"
+              }
             },
             {
               "source": {
@@ -16766,7 +16936,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -16779,9 +16949,16 @@
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
               "selectedCallerOldStepIds": [
-                "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13"
+                ],
+                "sourceReason": "only child bind13 verifies actual merge-base equals captured precreate parent HEAD; root binding9 and repeated44/49 do not execute this function",
+                "acceptance": "Selected source branch/caller only; coverage remains unresolved, no YAML/admission/runtime/preservation credit"
+              }
             },
             {
               "source": {
@@ -16794,7 +16971,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -16807,9 +16984,16 @@
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
               "selectedCallerOldStepIds": [
-                "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13"
+                ],
+                "sourceReason": "only child bind13 verifies actual merge-base equals captured precreate parent HEAD; root binding9 and repeated44/49 do not execute this function",
+                "acceptance": "Selected source branch/caller only; coverage remains unresolved, no YAML/admission/runtime/preservation credit"
+              }
             },
             {
               "source": {
@@ -16822,7 +17006,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -16835,9 +17019,16 @@
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
               "selectedCallerOldStepIds": [
-                "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13"
+                ],
+                "sourceReason": "only child bind13 verifies actual merge-base equals captured precreate parent HEAD; root binding9 and repeated44/49 do not execute this function",
+                "acceptance": "Selected source branch/caller only; coverage remains unresolved, no YAML/admission/runtime/preservation credit"
+              }
             },
             {
               "source": {
@@ -20370,7 +20561,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -20383,10 +20574,18 @@
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
               "selectedCallerOldStepIds": [
-                "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
+                ],
+                "sourceReason": "Lead9 has no parent; child13 has captured Lead parent. Inventory14 rereads both actual rows, validates Lead root and child task branches independently; cached bind alone is insufficient",
+                "acceptance": "Selected source branch/caller only; coverage remains unresolved, no YAML/admission/runtime/preservation credit"
+              }
             },
             {
               "source": {
@@ -20399,7 +20598,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -20412,10 +20611,18 @@
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
               "selectedCallerOldStepIds": [
-                "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
+                ],
+                "sourceReason": "Lead9 has no parent; child13 has captured Lead parent. Inventory14 rereads both actual rows, validates Lead root and child task branches independently; cached bind alone is insufficient",
+                "acceptance": "Selected source branch/caller only; coverage remains unresolved, no YAML/admission/runtime/preservation credit"
+              }
             },
             {
               "source": {
@@ -20428,7 +20635,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -20441,10 +20648,18 @@
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
               "selectedCallerOldStepIds": [
-                "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
+                ],
+                "sourceReason": "Lead9 has no parent; child13 has captured Lead parent. Inventory14 rereads both actual rows, validates Lead root and child task branches independently; cached bind alone is insufficient",
+                "acceptance": "Selected source branch/caller only; coverage remains unresolved, no YAML/admission/runtime/preservation credit"
+              }
             },
             {
               "source": {
@@ -20457,7 +20672,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -20470,10 +20685,18 @@
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
               "selectedCallerOldStepIds": [
-                "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
+                ],
+                "sourceReason": "Lead9 has no parent; child13 has captured Lead parent. Inventory14 rereads both actual rows, validates Lead root and child task branches independently; cached bind alone is insufficient",
+                "acceptance": "Selected source branch/caller only; coverage remains unresolved, no YAML/admission/runtime/preservation credit"
+              }
             },
             {
               "source": {
@@ -20486,7 +20709,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -20499,10 +20722,18 @@
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
               "selectedCallerOldStepIds": [
-                "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
+                ],
+                "sourceReason": "Lead9 has no parent; child13 has captured Lead parent. Inventory14 rereads both actual rows, validates Lead root and child task branches independently; cached bind alone is insufficient",
+                "acceptance": "Selected source branch/caller only; coverage remains unresolved, no YAML/admission/runtime/preservation credit"
+              }
             },
             {
               "source": {
@@ -20515,7 +20746,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -20529,9 +20760,17 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
-                "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
+                ],
+                "sourceReason": "Lead9 has no parent; child13 has captured Lead parent. Inventory14 rereads both actual rows, validates Lead root and child task branches independently; cached bind alone is insufficient",
+                "acceptance": "Selected source branch/caller only; coverage remains unresolved, no YAML/admission/runtime/preservation credit"
+              }
             },
             {
               "source": {
@@ -20544,7 +20783,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -20558,9 +20797,17 @@
               },
               "selectedCallerOldStepIds": [
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
-                "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
+                ],
+                "sourceReason": "Lead9 has no parent; child13 has captured Lead parent. Inventory14 rereads both actual rows, validates Lead root and child task branches independently; cached bind alone is insufficient",
+                "acceptance": "Selected source branch/caller only; coverage remains unresolved, no YAML/admission/runtime/preservation credit"
+              }
             },
             {
               "source": {
@@ -20573,7 +20820,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -20586,9 +20833,16 @@
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
               "selectedCallerOldStepIds": [
-                "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13"
+                ],
+                "sourceReason": "child-only saved child.created and native operation input selection at13; Lead9 does not read events or run child ancestry. Both bindings require exactly one actual matching listing and fresh row",
+                "acceptance": "Selected source branch/caller only; coverage remains unresolved, no YAML/admission/runtime/preservation credit"
+              }
             },
             {
               "source": {
@@ -20601,7 +20855,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "selected-function-reachable-branch-unresolved",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -20614,9 +20868,16 @@
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
               "selectedCallerOldStepIds": [
-                "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13"
+                ],
+                "sourceReason": "child-only saved child.created and native operation input selection at13; Lead9 does not read events or run child ancestry. Both bindings require exactly one actual matching listing and fresh row",
+                "acceptance": "Selected source branch/caller only; coverage remains unresolved, no YAML/admission/runtime/preservation credit"
+              }
             },
             {
               "source": {
@@ -21267,7 +21528,7 @@
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
               },
-              "classification": "unrelated-to-static-selected-call-closure",
+              "classification": "selected-invocation-predicate-reachable",
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
@@ -21279,7 +21540,13 @@
                 "canonicalAttempt": "none for this exact predicate; nearby API/DOM actions do not earn preservation credit",
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
-              "selectedCallerOldStepIds": []
+              "selectedCallerOldStepIds": [],
+              "selectedInvocationReachability": {
+                "status": "reachable",
+                "sourceTeardown": true,
+                "sourceReason": "Original suite teardown calls cleanup; every captured .id is freshly reread and name-run ownership asserted before final state/event-ID receipt. It is not an archive/delete operation.",
+                "acceptance": "Teardown source obligation only; still uncovered"
+              }
             },
             {
               "source": {
@@ -21364,7 +21631,18 @@
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/44",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/49"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "selected-scope-known-guard-unvalidated",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/44",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/49"
+                ],
+                "sourceReason": "Exact ref calls: Lead9 empty parentHead and repeat-lead name; child13 parentHead=captured precreate40hex; repeated44/49 child name with empty parentHead. Allowed-name/default-denial guards retained; pair/sidebar name branches not selected.",
+                "acceptance": "External protocol guards still unresolved; no claimed supported implementation or runtime proof"
+              }
             },
             {
               "source": {
@@ -21390,7 +21668,18 @@
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/44",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/49"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "selected-scope-known-guard-unvalidated",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/44",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/49"
+                ],
+                "sourceReason": "Exact ref calls: Lead9 empty parentHead and repeat-lead name; child13 parentHead=captured precreate40hex; repeated44/49 child name with empty parentHead. Allowed-name/default-denial guards retained; pair/sidebar name branches not selected.",
+                "acceptance": "External protocol guards still unresolved; no claimed supported implementation or runtime proof"
+              }
             },
             {
               "source": {
@@ -21412,11 +21701,16 @@
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
               "selectedCallerOldStepIds": [
-                "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
-                "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
-                "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/44",
-                "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/49"
-              ]
+                "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9"
+              ],
+              "selectedInvocationReachability": {
+                "status": "selected-scope-known-guard-unvalidated",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9"
+                ],
+                "sourceReason": "Exact ref calls: Lead9 empty parentHead and repeat-lead name; child13 parentHead=captured precreate40hex; repeated44/49 child name with empty parentHead. Allowed-name/default-denial guards retained; pair/sidebar name branches not selected.",
+                "acceptance": "External protocol guards still unresolved; no claimed supported implementation or runtime proof"
+              }
             },
             {
               "source": {
@@ -21442,7 +21736,18 @@
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/44",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/49"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "selected-scope-known-guard-unvalidated",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/44",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/49"
+                ],
+                "sourceReason": "Exact ref calls: Lead9 empty parentHead and repeat-lead name; child13 parentHead=captured precreate40hex; repeated44/49 child name with empty parentHead. Allowed-name/default-denial guards retained; pair/sidebar name branches not selected.",
+                "acceptance": "External protocol guards still unresolved; no claimed supported implementation or runtime proof"
+              }
             },
             {
               "source": {
@@ -21464,11 +21769,20 @@
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
               "selectedCallerOldStepIds": [
-                "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/44",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/49"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "selected-scope-known-guard-unvalidated",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/44",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/49"
+                ],
+                "sourceReason": "Exact ref calls: Lead9 empty parentHead and repeat-lead name; child13 parentHead=captured precreate40hex; repeated44/49 child name with empty parentHead. Allowed-name/default-denial guards retained; pair/sidebar name branches not selected.",
+                "acceptance": "External protocol guards still unresolved; no claimed supported implementation or runtime proof"
+              }
             },
             {
               "source": {
@@ -21490,11 +21804,20 @@
                 "missingObservation": "Exact selected branch and data/DOM/native/temporal comparison still need typed YAML translation. This is an authoring gap, not a confirmed missing primitive."
               },
               "selectedCallerOldStepIds": [
-                "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/44",
                 "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/49"
-              ]
+              ],
+              "selectedInvocationReachability": {
+                "status": "selected-scope-known-guard-unvalidated",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/44",
+                  "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/49"
+                ],
+                "sourceReason": "Exact ref calls: Lead9 empty parentHead and repeat-lead name; child13 parentHead=captured precreate40hex; repeated44/49 child name with empty parentHead. Allowed-name/default-denial guards retained; pair/sidebar name branches not selected.",
+                "acceptance": "External protocol guards still unresolved; no claimed supported implementation or runtime proof"
+              }
             }
           ]
         },
@@ -22438,6 +22761,396 @@
         "evidence": "real Lead/child tools + native completion + saved event identity + rendered/geometry evidence; original retained repeat failures remain unwaived",
         "deadlines": "every original per-step budget and helper observation timeout copied; no lifetime wait/sleep addition",
         "screenshots": "all51 named steps plus exact helper screenshot names and width/theme receipts retained"
+      },
+      "selectedBranchReview": {
+        "at": "2026-10-09T11:24:20.451537+00:00",
+        "scope": "Bounded Lead/child bind,inventory,physical ref and teardown subset ONLY; remaining child DOM/completion/mobile/reactivation/disclosure predicates still conservative",
+        "sourceByteProof": "All three inventoried helpers match committed frozen SHA and exact git56bb original; original inventory index path currently unavailable, not rehashed here",
+        "selectedInventoryReview": {
+          "bindingInventoryRefPredicatesNarrowed": 31,
+          "newlyRecoveredTeardownPredicate": 1,
+          "remainingChildUnresolvedInventoryPredicates": 126,
+          "externalRefGuardsUnresolved": 6,
+          "wholeDenominator": "OPEN: remaining exact child selected branches/native/ownership imports plus source guard groups not complete"
+        },
+        "selectedCallerArguments": [
+          {
+            "oldStep": 9,
+            "call": "bind(repeat-lead,cov-child-repeat-lead-RUN_ID),root -> actual precreate read_ref(empty parentHead)"
+          },
+          {
+            "oldStep": 13,
+            "call": "bind(repeat,cov-child-repeat-RUN_ID,repeat-lead),child -> read_ref(saved Lead precreate HEAD),assert_child_ancestry -> two independent parent events reads"
+          },
+          {
+            "oldStep": 14,
+            "call": "inventory(repeat-lead,repeat):freshLead+childrows,Lead history,native_session(Lead) -> exact inventory_result"
+          },
+          {
+            "oldSteps": [
+              44,
+              49
+            ],
+            "call": "repeated -> read_ref(saved child,empty parentHead),actual switched branch/commit/file list"
+          },
+          {
+            "sourceTeardown": true,
+            "call": "cleanup -> each captured .id fresh Agent API row and complete final saved events"
+          }
+        ],
+        "additionalSourceObligations": [
+          {
+            "id": "child-native-tool-selection",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "sourceHelperSha256": "65f53991c2e7ca78944147e15524a3194e69d4ef8930b281f2d024e933b849f4",
+            "sourceLines": {
+              "start": 125,
+              "end": 139,
+              "text": "    def native_tool(event):\n        if event.get(\"agent_id\") != lead_id or event.get(\"kind\") != \"item.completed\":\n            return None\n        payload = event.get(\"payload\") or {}\n        if payload.get(\"itemKind\") != \"tool\" or payload.get(\"session\") != native_id:\n            return None\n        item_id = payload.get(\"itemId\")\n        if not isinstance(item_id, str) or not item_id:\n            return None\n        if event.get(\"event_id\") != f\"item.completed:{native_root}:{native_id}:{item_id}\":\n            return None\n        tool = payload.get(\"tool\")\n        if not isinstance(tool, dict) or tool.get(\"failed\", False) is not False:\n            return None\n        return tool"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
+            ],
+            "sourceTeardown": false,
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-obligation-outside-frozen-predicate-extraction",
+              "required": "Saved event actual agent/kind=item.completed,itemKind=tool,exact session/nonempty itemId,eventID item.completed:<nativeRoot>:<nativeId>:<itemId>,tool object and failed IS false,not merely falsy. Native root empty string is valid.",
+              "canonicalAttempt": "Existing typed AgentRef/native/owned worktree facts are neighboring interfaces; no exact complete source selection/mutation/guard equivalence credited",
+              "missingObservation": "Source-specific selected event/filter/ref/guard comparison must map to real canonical input/output and YAML expectations; no expected-result stub or generic executable fallback"
+            }
+          },
+          {
+            "id": "child-native-start-created-selection",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "sourceHelperSha256": "65f53991c2e7ca78944147e15524a3194e69d4ef8930b281f2d024e933b849f4",
+            "sourceLines": {
+              "start": 148,
+              "end": 156,
+              "text": "    starts = [event for event in history if event.get(\"kind\") == \"turn.started\" and\n              event.get(\"agent_id\") == lead_id and event.get(\"turn_id\") == turn_id and\n              event.get(\"payload\", {}).get(\"session\") == native_id and\n              event.get(\"event_id\") == f\"turn.started:{native_root}:{native_id}:{turn_id}\"]\n    assert len(starts) == 1 and starts[0][\"seq\"] < create[\"seq\"], \"native delegation turn is unbound\"\n    created = [event for event in history if event.get(\"kind\") == \"child.created\" and\n               event.get(\"agent_id\") == lead_id and\n               event.get(\"payload\", {}).get(\"child\") == child[\"agent_id\"] and\n               event.get(\"event_id\") == f\"child.created:{child['agent_id']}\"]"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
+            ],
+            "sourceTeardown": false,
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-obligation-outside-frozen-predicate-extraction",
+              "required": "Exact actual Lead/session/turn/event IDs for turn.started and child.created; preserve their selected sets before uniqueness/order assertions.",
+              "canonicalAttempt": "Existing typed AgentRef/native/owned worktree facts are neighboring interfaces; no exact complete source selection/mutation/guard equivalence credited",
+              "missingObservation": "Source-specific selected event/filter/ref/guard comparison must map to real canonical input/output and YAML expectations; no expected-result stub or generic executable fallback"
+            }
+          },
+          {
+            "id": "child-installed-input-selection",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "sourceHelperSha256": "65f53991c2e7ca78944147e15524a3194e69d4ef8930b281f2d024e933b849f4",
+            "sourceLines": {
+              "start": 164,
+              "end": 172,
+              "text": "        try:\n            raw_input = json.loads(tool.get(\"input\", \"\"))\n        except (TypeError, ValueError):\n            continue\n        if not isinstance(raw_input, dict) or set(raw_input) != {\"code\"} or \\\n                not isinstance(raw_input[\"code\"], str) or \\\n                raw_input[\"code\"].strip().removesuffix(\";\").strip() != \"return Object.keys(tools.loom)\":\n            continue\n        inventory.append((event, tool, raw_input[\"code\"]))"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
+            ],
+            "sourceTeardown": false,
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-obligation-outside-frozen-predicate-extraction",
+              "required": "Execute tool JSON input is exact object {code:string}; strip whitespace and ONE trailing semicolon,strip again equals return Object.keys(tools.loom). No narration or precomputed expected names substitute.",
+              "canonicalAttempt": "Existing typed AgentRef/native/owned worktree facts are neighboring interfaces; no exact complete source selection/mutation/guard equivalence credited",
+              "missingObservation": "Source-specific selected event/filter/ref/guard comparison must map to real canonical input/output and YAML expectations; no expected-result stub or generic executable fallback"
+            }
+          },
+          {
+            "id": "child-installed-output-json-denial",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "sourceHelperSha256": "65f53991c2e7ca78944147e15524a3194e69d4ef8930b281f2d024e933b849f4",
+            "sourceLines": {
+              "start": 176,
+              "end": 180,
+              "text": "        \"inventory did not precede creation in the same owned native turn\"\n    try:\n        names = json.loads(tool.get(\"output\", \"\"))\n    except (TypeError, ValueError) as exc:\n        raise AssertionError(\"native inventory output is not a JSON name array\") from exc"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
+            ],
+            "sourceTeardown": false,
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-obligation-outside-frozen-predicate-extraction",
+              "required": "Actual selected tool output decodes JSON; type/value/decode failures deny before required six unique string namespace names predicate.",
+              "canonicalAttempt": "Existing typed AgentRef/native/owned worktree facts are neighboring interfaces; no exact complete source selection/mutation/guard equivalence credited",
+              "missingObservation": "Source-specific selected event/filter/ref/guard comparison must map to real canonical input/output and YAML expectations; no expected-result stub or generic executable fallback"
+            }
+          },
+          {
+            "id": "child-ref-owned-actor-row",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-children-activity-ref.sh",
+            "sourceHelperSha256": "c6f7af0e4f750cde234f4ae6eb38820d5bf397fef1b96c678fc304e42e69011a",
+            "sourceLines": {
+              "start": 20,
+              "end": 25,
+              "text": "row=\"$(curl -fsS --max-time 15 \"$AFT_API_URL/api/workspaces/LOCALMODE/v1/agents/$agent_id\")\"\njq -e --arg id \"$agent_id\" --arg name \"$name\" --arg preset \"$preset\" \\\n  --arg repo \"$AFT_AGENT_FLOW_REPO\" \\\n  '.agent_id == $id and .name == $name and .preset == $preset and\n   .repo == $repo and .harness == \"opencode\" and\n   (.worktree_path | type == \"string\" and startswith(\"/\"))' <<< \"$row\" >/dev/null"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/44",
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/49"
+            ],
+            "sourceTeardown": false,
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-obligation-outside-frozen-predicate-extraction",
+              "required": "Fresh15s Agent API exact ID/name/preset/repo/opencode and absolute actual worktree path before read-only worktree operations.",
+              "canonicalAttempt": "Existing typed AgentRef/native/owned worktree facts are neighboring interfaces; no exact complete source selection/mutation/guard equivalence credited",
+              "missingObservation": "Source-specific selected event/filter/ref/guard comparison must map to real canonical input/output and YAML expectations; no expected-result stub or generic executable fallback"
+            }
+          },
+          {
+            "id": "child-ref-owned-parent-row",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-children-activity-ref.sh",
+            "sourceHelperSha256": "c6f7af0e4f750cde234f4ae6eb38820d5bf397fef1b96c678fc304e42e69011a",
+            "sourceLines": {
+              "start": 29,
+              "end": 35,
+              "text": "  jq -e --arg parent \"$parent_id\" \\\n    '.created_by_kind == \"agent\" and .created_by_id == $parent and\n     .parent_agent_id == $parent and .root_agent_id == $parent' <<< \"$row\" >/dev/null\n  parent=\"$(curl -fsS --max-time 15 \"$AFT_API_URL/api/workspaces/LOCALMODE/v1/agents/$parent_id\")\"\n  jq -e --arg id \"$parent_id\" --arg name \"$parent_name\" --arg repo \"$AFT_AGENT_FLOW_REPO\" \\\n    '.agent_id == $id and .name == $name and .preset == \"lead\" and\n     .repo == $repo and .harness == \"opencode\" and .parent_agent_id == null' <<< \"$parent\" >/dev/null"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/44",
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/49"
+            ],
+            "sourceTeardown": false,
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-obligation-outside-frozen-predicate-extraction",
+              "required": "Task child fresh actual creator/root/parent membership plus separate15s parent read exact expected run-owned Lead/name/repo/opencode/root null; no cached parent substitution.",
+              "canonicalAttempt": "Existing typed AgentRef/native/owned worktree facts are neighboring interfaces; no exact complete source selection/mutation/guard equivalence credited",
+              "missingObservation": "Source-specific selected event/filter/ref/guard comparison must map to real canonical input/output and YAML expectations; no expected-result stub or generic executable fallback"
+            }
+          },
+          {
+            "id": "child-ref-lead-root",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-children-activity-ref.sh",
+            "sourceHelperSha256": "c6f7af0e4f750cde234f4ae6eb38820d5bf397fef1b96c678fc304e42e69011a",
+            "sourceLines": {
+              "start": 36,
+              "end": 38,
+              "text": "else\n  jq -e '.parent_agent_id == null' <<< \"$row\" >/dev/null\nfi"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9"
+            ],
+            "sourceTeardown": false,
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-obligation-outside-frozen-predicate-extraction",
+              "required": "Lead ref branch requires actual parent_agent_id null; child branch must not be silently selected for root.",
+              "canonicalAttempt": "Existing typed AgentRef/native/owned worktree facts are neighboring interfaces; no exact complete source selection/mutation/guard equivalence credited",
+              "missingObservation": "Source-specific selected event/filter/ref/guard comparison must map to real canonical input/output and YAML expectations; no expected-result stub or generic executable fallback"
+            }
+          },
+          {
+            "id": "child-ref-container-scope",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-children-activity-ref.sh",
+            "sourceHelperSha256": "c6f7af0e4f750cde234f4ae6eb38820d5bf397fef1b96c678fc304e42e69011a",
+            "sourceLines": {
+              "start": 40,
+              "end": 43,
+              "text": "cd \"$AFT_SOURCE_ROOT\"\ncompose=(agent_flows_podman compose -p \"$AFT_OWNED_PROJECT\" -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.agents.yml -f test/local-mode/docker-compose.agents-real.yml -f \"$AFT_WORK_DIR/fleet-override.yml\")\ncontainer=\"$(\"${compose[@]}\" ps -q loom-local | tr -d '\\r')\"\nagent_flows_check_container \"$container\""
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/44",
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/49"
+            ],
+            "sourceTeardown": false,
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-obligation-outside-frozen-predicate-extraction",
+              "required": "Actual source-root Compose project/overrides, exact loom-local container and ownership attestation before fixed read protocol; no host worktree fallback.",
+              "canonicalAttempt": "Existing typed AgentRef/native/owned worktree facts are neighboring interfaces; no exact complete source selection/mutation/guard equivalence credited",
+              "missingObservation": "Source-specific selected event/filter/ref/guard comparison must map to real canonical input/output and YAML expectations; no expected-result stub or generic executable fallback"
+            }
+          },
+          {
+            "id": "child-ref-physical-git-measurement",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-children-activity-ref.sh",
+            "sourceHelperSha256": "c6f7af0e4f750cde234f4ae6eb38820d5bf397fef1b96c678fc304e42e69011a",
+            "sourceLines": {
+              "start": 47,
+              "end": 55,
+              "text": "const git=(...args)=>{const r=spawnSync(\"git\",[\"-C\",path,...args],{encoding:\"utf8\",timeout:15000});\n  if(r.status!==0) process.exit(3); return r.stdout.trim();};\nconst branch=git(\"symbolic-ref\",\"--short\",\"HEAD\");\nconst head=git(\"rev-parse\",\"HEAD\");\nif(!branch || !/^[a-f0-9]{40}$/.test(head)) process.exit(3);\nconst mergeBase=parentHead?git(\"merge-base\",parentHead,head):null;\nif(parentHead && mergeBase!==parentHead) process.exit(3);\nconst changed=git(\"show\",\"--format=\",\"--name-only\",\"HEAD\").split(\"\\n\").filter(Boolean);\nprocess.stdout.write(JSON.stringify({agent_id:id,branch,head,merge_base:mergeBase,changed})+\"\\n\");"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/9",
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/13",
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/44",
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/49"
+            ],
+            "sourceTeardown": false,
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-obligation-outside-frozen-predicate-extraction",
+              "required": "Actual Git each15000ms,success required; nonempty symbolic HEAD branch,40hex HEAD, optional actual merge-base equality to captured parent head, exact git show --name-only HEAD file list. Child13 passes parent HEAD; other three calls do not.",
+              "canonicalAttempt": "Existing typed AgentRef/native/owned worktree facts are neighboring interfaces; no exact complete source selection/mutation/guard equivalence credited",
+              "missingObservation": "Source-specific selected event/filter/ref/guard comparison must map to real canonical input/output and YAML expectations; no expected-result stub or generic executable fallback"
+            }
+          },
+          {
+            "id": "child-native-owned-provisioning",
+            "sourceHelper": "campaign:tests/aft/scripts/agent-flows-native-session.sh",
+            "sourceHelperSha256": "3c0f6b822f054694a8b3934f5da364229deeea8cc82cb3d5a84cdcd7696d55e9",
+            "sourceLines": {
+              "start": 6,
+              "end": 13,
+              "text": "agent_flows_check_manifest\ndeclared=\"$(agent_flows_declared_agents)\" || exit 2\n[[ $# -eq 1 && \"$1\" =~ ^[A-Za-z0-9_-]+$ ]] || exit 2\nagent_id=\"$1\"\ncd \"$AFT_SOURCE_ROOT\"\ncompose=(agent_flows_podman compose -p \"$AFT_OWNED_PROJECT\" -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.agents.yml -f test/local-mode/docker-compose.agents-real.yml -f \"$AFT_WORK_DIR/fleet-override.yml\")\ncontainer=\"$(\"${compose[@]}\" ps -q loom-local | tr -d '\\r')\"\nagent_flows_check_container \"$container\""
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
+            ],
+            "sourceTeardown": false,
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-obligation-outside-frozen-predicate-extraction",
+              "required": "Actual manifest plus declared agent inventory/session and exact owning Compose/container before native read; ownership imported predicate denominator remains unresolved.",
+              "canonicalAttempt": "Existing typed AgentRef/native/owned worktree facts are neighboring interfaces; no exact complete source selection/mutation/guard equivalence credited",
+              "missingObservation": "Source-specific selected event/filter/ref/guard comparison must map to real canonical input/output and YAML expectations; no expected-result stub or generic executable fallback"
+            }
+          },
+          {
+            "id": "child-native-owning-store",
+            "sourceHelper": "campaign:tests/aft/scripts/agent-flows-native-session.sh",
+            "sourceHelperSha256": "3c0f6b822f054694a8b3934f5da364229deeea8cc82cb3d5a84cdcd7696d55e9",
+            "sourceLines": {
+              "start": 16,
+              "end": 24,
+              "text": "const {DatabaseSync}=require(\"node:sqlite\");\nconst db=new DatabaseSync(\"/root/.loom/agents.db\",{readOnly:true});\nconst row=db.prepare(\"SELECT agent_id, name, harness, repo, preset, created_by_kind, parent_agent_id, root_agent_id, harness_session_id AS native_id, harness_session_root AS native_root FROM agents WHERE agent_id=? AND workspace_id=?\").get(process.argv[1],\"LOCALMODE\");\nconst fail=(category)=>{ process.stderr.write(\"native probe: \"+category+\"\\n\"); process.exit(3); };\nif (!row) fail(\"agent-row-missing\");\nconst run=process.argv[2];\nconst declared=JSON.parse(process.argv[3]);\nconst repo=process.argv[4];\nconst session=process.argv[5];"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
+            ],
+            "sourceTeardown": false,
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-obligation-outside-frozen-predicate-extraction",
+              "required": "Read-only actual owning container SQLite LOCALMODE row with exact supplied Lead ID,actual run/repo/session/declaration; missing row/storage never absence/eligibility.",
+              "canonicalAttempt": "Existing typed AgentRef/native/owned worktree facts are neighboring interfaces; no exact complete source selection/mutation/guard equivalence credited",
+              "missingObservation": "Source-specific selected event/filter/ref/guard comparison must map to real canonical input/output and YAML expectations; no expected-result stub or generic executable fallback"
+            }
+          },
+          {
+            "id": "child-native-declared-lead",
+            "sourceHelper": "campaign:tests/aft/scripts/agent-flows-native-session.sh",
+            "sourceHelperSha256": "3c0f6b822f054694a8b3934f5da364229deeea8cc82cb3d5a84cdcd7696d55e9",
+            "sourceLines": {
+              "start": 25,
+              "end": 47,
+              "text": "if (declared === null) {\n  const ownedName=new RegExp(\"^(aft-(child-(a|b)|cancel-child|isolation-(own|foreign))-\"+run+\n    \"|live-recovery-(restart|archive|sibling|dirty)-\"+run+\")$\");\n  if (typeof row.name!==\"string\" || !ownedName.test(row.name)) fail(\"agent-name-not-run-owned\");\n} else {\n  if (row.repo!==repo) fail(\"repo-mismatch\");\n  const child=declared.children.find(c=>c.name===row.name);\n  const lead=declared.leads.find(lead=>lead.name===row.name);\n  const suite=lead?.suite ?? child?.suite;\n  if (!suite || !session.startsWith(\"aft-\"+suite+\"-\") || !/^[0-9]+$/.test(session.slice((\"aft-\"+suite+\"-\").length)))\n    fail(\"agent-session-mismatch\");\n  if (lead) {\n    if (row.preset!==\"lead\" || row.created_by_kind!==\"user\" || row.parent_agent_id!==null || row.root_agent_id!==null)\n      fail(\"lead-root-mismatch\");\n  } else if (child) {\n    if (row.preset!==\"task\" || row.created_by_kind!==\"agent\" || !row.parent_agent_id || row.root_agent_id!==row.parent_agent_id)\n      fail(\"child-parent-mismatch\");\n    const parent=db.prepare(\"SELECT name,harness,repo,preset,created_by_kind,parent_agent_id,root_agent_id FROM agents WHERE agent_id=? AND workspace_id=?\").get(row.parent_agent_id,\"LOCALMODE\");\n    if (!parent || parent.name!==child.parent || parent.harness!==\"opencode\" || parent.repo!==repo ||\n        parent.preset!==\"lead\" || parent.created_by_kind!==\"user\" || parent.parent_agent_id!==null || parent.root_agent_id!==null)\n      fail(\"child-parent-mismatch\");\n  } else fail(\"agent-name-not-run-owned\");\n}"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
+            ],
+            "sourceTeardown": false,
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-obligation-outside-frozen-predicate-extraction",
+              "required": "Selected cov-child-repeat-lead name cannot use legacy undeclared aft/live-recovery regex; successful path needs actual declared Lead matching run/session suite,preset lead,user-created,parent/root null,repo match. Other cases remain distinct.",
+              "canonicalAttempt": "Existing typed AgentRef/native/owned worktree facts are neighboring interfaces; no exact complete source selection/mutation/guard equivalence credited",
+              "missingObservation": "Source-specific selected event/filter/ref/guard comparison must map to real canonical input/output and YAML expectations; no expected-result stub or generic executable fallback"
+            }
+          },
+          {
+            "id": "child-native-historical-ownership",
+            "sourceHelper": "campaign:tests/aft/scripts/agent-flows-native-session.sh",
+            "sourceHelperSha256": "3c0f6b822f054694a8b3934f5da364229deeea8cc82cb3d5a84cdcd7696d55e9",
+            "sourceLines": {
+              "start": 48,
+              "end": 54,
+              "text": "if (row.harness!==\"opencode\") fail(\"harness-mismatch\");\nif (typeof row.native_id!==\"string\" || !row.native_id) fail(\"native-id-missing\");\n// OpenCode launch has no Root; the durable, valid NativeRoot is an empty string.\nif (typeof row.native_root!==\"string\") fail(\"native-root-missing\");\nconst owned=db.prepare(\"SELECT 1 FROM agent_native_sessions WHERE agent_id=? AND harness=? AND native_root=? AND native_id=?\")\n  .get(row.agent_id,row.harness,row.native_root,row.native_id);\nif (!owned) fail(\"native-owner-mismatch\");"
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
+            ],
+            "sourceTeardown": false,
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-obligation-outside-frozen-predicate-extraction",
+              "required": "Actual opencode harness,nonempty native ID,string native root (empty valid),exact historical agent_native_sessions membership in same store.",
+              "canonicalAttempt": "Existing typed AgentRef/native/owned worktree facts are neighboring interfaces; no exact complete source selection/mutation/guard equivalence credited",
+              "missingObservation": "Source-specific selected event/filter/ref/guard comparison must map to real canonical input/output and YAML expectations; no expected-result stub or generic executable fallback"
+            }
+          },
+          {
+            "id": "child-native-storage-exception-denial",
+            "sourceHelper": "campaign:tests/aft/scripts/agent-flows-native-session.sh",
+            "sourceHelperSha256": "3c0f6b822f054694a8b3934f5da364229deeea8cc82cb3d5a84cdcd7696d55e9",
+            "sourceLines": {
+              "start": 62,
+              "end": 63,
+              "text": "} catch { process.stderr.write(\"native probe: storage-unavailable\\n\"); process.exit(3); }\n' \"$agent_id\" \"$RUN_ID\" \"$declared\" \"$AFT_AGENT_FLOW_REPO\" \"${AFT_SESSION:-}\")\""
+            },
+            "callerOldStepIds": [
+              "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/14"
+            ],
+            "sourceTeardown": false,
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-obligation-outside-frozen-predicate-extraction",
+              "required": "Any unavailable storage/protocol read rejects; no synthesized native identity or alternate store.",
+              "canonicalAttempt": "Existing typed AgentRef/native/owned worktree facts are neighboring interfaces; no exact complete source selection/mutation/guard equivalence credited",
+              "missingObservation": "Source-specific selected event/filter/ref/guard comparison must map to real canonical input/output and YAML expectations; no expected-result stub or generic executable fallback"
+            }
+          },
+          {
+            "id": "child-cleanup-final-snapshot",
+            "sourceHelper": "campaign:tests/aft/scripts/coverage-children-activity.py",
+            "sourceHelperSha256": "65f53991c2e7ca78944147e15524a3194e69d4ef8930b281f2d024e933b849f4",
+            "sourceLines": {
+              "start": 1410,
+              "end": 1414,
+              "text": "    for path in OUT.glob(\"*.id\"):\n        row = agent(path.read_text().strip())\n        assert row[\"name\"].startswith(\"cov-child-\") and row[\"name\"].endswith(f\"-{RUN}\")\n        save(f\"final-{row['agent_id']}\", {\"agent_id\": row[\"agent_id\"], \"state\": row[\"state\"],\n                                         \"event_ids\": [e[\"event_id\"] for e in events(row[\"agent_id\"])]})"
+            },
+            "callerOldStepIds": [],
+            "sourceTeardown": true,
+            "coverage": "unresolved",
+            "destination": [],
+            "gap": {
+              "kind": "reachable-source-obligation-outside-frozen-predicate-extraction",
+              "required": "Teardown rereads every captured .id and actual run-owned row,records final state plus complete exact saved event IDs; does not archive or mutate child.",
+              "canonicalAttempt": "Existing typed AgentRef/native/owned worktree facts are neighboring interfaces; no exact complete source selection/mutation/guard equivalence credited",
+              "missingObservation": "Source-specific selected event/filter/ref/guard comparison must map to real canonical input/output and YAML expectations; no expected-result stub or generic executable fallback"
+            }
+          }
+        ],
+        "importedOwnershipClosure": {
+          "source": "campaign:tests/aft/scripts/agent-flows-ownership.sh",
+          "callers": [
+            9,
+            13,
+            14,
+            44,
+            49
+          ],
+          "required": "Exact manifest,Podman connection fingerprint,container-service ownership; native14 also declared_agents required by actual cov-child name. Unenumerated extra source predicate closure, not all1072 inventory."
+        },
+        "runtime": "0; no helper executed,services or new consumer install; all coverage/unmapped assertions unchanged"
       }
     },
     {
@@ -43340,23 +44053,24 @@
     "originalSteps": 207,
     "helperInventoryEntries": 1072,
     "classificationCounts": {
-      "selected-invocation-predicate-reachable": 62,
-      "unrelated-to-static-selected-call-closure": 381,
+      "selected-invocation-predicate-reachable": 94,
+      "unrelated-to-static-selected-call-closure": 380,
       "helper-selftest-negative-requirement": 213,
       "excluded-static-selected-invocation-branch": 8,
       "selected-invocation-predicate-conditionally-reachable": 2,
-      "selected-function-reachable-branch-unresolved": 368,
+      "selected-function-reachable-branch-unresolved": 337,
       "selected-external-helper-branch-unresolved": 34,
       "unrelated-external-helper-case": 4
     },
-    "reachableCandidatePredicates": 466,
-    "classificationMethod": "Conservative selected-call closure for other pilots; exact Stop and Files arguments/call branches narrowed. Stop40 inventory obligations retained, question3 excluded; Files24 retained, empty-file5 excluded; Files33 selftest/negative entries separated.14 Stop native guards,6 Files origin/editor/cleanup guards and ownership import closure uncovered outside frozen1072 extraction; full denominator unresolved.",
+    "reachableCandidatePredicates": 467,
+    "classificationMethod": "Conservative selected-call closure for other pilots; exact Stop and Files arguments/call branches narrowed. Stop40 inventory obligations retained, question3 excluded; Files24 retained, empty-file5 excluded; Files33 selftest/negative entries separated.14 Stop native guards,6 Files origin/editor/cleanup guards and ownership import closure uncovered outside frozen1072 extraction; full denominator unresolved. Child subset31 binding/inventory/ref predicates narrowed and one previously-unrelated teardown predicate recovered; other child shapes still unresolved,15 new source guard groups outside extraction remain uncovered.",
     "reviewedAuthoredUnvalidatedPredicates": 20,
     "partiallyMappedRepeatedPredicates": 3,
     "fullPreservationAcceptance": false,
     "additionalUninventoriedStopNativeGuards": 14,
     "ownershipImportedPredicateDenominator": "unresolved; excluded from1072 frozen extraction, included in required followup",
-    "additionalUninventoriedFilesGuards": 6
+    "additionalUninventoriedFilesGuards": 6,
+    "additionalUninventoriedChildSourceGroups": 15
   },
   "dependencies": {
     "acceptedEngine": "e8eee6bb6d8d5d2c8e65bae36154732a74742212",

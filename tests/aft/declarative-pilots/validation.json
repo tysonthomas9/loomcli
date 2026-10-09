@@ -895,7 +895,7 @@
       },
       {
         "file": "tests/aft/declarative-pilots/preservation.json",
-        "sha256": "7dda4f2033a075316aea9efafc6bce4e4c851a382af6061bd89f045a455a51ac"
+        "sha256": "213fd51d8b1be1887fc29fd250022caf9da8149799c5ee83d51e62dfbf5d5f8d"
       },
       {
         "file": "tests/aft/declarative-pilots/sse-cursor.test.yaml",
@@ -934,10 +934,10 @@
       "reviewedPredicateMappings": 20,
       "fullPreservationAccepted": 0,
       "helperInventory": 1072,
-      "conservativeReachableCandidates": 466,
+      "conservativeReachableCandidates": 467,
       "helperSelftestOrNegativeRecords": 213,
-      "unrelatedBranchesOrCases": 393,
-      "exactReachablePredicateDenominator": "Stop40/Files24 frozen inventory obligations individually selected; other pilots and20 source guard extensions/imported ownership closure remain uncovered."
+      "unrelatedBranchesOrCases": 392,
+      "exactReachablePredicateDenominator": "Stop40/Files24 and Child32 binding/inventory/ref/teardown frozen subset individually selected; child remaining126+6external guards, other pilots and35 extra source guard groups/imports remain uncovered."
     },
     "supportedInterfaceScope": "Captured AgentRef/native bootstrap facts, fixtureRunId and scalar owned-relative-path composition supported at deterministic interface depth; this does not validate pilot callers or runtime roots. Four Stop marker checkpoints authored.",
     "blockedCases": [
@@ -1580,5 +1580,26 @@
     "globalConservativeReachableCandidates": 466,
     "globalHelperSelftestNegativeRecords": 213,
     "fullDenominator": "unresolved other selected branches/ownership import/source extensions"
+  },
+  "childBindingSelectedBranchReview": {
+    "at": "2026-10-09T11:24:20.451537+00:00",
+    "frozenGitHelperBytesMatch": true,
+    "originalInventoryIndexAvailable": false,
+    "bindingInventoryRefPredicatesNarrowed": 31,
+    "recoveredTeardownPredicate": 1,
+    "sourceGuardGroupsUncovered": 15,
+    "conservativeReachableCandidates": 467,
+    "inventoryRecords": 1072,
+    "remainingChildUnresolvedInventoryPredicates": 126,
+    "externalRefGuardsUnresolved": 6,
+    "preservationCredit": false,
+    "inventoryRetentionCheck": {
+      "checkedAt": "2026-10-09T11:25:18.335236+00:00",
+      "originalPath": "/private/tmp/declarative-aft-inventory-cef8251e.mHm7Ih7g/index.json",
+      "originalSha256": "4055541f111c878152782d94840d2466e1744e59e795b9e5376e15a5e9e35640",
+      "status": "unavailable-at-original-path; no index rehash credited",
+      "fallbackProof": "Three helper bytes equal committed preservation SHA and exact original56bb Git blobs; original index not recreated",
+      "parentNotified": true
+    }
   }
 }
