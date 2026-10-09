@@ -27,7 +27,27 @@
     "runtime-targets": {
       "owner": "agent-b9294aeb-0c35-440a-8d2a-f1f43287248b",
       "request": "trusted product legacy/native harness/worker/terminal registration plus exact generation-at-effect transition",
-      "status": "host serve bound; other targets missing"
+      "status": "host serve bound; other targets missing",
+      "gracefulService": {
+        "checkpoint": "51423f5415cb79f4f4ebd429797d5238d2d577f3",
+        "sources": [
+          {
+            "path": "tests/aft/suites/agents-v1-lead.test.yaml",
+            "base": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+            "sha256": "82f1cecdc7c0b39867d3e8e390c5d98133bcb44c3f10495f37caeca762ddef38"
+          },
+          {
+            "path": "tests/aft/suites/agents-v1-resume.test.yaml",
+            "base": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+            "sha256": "79d3ed4e7e860d3d1a667ad0895b7a9b87712bd5790f150d68a7c71d9a63f1b9"
+          }
+        ],
+        "originalActor": "Read the fixed OpenCode service registration and kill its PID with default SIGTERM; await original exit. Later UI/API action causes a replacement, which YAML separately asserts.",
+        "privatePort": "terminateRegisteredNativeService(registered-opencode-service, expectedGeneration, signal)",
+        "stoppedFact": "afterGeneration:null is valid; no immediate saved-command respawn",
+        "notEquivalent": "Force cleanup SIGKILL/task_terminate is a distinct actor. Darwin graceful port remains unsupported.",
+        "remaining": "Legacy target lookup must expose exact enrolled service generation; genuine source-caused successor attestation/enrollment and cleanup still missing. No bound graceful journey or coverage claim."
+      }
     },
     "compose-mutations": {
       "owner": "agent-b9294aeb-0c35-440a-8d2a-f1f43287248b",
@@ -47,7 +67,29 @@
     "workspace-fixture": {
       "owner": "agent-b9294aeb-0c35-440a-8d2a-f1f43287248b",
       "request": "finite source fixture repo seed factory and owned restore/disposal registration",
-      "status": "missing"
+      "status": "missing",
+      "finiteSourcePairs": [
+        {
+          "fixtureId": "legacy-e2e-repo",
+          "workspaceId": "E2E-WS-AGENT",
+          "name": "e2e-ws-agent",
+          "source": {
+            "path": "tests/aft/suites/zz-agent-flow.test.yaml",
+            "base": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+            "sha256": "bed93c035b0221ee60868d16db59e38a4683c37d3545d1c0fef1455ec70a9550"
+          },
+          "setup": "agent-repo; git init -q without explicit branch; empty commit init with e2e/e2e@x; nova is a later user/API-created legacy name."
+        },
+        {
+          "fixtureId": "slack-clone",
+          "source": {
+            "path": "scripts/seed-slack-clone.sh",
+            "base": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+            "sha256": "e9d04d3f97d6b69b6cc008282904c348b9a924e33d6d9ad3b07d9ac13b4a6e99"
+          },
+          "setup": "Exact finite source tree seed exists; no frozen AFT caller supplies a workspace/name pair. Do not invent one."
+        }
+      ]
     },
     "operation-authority": {
       "owner": "agent-0f30e493-e8b6-4f7c-bb49-c320a3725a17",
@@ -63,7 +105,7 @@
       "owner": "agent-0f30e493-e8b6-4f7c-bb49-c320a3725a17",
       "fixtureOwner": "agent-b9294aeb-0c35-440a-8d2a-f1f43287248b",
       "request": "Canonical owned fixture workspace records plus actual creation receipts for E2E-WS-AGENT/nova and E2E-AGV1-*; discovery never grants ownership",
-      "status": "Consumes explicit legacy-agent-name core b675 authority before factory; host enumerates only retained legacy records, filters discovery to enrolled members, exact workspace provenance and dynamic parent enrollment tested. Actual fixture creation/read hooks remain required."
+      "status": "Consumes approved b6 actual host creation roster/private legacy store reads. Managed legacy binding compares retained repo/commonDir/storeId/storeGeneration against actual private creation facts using the existing canonical evidence store before CLI effects; launch source/config checkout stays distinct. Actual Host + production bind + canonical registry role/usage and all backend/mode positives with two workspaces, unrelated repo/association and replaced store negatives pass deterministically. Additional/native/multirepo creation and actor associations remain required; no live creation proof."
     },
     "operation-routing": {
       "owner": "agent-b9294aeb-0c35-440a-8d2a-f1f43287248b",

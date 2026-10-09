@@ -8,7 +8,8 @@ import { HostFixtureDriver } from '../fixture/host.js';
 import { HttpResponse, Json } from '../protocol.js';
 import { checkedCliPlan } from './cli-plan.js';
 import { LegacyError, LegacyEvidenceClasses, type LegacyAccess, type LegacyLease, type ConfigurationSnapshot } from './operations.js';
-import { getFixtureOperationAuthority, type LoomAuthorizedOperation } from '../authority.js';
+import { fixtureOwnerIdentity, getFixtureOperationAuthority, type LoomAuthorizedOperation } from '../authority.js';
+import type { EvidenceStore } from '../evidence.js';
 import { LegacyOperationEffects } from './effects.js';
 import { requireOwnedWorkspace } from '../workspaces.js';
 import { checkConfiguredModel } from './model-selection.js';
@@ -26,18 +27,20 @@ const unsupported = (): never => { throw new LegacyError('unsupported-capability
 const requireOwned = (ok: unknown): void => { if (!ok) throw new LegacyError('ownership-mismatch', 'Legacy fixture identity changed'); };
 
 /** Root composition uses the canonical private driver; no second lease store. */
-export function productionLegacyAccess(fixture: OwnedFixture): LegacyAccess {
+export function productionLegacyAccess(fixture: OwnedFixture, evidenceStore?: EvidenceStore): LegacyAccess {
   const driver = privateFixtureDriver(fixture);
   if (!(driver instanceof HostFixtureDriver)) return unsupported();
-  return createHostLegacyAccess(fixture, driver);
+  return createHostLegacyAccess(fixture, driver, evidenceStore);
 }
 
 /** Tests inject the actual HostFixtureDriver's process/HTTP seams. */
-export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtureDriver): LegacyAccess {
+export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtureDriver, evidenceStore?: EvidenceStore): LegacyAccess {
+  if (!evidenceStore) return unsupported();
   requireOwned(z.enum(LegacyEvidenceClasses).safeParse(fixture.evidenceClass).success && fixture.profile.startsWith('legacy-'));
   requireOwned(fixture.profile === 'legacy-deterministic' ? fixture.evidenceClass === 'deterministic' :
     fixture.profile.startsWith('legacy-real-') && fixture.evidenceClass === 'real-native');
-  requireOwned(driver.workspaceRoot === fixture.repo && driver.configurationRoot === path.join(fixture.repo, '.loom-config'));
+  requireOwned(driver.workspaceRoot.startsWith(driver.runtimeRoot + path.sep) &&
+    driver.configurationRoot === path.join(driver.workspaceRoot, '.loom-config'));
   let cached: LegacyLease | undefined;
   const baselines = new Map<BaselineTarget, string>();
   const identity = (id: string) => requireOwned(id === fixture.leaseId);
@@ -84,6 +87,19 @@ export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtur
       await verify(id, signal);
       const records = fixture.ownedWorkspaces?.filter(row => row.identityKind === 'legacy-agent-name');
       requireOwned(records?.length);
+      const primary = requireOwnedWorkspace(fixture, fixture.workspaceId, undefined, 'legacy-agent-name');
+      requireOwned(primary.repo === fixture.repo);
+      // A managed checkout is distinct from the launcher's source checkout.
+      // Re-read the fixture's successful creation facts and captured store,
+      // rather than granting ownership from the API topology below.
+      const actual = await driver.ownedWorkspaceRoster(fixtureOwnerIdentity(fixture), evidenceStore, signal);
+      for (const record of records!) {
+        const matches = actual.filter(row => row.identityKind === 'legacy-agent-name' && row.workspaceId === record.workspaceId);
+        requireOwned(matches.length === 1);
+        const created = matches[0]!;
+        requireOwned(created.repo === record.repo && created.commonDir === record.commonDir &&
+          created.storeId === record.storeId && created.storeGeneration === record.storeGeneration);
+      }
       const cli = driver.cliRegistration;
       // The owned service port rejects overlapping operations. Discovery is
       // bounded by the authenticated roster and serializes without retries.
@@ -93,7 +109,10 @@ export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtur
         requireOwned(owned.repo.startsWith(driver.runtimeRoot + path.sep) && await realpath(owned.repo) === owned.repo);
         const prefix = `/api/workspaces/${encodeURIComponent(record.workspaceId)}`;
         const workspace = Workspace.parse(await api(prefix, signal)).data;
-        requireOwned(workspace.id === record.workspaceId && workspace.path === owned.repo);
+        requireOwned(workspace.id === record.workspaceId && workspace.path.startsWith(driver.runtimeRoot + path.sep) &&
+          await realpath(workspace.path) === workspace.path &&
+          (owned.repo === workspace.path || owned.repo.startsWith(workspace.path + path.sep)) &&
+          workspace.repos.some(row => row.path === owned.repo));
         const agents = Agents.parse(await api(`${prefix}/agents`, signal));
         requireOwned(agents.total === agents.data.length && agents.data.every(row => row.workspace_key === record.workspaceId) &&
           new Set(agents.data.map(row => row.name)).size === agents.data.length);
