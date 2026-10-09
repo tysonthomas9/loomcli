@@ -2,8 +2,9 @@ import { lstat } from 'node:fs/promises';
 import type { CapabilityProvider, CapabilityRegistry, ImplementationPin } from '@tysonthomas9/aft/capabilities';
 import type { ObservationResult } from '@tysonthomas9/aft/types';
 import { z } from 'zod';
-import { AgentRef, AgentRow, Id, requireFact, type AgentRow as Row } from './protocol.js';
+import { AgentRef, AgentRow, Id, requireFact, redact, type AgentRow as Row } from './protocol.js';
 import { defineOperation } from './operation.js';
+import { getSyntheticProbe } from './synthetic-probe.js';
 import { getFixture, getAgent, type OwnedFixture } from './ownership.js';
 import { CorrelationInput, CorrelationOutput, correlateEvents } from './correlation.js';
 import { FailureInput, FailureOutput, observeNativeFailure } from './native-failure.js';
@@ -17,6 +18,11 @@ export * from './evidence.js';
 export * from './ownership.js';
 export * from './protocol.js';
 export * from './native-host.js';
+export * from './synthetic-probe.js';
+export * from './projection.js';
+export * from './container-observations.js';
+export { createLegacyProviders } from './legacy/providers.js';
+export type { LegacyAccessFactory } from './legacy/providers.js';
 
 export const BindAgentInput = z.object({ leaseId: Id, workspaceId: Id, agentId: Id }).strict();
 export const BindAgentOutput = z.object({ fixtureLeaseId: Id, workspaceId: Id, agentId: Id,
@@ -74,14 +80,14 @@ export function createCoreProviders(implementation: ImplementationPin & { sha256
     defineOperation({ ...common, id: 'loom.api.savedEvents', inputSchema: SavedEventsInput, outputSchema: SavedEventsOutput,
       async run(input, context) {
         const { fixture, agent } = await getAgent(context, input.agent);
-        const value = await collectSavedEvents(input, fixture.readApi, context.signal);
+        const value = await collectSavedEvents(input, fixture.readApi, context.signal, input.probeHandle ? getSyntheticProbe(fixture, input.probeHandle) : undefined);
         return { value, identity: identity(fixture, agent.row), evidenceClass: fixture.evidenceClass, secrets: fixture.secrets };
       },
     }),
     defineOperation({ ...common, id: 'loom.api.correlate', inputSchema: CorrelationInput, outputSchema: CorrelationOutput,
       async run(input, context) {
         const { fixture, agent } = await getAgent(context, input.agent);
-        const value = await correlateEvents(input, fixture.readApi, context.signal);
+        const value = await correlateEvents(input, fixture.readApi, context.signal, input.probeHandle ? getSyntheticProbe(fixture, input.probeHandle) : undefined);
         return { value, identity: { ...identity(fixture, agent.row), turnId: input.turnId,
           ...(input.requestId ? { requestId: input.requestId } : {}), ...(input.itemId ? { itemId: input.itemId } : {}) },
           evidenceClass: fixture.evidenceClass, secrets: fixture.secrets };
@@ -91,6 +97,8 @@ export function createCoreProviders(implementation: ImplementationPin & { sha256
       async run(input, context) {
         const { fixture, agent } = await getAgent(context, input.agent);
         const value = await observeFiles(input, fixture.repo, fixture.readFiles, context.signal);
+        requireFact(value.view !== 'content' || value.content === null || redact(value.content, fixture.secrets) === value.content,
+          'observation-failed', 'Exact Files content contains private material');
         return { value, identity: identity(fixture, agent.row), evidenceClass: fixture.evidenceClass, secrets: fixture.secrets };
       },
     }),
@@ -98,7 +106,7 @@ export function createCoreProviders(implementation: ImplementationPin & { sha256
       async run(input, context) {
         const { fixture, agent } = await getAgent(context, input.agent);
         requireFact(agent.native, 'unsupported-capability', 'Native observation is not available for this fixture');
-        const value = await observeNative(input, agent.native, agent.row, context.signal);
+        const value = await observeNative(input, agent.native, agent.row, context.signal, input.probeHandle ? getSyntheticProbe(fixture, input.probeHandle) : undefined);
         requireFact(!('complete' in value) || value.complete, 'incomplete-pages', 'Native message history is incomplete');
         return { value, identity: identity(fixture, agent.row), evidenceClass: fixture.evidenceClass, secrets: fixture.secrets };
       },
@@ -116,16 +124,21 @@ export function createCoreProviders(implementation: ImplementationPin & { sha256
         const fixture = await getFixture(context, input.leaseId);
         const root = fixture.roots.get(input.rootId);
         requireFact(root, 'ownership-mismatch', 'Filesystem root is not owned');
-        const before = await lstat(root.path);
-        requireFact(before.dev === root.device && before.ino === root.inode, 'identity-mismatch', 'Filesystem root changed');
-        const value = await observeFilesystem(input, root.path);
-        const after = await lstat(root.path);
-        requireFact(after.dev === root.device && after.ino === root.inode, 'identity-mismatch', 'Filesystem root changed during read');
+        let value: z.infer<typeof FilesystemOutput>;
+        if (root.remoteObserve) {
+          value = FilesystemOutput.parse(await root.remoteObserve(input, context.signal));
+          await fixture.verify(context.signal);
+        } else {
+          const before = await lstat(root.path);
+          requireFact(before.dev === root.device && before.ino === root.inode, 'identity-mismatch', 'Filesystem root changed');
+          value = await observeFilesystem(input, root.path);
+          const after = await lstat(root.path);
+          requireFact(after.dev === root.device && after.ino === root.inode, 'identity-mismatch', 'Filesystem root changed during read');
+        }
         // Exact bytes are useful only if they can be shared safely. Do not
         // return a base64 encoding that evades credential redaction.
         for (const entry of value.entries) if (entry.contentBase64 !== null) {
           const text = Buffer.from(entry.contentBase64, 'base64').toString('utf8');
-          const { redact } = await import('./protocol.js');
           requireFact(redact(text, fixture.secrets) === text, 'observation-failed', 'Exact file bytes contain private material');
         }
         return { value, identity: identity(fixture), evidenceClass: fixture.evidenceClass, secrets: fixture.secrets };
@@ -134,7 +147,11 @@ export function createCoreProviders(implementation: ImplementationPin & { sha256
     defineOperation({ ...common, id: 'loom.git.observe', effects: ['read-filesystem'], inputSchema: GitInput, outputSchema: GitOutput,
       async run(input, context) {
         const { fixture, agent } = await getAgent(context, input.agent);
-        const value = await observeGit(input, { worktree: agent.row.worktree_path, commonDir: agent.commonDir, branch: agent.row.branch }, gitReader);
+        const value = agent.gitObserve ? GitOutput.parse(await agent.gitObserve(input, context.signal)) :
+          await observeGit(input, { worktree: agent.row.worktree_path, commonDir: agent.commonDir, branch: agent.row.branch }, gitReader);
+        requireFact(value.worktree === agent.row.worktree_path && value.commonDir === agent.commonDir && value.branch === agent.row.branch,
+          'identity-mismatch', 'Git observation belongs to another agent');
+        await fixture.verify(context.signal);
         return { value, identity: identity(fixture, agent.row), evidenceClass: fixture.evidenceClass, secrets: fixture.secrets };
       },
     }),

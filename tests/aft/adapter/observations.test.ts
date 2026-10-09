@@ -95,7 +95,58 @@ test('Files public observations reject wrong path/version and truncation', async
   const content = '🙂\n'; const hash = await sha256(content);
   const body = { path: 'README.md', content, size: Buffer.byteLength(content), binary: false, truncated: false, version: `sha256:${hash}` };
   const input = { agent: ref, path: 'README.md', view: 'content' as const, maxBytes: 1000 };
-  assert.equal((await observeFiles(input, '/owned/source', async route => { assert.match(route, /scope=agent&target=agt_owned/); return { status: 200, body }; }, signal)).content, content);
+  const actual = await observeFiles(input, '/owned/source', async route => { assert.match(route, /scope=agent&target=agt_owned/); return { status: 200, body }; }, signal);
+  assert.ok(actual.view === 'content'); assert.equal(actual.content, content);
   for (const changed of [{ ...body, path: 'foreign' }, { ...body, version: 'stale' }, { ...body, truncated: true }])
     await assert.rejects(observeFiles(input, '/owned/source', async () => ({ status: 200, body: changed }), signal));
+});
+
+test('Files stat reports only actual metadata, and binary content does not fabricate text', async () => {
+  const input = { agent: ref, path: 'file', view: 'stat' as const, maxBytes: 1000 };
+  const stat = await observeFiles(input, '/owned/source', async () => ({ status: 200, body:
+    { path: 'file', size: 17, version: 'strong-version', is_dir: false, mod_time: '2026-10-09T00:00:00Z' } }), signal);
+  assert.ok(stat.view === 'stat'); assert.equal(stat.isDirectory, false); assert.equal(stat.modifiedAt, '2026-10-09T00:00:00Z');
+  assert.ok(!('binary' in stat)); assert.ok(!('truncated' in stat));
+  await assert.rejects(observeFiles(input, '/owned/source', async () => ({ status: 200, body: { path: 'file', size: 17, version: 'v' } }), signal));
+  const binary = await observeFiles({ ...input, view: 'content' }, '/owned/source', async () => ({ status: 200, body:
+    { path: 'file', size: 17, version: 'strong-version', binary: true, truncated: false } }), signal);
+  assert.ok(binary.view === 'content'); assert.equal(binary.content, null); assert.equal(binary.sha256, null);
+});
+
+test('synthetic native tool facts distinguish leaks, wrong probe, duplicates and redacted copies without expecting pass', async () => {
+  const { createSyntheticProbe } = await import('./synthetic-probe.js');
+  const probe = createSyntheticProbe('run_owned', 'lease');
+  const native = access(present); const read = native.read;
+  const tool = (id: string, input: Json, output: Json) => ({ type: 'tool', id, name: 'bash', state: { status: 'completed', input, content: output } });
+  let content: Json[] = [tool('call_1', { command: `printf SAFE # TOKEN=${probe.value}` }, { text: 'SAFE' })];
+  native.read = async (route, abort) => route.includes('/message?') ? { status: 200, body: { data: [{ id: 'msg_1', sessionID: 'ses_owned',
+    type: 'assistant', time: { completed: 1 }, content }] } } : read(route, abort);
+  const input = { ...nativeInput, view: 'tools' as const, probeHandle: probe.handle };
+  const actual = await observeNative(input, native, row, signal, probe);
+  assert.ok(actual.view === 'tools'); assert.equal(actual.records[0]!.probe!.inputOccurrences, 1); assert.equal(actual.records[0]!.probe!.outputOccurrences, 0);
+  content = [tool('call_1', { command: probe.value }, { text: probe.value })];
+  const leaking = await observeNative(input, native, row, signal, probe);
+  assert.ok(leaking.view === 'tools'); assert.equal(leaking.records[0]!.probe!.outputOccurrences, 1);
+  content = [tool('call_1', { command: 'ghp_AFTONLYforeignQ7mR2pK9xT4vN8cY6bL5fS3dH1jW0' }, { text: 'SAFE' })];
+  const wrong = await observeNative(input, native, row, signal, probe);
+  assert.ok(wrong.view === 'tools'); assert.equal(wrong.records[0]!.probe!.inputOccurrences, 0);
+  content = [tool('call_1', { command: '[REDACTED]' }, { text: 'SAFE' })];
+  const redactedCopy = await observeNative(input, native, row, signal, probe);
+  assert.ok(redactedCopy.view === 'tools'); assert.equal(redactedCopy.records[0]!.probe!.inputOccurrences, 0);
+  content = [tool('call_1', { command: probe.value }, { text: 'SAFE' }), tool('call_2', { command: probe.value }, { text: 'SAFE' })];
+  const duplicateMatches = await observeNative(input, native, row, signal, probe);
+  assert.ok(duplicateMatches.view === 'tools'); assert.equal(duplicateMatches.records.filter(record => record.probe?.inputOccurrences === 1).length, 2);
+  const partial = await observeNative({ ...input, maxMessages: 1 }, native, row, signal, probe);
+  assert.ok(partial.view === 'tools'); assert.equal(partial.complete, false);
+  await assert.rejects(observeNative({ ...input, probeHandle: 'foreign' }, native, row, signal, probe));
+  content = [{ type: 'tool', id: 'call_1', name: 'bash', state: { status: 'completed', input: {} } }];
+  await assert.rejects(observeNative(input, native, row, signal, probe));
+});
+test('saved-event pre-redaction occurrence facts cannot conceal a product leak', async () => {
+  const { createSyntheticProbe } = await import('./synthetic-probe.js'); const probe = createSyntheticProbe('run_owned', 'lease');
+  const source = { ...event(1), payload: { text: `unexpected leak ${probe.value}` } };
+  const actual = await collectSavedEvents({ ...eventsInput, probeHandle: probe.handle }, async () => ({ status: 200, body:
+    { events: [source], snapshot_seq: 1, next: 1, more: false } }), signal, probe);
+  assert.equal(actual.events[0]!.probe!.payloadOccurrences, 1);
+  await assert.rejects(collectSavedEvents({ ...eventsInput, probeHandle: 'foreign' }, async () => ({ status: 200, body: {} }), signal, probe));
 });

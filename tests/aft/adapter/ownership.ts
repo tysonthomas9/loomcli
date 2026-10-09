@@ -1,13 +1,21 @@
-import type { CapabilityContext } from '@tysonthomas9/aft/capabilities';
+import { getRegisteredResource, type CapabilityContext } from '@tysonthomas9/aft/capabilities';
+import type { z } from 'zod';
+import type { FilesystemInput, FilesystemOutput } from './filesystem.js';
+import type { GitInput, GitOutput } from './git.js';
+import type { SyntheticProbe } from './synthetic-probe.js';
 import type { EvidenceClass } from '@tysonthomas9/aft/types';
-import { bindEvidenceStore } from './evidence.js';
+import { bindEvidenceStore, evidenceKey } from './evidence.js';
 import { AgentRow, AgentRef, requireFact, type NativeAccess, type ReadTransport } from './protocol.js';
 
-export interface OwnedRoot { path: string; device: number; inode: number }
+export interface OwnedRoot {
+  path: string; device: number; inode: number;
+  remoteObserve?: (input: z.infer<typeof FilesystemInput>, signal: AbortSignal) => Promise<z.infer<typeof FilesystemOutput>>;
+}
 export interface OwnedAgent {
   row: AgentRow;
   commonDir: string;
   native?: NativeAccess;
+  gitObserve?: (input: z.infer<typeof GitInput>, signal: AbortSignal) => Promise<z.infer<typeof GitOutput>>;
 }
 /** Private fixture state is never serialized into suite bindings or receipts. */
 export interface OwnedFixture {
@@ -24,6 +32,7 @@ export interface OwnedFixture {
   roots: Map<string, OwnedRoot>;
   agents: Map<string, OwnedAgent>;
   secrets: readonly string[];
+  syntheticProbe?: SyntheticProbe;
   readApi: ReadTransport;
   readFiles: ReadTransport;
   resolveAgent(agentId: string, signal: AbortSignal): Promise<OwnedAgent>;
@@ -38,10 +47,20 @@ export function putFixture(context: CapabilityContext, fixture: OwnedFixture): v
     'ownership-mismatch', 'Fixture ownership is invalid or duplicated');
   bindEvidenceStore(context, fixture.leaseId);
   context.resources.set(resourceKey(fixture.leaseId), fixture);
+  try { context.registerResource(fixture.leaseId, [resourceKey(fixture.leaseId), `${evidenceKey}:${fixture.leaseId}`]); }
+  catch (error) {
+    context.resources.delete(resourceKey(fixture.leaseId));
+    context.resources.delete(`${evidenceKey}:${fixture.leaseId}`);
+    throw error;
+  }
 }
 export async function getFixture(context: CapabilityContext, leaseId: string): Promise<OwnedFixture> {
   let fixture = context.resources.get(resourceKey(leaseId)) as OwnedFixture | undefined;
   let fromSuite = false;
+  if (fixture) {
+    try { fixture = getRegisteredResource(context, resourceKey(leaseId), leaseId) as OwnedFixture; }
+    catch { requireFact(false, 'ownership-mismatch', 'Fixture authority is missing or revoked'); }
+  }
   if (!fixture && context.scope === 'case' && context.suite?.id === context.suiteId && context.suite.handles.includes(leaseId)) {
     fixture = context.suite.getResource(resourceKey(leaseId), leaseId) as OwnedFixture | undefined;
     fromSuite = true;
@@ -92,5 +111,5 @@ export async function disposeFixtures(context: CapabilityContext): Promise<void>
 }
 export function fixtureReceipt(fixture: OwnedFixture) {
   return { leaseId: fixture.leaseId, workspaceId: fixture.workspaceId, repo: fixture.repo,
-    profile: fixture.profile, roots: [...fixture.roots.keys()].sort(), agentIds: [...fixture.agents.keys()].sort() };
+    profile: fixture.profile, ...(fixture.syntheticProbe ? { syntheticProbeHandle: fixture.syntheticProbe.handle, syntheticProbeRunId: fixture.syntheticProbe.runId } : {}), roots: [...fixture.roots.keys()].sort(), agentIds: [...fixture.agents.keys()].sort() };
 }
