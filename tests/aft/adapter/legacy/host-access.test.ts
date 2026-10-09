@@ -73,6 +73,7 @@ async function setup() {
     },
   };
   const http: Http = async (_origin, method, route) => {
+    if (route === '/__requests') return { status: 200, body: { requests: [], queued: 0 } };
     if (method === 'POST') return { status: 201, body: {} };
     if (route === '/api/workspaces/E2E-WS') return { status: 200, body: { success: true,
       data: { id: 'E2E-WS', path: driver.workspaceRoot, repos: [{ name: 'repo', path: driver.workspaceRoot }] } } };
