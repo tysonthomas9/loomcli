@@ -9,6 +9,7 @@ import { initializeCodex, type CodexProtocolProbe } from './codex-probe.js';
 import { prepareRenderer, type PreparedRenderer } from './renderer.js';
 import { fixtureRouting, fixtureOperationAuthority } from './routing.js';
 import type { FixtureAuthorityOwner } from '../authority.js';
+import {OwnedDescendants,createRegisteredProcessPort,readRegisteredHostServices,type RegisteredProcessPort} from './descendants.js';
 import { StartupBaselines, type BaselineTarget } from './baseline.js';
 
 const check = (condition: unknown, code: FixtureError['code'] = 'ownership-mismatch') => { if (!condition) throw new FixtureError(code); };
@@ -19,6 +20,7 @@ export interface HostConfig extends ProductionConfig {
   pinnedOpenCodeBinary: string;
   // Paths and provider auth roots are pinned by the reviewed launcher, not YAML.
   realBinaries: Partial<Record<'codex' | 'claude' | 'cursor' | 'opencode', { executable: string; sha256: string; authRoot: string }>>;
+  registeredProcesses?:{pythonBinary:string};
   daemon: boolean; fakeGitHub: boolean; maxBudgetUsd: string;
 }
 export type Http = (origin: string, method: 'GET' | 'POST' | 'PATCH' | 'DELETE', relative: string, body: unknown, signal: AbortSignal) => Promise<{ status: number; body: unknown }>;
@@ -36,6 +38,9 @@ export class HostFixtureDriver implements FixtureDriver {
   private leaseId = '';
   private readonly stamps = new Map<string, { dev: number; ino: number }>();
   private readonly handles = new Map<string, OwnedProcess>();
+  private descendants?:OwnedDescendants;
+  private readonly retainedServiceRegistrations=new Map<string,unknown>();
+  private runtimeRemoved=false;
   private readonly activeOperations = new Set<string>();
   private async withServiceOperation<T>(id:string,operation:()=>Promise<T>):Promise<T>{
     check(!this.activeOperations.has(id),'identity-mismatch');
@@ -63,7 +68,7 @@ export class HostFixtureDriver implements FixtureDriver {
   constructor(config: HostConfig, private readonly processes: HostProcesses = nodeProcesses,
     private readonly files: typeof fs = fs, private readonly http: Http = readHttp,
     private readonly uuid: () => string = randomUUID, private readonly reserve: () => Promise<PortReservation> = reservePort,
-    private readonly codexProtocol: CodexProtocolProbe = initializeCodex) { this.config = structuredClone(config); }
+    private readonly codexProtocol: CodexProtocolProbe = initializeCodex,private readonly registeredPort?:RegisteredProcessPort) { this.config = structuredClone(config); }
   get runtimeRoot() { return this.root; }
   get workspaceRoot() { return path.join(this.root, 'runtime', 'e2e-workspace'); }
   get processesById(): ReadonlyMap<string, OwnedProcess> { return this.handles; }
@@ -89,8 +94,18 @@ export class HostFixtureDriver implements FixtureDriver {
   private async drainCleanups() {
     while (this.cleanups.length) { await this.cleanups[this.cleanups.length - 1]!(); this.cleanups.pop(); }
   }
+  async prepareObserve(signal:AbortSignal){
+    signal.throwIfAborted();if(this.descendants&&!this.runtimeRemoved){
+      const root=this.configurationRoot,stamp=this.stamps.get(root),before=await this.files.lstat(root);
+      check(stamp&&!before.isSymbolicLink()&&before.isDirectory()&&await this.files.realpath(root)===root&&stamp.dev===before.dev&&stamp.ino===before.ino);
+      await readRegisteredHostServices(root,this.config.fleetBinary,this.profile==='legacy-real-opencode'?this.config.realBinaries.opencode!.executable:this.config.pinnedOpenCodeBinary,this.descendants,this.retainedServiceRegistrations);
+      const after=await this.files.lstat(root);check(!after.isSymbolicLink()&&before.dev===after.dev&&before.ino===after.ino);
+    }
+  }
+  async prepareCleanup(signal:AbortSignal){await this.drainCleanups();await this.prepareObserve(signal);}
   async inspectOwnedProcess(id: string, generation: string, signal: AbortSignal) {
-    signal.throwIfAborted(); const handle = this.handles.get(id);
+    signal.throwIfAborted();if(this.descendants?.has(id)){const identity=await this.descendants.inspect(id,generation);return {id,generation:identity.generation,pid:identity.pid,state:identity.state};}
+    const handle = this.handles.get(id);
     check(handle && handle.generation === generation, 'identity-mismatch');
     return { id, generation: handle!.generation, pid: handle!.pid, state: handle!.state() };
   }
@@ -120,6 +135,7 @@ export class HostFixtureDriver implements FixtureDriver {
     return { id, generation, pid: handle.pid, completion };
   }
   private async stopCapturedProcess(id:string,generation:string,signal:AbortSignal){
+    if(this.descendants?.has(id)){await this.descendants.inspect(id,generation);signal.throwIfAborted();await this.descendants.stop(id,generation);return {beforeGeneration:generation,afterGeneration:null,affectedIds:[id],complete:true as const};}
     const handle=this.requireHandle(id,generation);
     await this.inspectOwnedProcess(id,generation,signal);
     signal.throwIfAborted();this.requireCurrentHandle(id,handle);
@@ -208,6 +224,12 @@ export class HostFixtureDriver implements FixtureDriver {
       check([this.config.loom, this.config.fleet, this.config.engine, this.config.adapter].some(build =>
         build.build.entries.some(entry => path.join(build.build.root, entry.relativePath) === binary)), 'source-mismatch');
     }
+    if(this.config.registeredProcesses){
+      const binary=this.config.registeredProcesses.pythonBinary,helper=path.join(this.config.adapter.build.root,'fixture/kernel-process.py');
+      check(path.isAbsolute(binary)&&await this.files.realpath(binary)===binary,'source-mismatch');await this.files.access(binary,constants.X_OK);
+      for(const filename of [binary,helper])check([this.config.loom,this.config.fleet,this.config.engine,this.config.adapter].some(build=>build.build.entries.some(entry=>
+        path.join(build.build.root,entry.relativePath)===filename)), 'source-mismatch');
+    }
     const real = this.profile !== 'legacy-deterministic';
     const farm = path.join(this.config.loom.source.root, 'e2e', real ? `stubs-real-${this.backend}` : 'stubs');
     const selected = this.backend === 'cursor' ? 'cursor-agent' : this.backend;
@@ -287,6 +309,8 @@ export class HostFixtureDriver implements FixtureDriver {
   }
   async provision(_plan: FixturePlan, record: (resource: Resource) => void, signal: AbortSignal) {
     this.record = record;
+    const processPort=this.registeredPort??(this.config.registeredProcesses?createRegisteredProcessPort(this.config.registeredProcesses.pythonBinary,path.join(this.config.adapter.build.root,'fixture/kernel-process.py')):undefined);
+    if(processPort)this.descendants=new OwnedDescendants(processPort,record);
     if (this.profile === 'legacy-real-codex') {
       const reservation = await this.reserve(); this.sockets.push(reservation);
       await reservation.release(); this.sockets.pop();
@@ -324,6 +348,7 @@ export class HostFixtureDriver implements FixtureDriver {
       argv: ['serve', '--bind', '127.0.0.1', '--port', String(this.ports[0]), '--frontend-url', filesOrigin, '--frontend-url', `http://localhost:${this.ports[1]}`],
       cwd: this.workspaceRoot, env: this.env() }, `Server starting on 127.0.0.1:${this.ports[0]}`, record, signal);
     check((await this.http(apiOrigin, 'GET', '/api/config', null, signal)).status === 200, 'observation-failed');
+    await this.prepareObserve(signal);
     for (const [name, repo] of [['e2e-ws-2', second], ['e2e-ws', this.workspaceRoot]] as const) {
       const created = await this.http(apiOrigin, 'POST', '/api/workspaces', { name, type: 'empty', repos: [repo] }, signal);
       check(created.status === 200 || created.status === 201, 'identity-mismatch');
@@ -344,6 +369,7 @@ export class HostFixtureDriver implements FixtureDriver {
   }
   async inspect(resource: Resource): Promise<Inventory> {
     if (resource.kind === 'process') {
+      if(this.descendants?.has(resource.id)){const identity=await this.descendants.inspect(resource.id,resource.generation);return {complete:true,owned:true,services:[{id:resource.id,pid:identity.pid,generation:identity.generation,state:identity.state}]};}
       if (this.unspawned.get(resource.id) === resource.generation) return { complete: true, owned: true, services: [] };
       const handle = this.handles.get(resource.id); check(handle && handle.generation === resource.generation);
       return { complete: true, owned: true, services: [{ id: resource.id, pid: handle!.pid, generation: handle!.generation, state: handle!.state() }] };
@@ -363,7 +389,7 @@ export class HostFixtureDriver implements FixtureDriver {
     check([...this.handles.values()].every(handle => handle.state() === 'exited'));
     const runtime = path.join(this.root, 'runtime'); const stamp = this.stamps.get(runtime); const stat = await this.files.lstat(runtime);
     check(stamp && !stat.isSymbolicLink() && stat.dev === stamp.dev && stat.ino === stamp.ino);
-    await this.files.rm(runtime, { recursive: true });
+    await this.files.rm(runtime, { recursive: true });this.runtimeRemoved=true;
   }
   async artifact(kind: 'acquire' | 'release' | 'observe' | 'failure', value: unknown): Promise<Artifact> {
     const directory = path.join(this.root, 'evidence'); const stamp = this.stamps.get(directory); const stat = await this.files.lstat(directory);

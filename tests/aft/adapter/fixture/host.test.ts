@@ -10,7 +10,7 @@ import { type RegisteredBuild, verifyManifest } from './production.js';
 import { materializeRenderer } from './renderer-fixtures.test.js';
 
 const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
-async function setup(profile: string) {
+async function setup(profile: string,registeredServices=false) {
   const root = await fs.mkdtemp(path.join(path.dirname(new URL(import.meta.url).pathname), 'test-artifacts-'));
   const source = path.join(root, 'source'); const build = path.join(root, 'build');
   await fs.mkdir(source); await fs.mkdir(build); await fs.mkdir(path.join(root, 'locks')); await fs.mkdir(path.join(root, 'home'));
@@ -71,7 +71,7 @@ async function setup(profile: string) {
       if(spawnFails) throw new LaunchNotStarted();
       starts.push({ id, command, readiness }); let alive = true;
       const handle: OwnedProcess = { pid: ++count + 40, generation: generation ?? `generation-${count}`, executable: command.executable, argv: command.argv,
-        state: () => alive ? 'running' : 'exited', async ready() { if (id === failService) throw new Error('Bearer private-ready-token'); },
+        state: () => alive ? 'running' : 'exited', async ready() { if(registeredServices&&id==='serve'){const dir=path.join(command.env.LOOM_CONFIG_DIR!,'fleet-db');await fs.mkdir(dir,{recursive:true});await fs.writeFile(path.join(dir,'runtime.json'),JSON.stringify({pid:999,url:'http://127.0.0.1:6001',started_at:'2026-10-09T00:00:00Z'}));} if (id === failService) throw new Error('Bearer private-ready-token'); },
         async stop() { if (id === failStop) throw new Error('secret=private-stop-token'); alive = false; stopped.push(id); } };
       handles.set(id, handle); return handle;
     },
@@ -86,10 +86,13 @@ async function setup(profile: string) {
     if (method === 'POST') return { status: 201, body: {} };
     return { status: 200, body: relative.endsWith('/E2E-WS') ? { data: { id: 'E2E-WS', repos: [{ path: driver.workspaceRoot }] } } : {} };
   };
+  let registeredRunning=true,failRegisteredStop=false;const registeredStops:string[]=[];
+  const registeredPort={async capture(pid:number){assert.equal(pid,999);const identity={pid,generation:'actual-kernel-start',executable:config.fleetBinary,argvSha256:'a'.repeat(64),parentPid:handles.get('serve')!.pid,configurationRoot:driver.configurationRoot,state:'running' as const};return {identity,async inspect(){return {...identity,parentPid:handles.get('serve')!.state()==='exited'?1:identity.parentPid,state:registeredRunning?'running' as const:'exited' as const};},async stop(){if(failRegisteredStop)throw new Error('private child cleanup');registeredRunning=false;registeredStops.push('fleet');},async abandon(){assert.fail('owned child');}};}};
   const protocols:string[]=[];
-  const driver: HostFixtureDriver = new HostFixtureDriver(config, processes, fs, http, () => `fixture-${++count}`, async () => ({ port: port++, async release() {} }),async endpoint=>{protocols.push(endpoint);if(failService==='codex-protocol')throw new Error('private probe failure');});
+  const driver: HostFixtureDriver = new HostFixtureDriver(config, processes, fs, http, () => `fixture-${++count}`, async () => ({ port: port++, async release() {} }),async endpoint=>{protocols.push(endpoint);if(failService==='codex-protocol')throw new Error('private probe failure');},registeredServices?registeredPort:undefined);
   const lifecycle = new FixtureLifecycle([plan], () => driver, () => 1000, () => 'opaque-fixture');
   return { root, source, config, plan, starts, runs, stopped, handles, driver, lifecycle, protocols, requests,
+    registeredStops,failRegisteredCleanup(value:boolean){failRegisteredStop=value;},
     request: { runId: 'test-run', profile, loomRevision: revision, fleetRevision: revision, model: plan.model, maxCases: 1, selectionSha256: plan.selectionSha256 },
     onHttp(callback:(method:string,relative:string)=>Promise<void>){onHttp=callback;},
     failSpawn() { spawnFails = true; }, failService(value: string) { failService = value; }, failStop(value: string) { failStop = value; }, failHttp() { failHttp = true; },
@@ -337,5 +340,35 @@ test('paid task without exact reviewed authority and backend swap fail before CL
  for(const backend of ['codex','claude'])await assert.rejects(r.driver.launchOwnedCli(['--workspace','E2E-WS','--backend',backend,'task','owned'],{},'',false,new AbortController().signal));
  assert.equal(r.runs.length,count);assert.equal(r.driver.cliRegistration.env.LOOM_AGENT_MODEL,r.plan.model);assert.equal(r.driver.cliRegistration.env.LOOM_OPENCODE_MODEL,r.plan.model);
  assert.equal((await r.lifecycle.release(a.lease.id,'test-run')).released,true);
+ }finally{await r.cleanup();}
+});
+
+test('host product registration binds detached generation after parent exit and cleanup failure retains authority',async()=>{
+ const r=await setup('legacy-deterministic',true);try{
+ const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal),parent=r.driver.processesById.get('serve')!;
+ await parent.stop();const before=await r.lifecycle.observe(a.lease.id,r.request.runId);
+ assert.ok(before.services.some(row=>row.id==='registered-fleet-db'&&row.generation==='actual-kernel-start'&&row.state==='running'));
+ r.failRegisteredCleanup(true);const failed=await r.lifecycle.release(a.lease.id,r.request.runId);assert.equal(failed.released,false);
+ assert.ok(failed.remainingOwnedResources.includes('registered-fleet-db'));assert.ok((await fs.lstat(path.join(r.driver.runtimeRoot,'runtime'))).isDirectory());
+ r.failRegisteredCleanup(false);assert.equal((await r.lifecycle.release(a.lease.id,r.request.runId)).released,true);assert.deepEqual(r.registeredStops,['fleet']);
+ }finally{await r.cleanup();}
+});
+test('changed product registration blocks all cleanup without adopting the new PID',async()=>{
+ const r=await setup('legacy-deterministic',true);try{
+ const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal),before=r.stopped.length;
+ const file=path.join(r.driver.configurationRoot,'fleet-db/runtime.json'),original=await fs.readFile(file);
+ await fs.writeFile(file,JSON.stringify({pid:1000,url:'http://127.0.0.1:6002'}));
+ const failed=await r.lifecycle.release(a.lease.id,r.request.runId);assert.equal(failed.released,false);assert.equal(r.stopped.length,before);assert.deepEqual(r.registeredStops,[]);
+ await fs.writeFile(file,original);assert.equal((await r.lifecycle.release(a.lease.id,r.request.runId)).released,true);
+ }finally{await r.cleanup();}
+});
+test('partial host acquisition enrolls registered child before cleanup snapshot and retains it after failure',async()=>{
+ const r=await setup('legacy-deterministic',true);try{
+ r.failService('frontend');r.failRegisteredCleanup(true);let lease='';
+ await assert.rejects(r.lifecycle.acquire(r.request,new AbortController().signal),error=>{
+  assert.ok(error instanceof FixtureError);lease=error.leaseId!;assert.ok(error.remainingOwnedResources.includes('registered-fleet-db'));return true;
+ });
+ assert.equal(r.handles.get('serve')!.state(),'running');r.failRegisteredCleanup(false);
+ assert.equal((await r.lifecycle.release(lease,r.request.runId)).released,true);assert.deepEqual(r.registeredStops,['fleet']);
  }finally{await r.cleanup();}
 });
