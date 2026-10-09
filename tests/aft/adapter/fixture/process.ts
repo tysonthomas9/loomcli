@@ -9,6 +9,9 @@ export interface HostCommand {
 export interface CliCompletion { exitCode: number | null; stdout: string; stderr: string; complete: boolean }
 export interface ProcessOutputSnapshot {
   stdout:string;stderr:string;stdoutComplete:boolean;stderrComplete:boolean;closed:boolean;
+  // Optional only for old private consumers. Exact-byte public observers must
+  // reject a transport that cannot attest its actual consumed byte counts.
+  stdoutBytes?:number;stderrBytes?:number;
 }
 export interface OwnedCliProcess extends OwnedProcess { completion(signal: AbortSignal): Promise<CliCompletion> }
 export interface OwnedProcess {
@@ -112,9 +115,16 @@ export function createNodeProcesses(spawnChild: typeof spawn = spawn, signalGrou
     return {
       pid: child.pid ?? 0, generation, executable: command.executable, argv: Object.freeze([...command.argv]),
       state: () => running ? 'running' : 'exited',
-      output:()=>({stdout:Buffer.concat(output.stdout).toString('utf8'),stderr:Buffer.concat(output.stderr).toString('utf8'),
-        stdoutComplete:outputHealthy&&streamHealthy.stdout&&sizes.stdout<=4*1024*1024,
-        stderrComplete:outputHealthy&&streamHealthy.stderr&&sizes.stderr<=4*1024*1024,closed:outputClosed}),
+      output:()=>{
+        const decode=(stream:'stdout'|'stderr')=>{
+          try{return {text:new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(Buffer.concat(output[stream])),valid:true};}
+          catch{return {text:'',valid:false};}
+        };
+        const stdout=decode('stdout'),stderr=decode('stderr');
+        return {stdout:stdout.text,stderr:stderr.text,stdoutBytes:sizes.stdout,stderrBytes:sizes.stderr,
+          stdoutComplete:outputHealthy&&streamHealthy.stdout&&sizes.stdout<=4*1024*1024&&stdout.valid,
+          stderrComplete:outputHealthy&&streamHealthy.stderr&&sizes.stderr<=4*1024*1024&&stderr.valid,closed:outputClosed};
+      },
       async ready(signal) {
         signal.throwIfAborted();
         let abort!: () => void;

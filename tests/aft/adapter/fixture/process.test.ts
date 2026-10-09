@@ -39,7 +39,7 @@ test('owned service transport retains independent bounded log bytes without clai
  r.child.stdout.write('ready\n');await p.ready(new AbortController().signal);
  const bytes=Buffer.from('agent stopped via control socket worktree=nova café\n');
  r.child.stderr.write(bytes.subarray(0,bytes.length-3));r.child.stderr.write(bytes.subarray(bytes.length-3));
- assert.deepEqual(p.output!(),{stdout:'ready\n',stderr:bytes.toString('utf8'),stdoutComplete:true,stderrComplete:true,closed:false});
+ assert.deepEqual(p.output!(),{stdout:'ready\n',stderr:bytes.toString('utf8'),stdoutBytes:6,stderrBytes:bytes.length,stdoutComplete:true,stderrComplete:true,closed:false});
  r.finish();assert.equal(p.output!().closed,true);await p.stop();assert.deepEqual(r.signals,[]);
 });
 
@@ -55,7 +55,28 @@ test('owned service transport error cannot turn discarded or unfinished logs int
  const r=rig(undefined),p=r.processes.start(command,'ready','registered');
  r.child.emit('error',new Error('private transport error'));
  await assert.rejects(p.ready(new AbortController().signal));
- assert.deepEqual(p.output!(),{stdout:'',stderr:'',stdoutComplete:false,stderrComplete:false,closed:false});
+ assert.deepEqual(p.output!(),{stdout:'',stderr:'',stdoutBytes:0,stderrBytes:0,stdoutComplete:false,stderrComplete:false,closed:false});
+});
+
+test('owned stderr snapshot preserves actual bytes and genuine replacement/BOM characters',async()=>{
+ const r=rig(),p=r.processes.start(command,'ready','registered');r.child.stdout.write('ready');await p.ready(new AbortController().signal);
+ const text='\uFEFFactual\uFFFD café\r\n';const raw=Buffer.from(text);r.child.stderr.write(raw);
+ const snapshot=p.output!();assert.equal(snapshot.stderr,text);assert.equal(snapshot.stderrBytes,raw.length);assert.equal(snapshot.stderrComplete,true);
+ r.finish();await p.stop();
+});
+
+test('malformed same-length UTF8 cannot produce changed successful stderr',async()=>{
+ const r=rig(),p=r.processes.start(command,'ready','registered');r.child.stdout.write('ready');await p.ready(new AbortController().signal);
+ const malformed=Buffer.from([0xf0,0x90,0x80]);assert.equal(Buffer.byteLength(malformed.toString('utf8')),malformed.length);
+ r.child.stderr.write(malformed);const snapshot=p.output!();assert.equal(snapshot.stderrBytes,3);
+ assert.equal(snapshot.stderrComplete,false);assert.equal(snapshot.stderr,'');r.finish();assert.equal(p.output!().stderrComplete,false);await p.stop();
+});
+
+test('split stderr UTF8 remains incomplete until the actual remaining bytes arrive',async()=>{
+ const r=rig(),p=r.processes.start(command,'ready','registered');r.child.stdout.write('ready');await p.ready(new AbortController().signal);
+ const raw=Buffer.from('€');r.child.stderr.write(raw.subarray(0,2));assert.equal(p.output!().stderrComplete,false);assert.equal(p.output!().stderrBytes,2);
+ r.child.stderr.write(raw.subarray(2));assert.equal(p.output!().stderrComplete,true);assert.equal(p.output!().stderr,'€');assert.equal(p.output!().stderrBytes,3);
+ r.finish();await p.stop();
 });
 
 for(const stream of ['stdout','stderr'] as const)test(`owned service ${stream} read error stays incomplete through later bytes and child close`,async()=>{
