@@ -11,6 +11,7 @@ import { createLegacyProviders, RoleOutput } from './providers.js';
 import type { LegacyAccess, LegacyLease } from './operations.js';
 import { createFixtureOperationAuthority } from '../authority.js';
 import { LegacyOperationEffects } from './providers.js';
+import { testLegacyRoster } from './test-roster.js';
 
 test('all six legacy providers register strict contracts and return canonical envelopes', async t => {
   const root = fileURLToPath(new URL('..', import.meta.url));
@@ -37,6 +38,7 @@ test('all six legacy providers register strict contracts and return canonical en
     readApi: unsupported, readFiles: unsupported, resolveAgent: unsupported, verify: async () => { verified++; }, dispose: async () => {} };
   fixture.operationAuthority = createFixtureOperationAuthority({ leaseId: fixture.leaseId, runId: fixture.runId, suiteId: fixture.suiteId, scope: fixture.scope, caseId: fixture.caseId, profile: fixture.profile }, Object.fromEntries(Object.entries(LegacyOperationEffects).map(([operation, effects]) =>
     [operation, { evidenceClass: 'deterministic' as const, effects: [...effects] }])));
+  fixture.ownedWorkspaces = await testLegacyRoster(fixture, evidenceStore);
   putFixture(context, fixture);
   const invoke = (input: unknown) => registry.invoke({ id: 'loom.cli.role', version: 1, input: {} }, input, context);
   const result = ObservationResultSchema.parse(await invoke({ leaseId: 'lease', workspaceId: 'WS', operation: 'list', name: null }));
@@ -60,7 +62,8 @@ test('all six legacy providers register strict contracts and return canonical en
   Object.assign(nativeContext, { runId: 'run' }); putEvidenceStore(nativeContext, evidenceStore);
   const nativeFixture: OwnedFixture = { ...fixture, suiteId: nativeContext.suiteId, scope: nativeContext.scope,
     caseId: nativeContext.caseId, evidenceClass: 'real-native' };
-  nativeFixture.operationAuthority = createFixtureOperationAuthority({ leaseId: nativeFixture.leaseId, runId: nativeFixture.runId, suiteId: nativeFixture.suiteId, scope: nativeFixture.scope, caseId: nativeFixture.caseId, profile: nativeFixture.profile }, { 'loom.cli.role': { evidenceClass: 'real-native', effects: ['read-api'] } });
+  nativeFixture.operationAuthority = createFixtureOperationAuthority({ leaseId: nativeFixture.leaseId, runId: nativeFixture.runId, suiteId: nativeFixture.suiteId, scope: nativeFixture.scope, caseId: nativeFixture.caseId, profile: nativeFixture.profile }, { 'loom.cli.role': { evidenceClass: 'real-native', effects: [...LegacyOperationEffects['loom.cli.role']] } });
+  nativeFixture.ownedWorkspaces = await testLegacyRoster(nativeFixture, evidenceStore);
   putFixture(nativeContext, nativeFixture);
   const native = ObservationResultSchema.parse(await registry.invoke({ id: 'loom.cli.role', version: 1, input: {} },
     { leaseId: 'lease', workspaceId: 'WS', operation: 'list', name: null }, nativeContext));
@@ -96,7 +99,7 @@ test('suite fixture configuration keeps its original restoration across declared
   const fixture: OwnedFixture = { leaseId: 'lease', runId: 'run', caseId: 'setup', suiteId: suite.suiteId, scope: 'suite', workspaceId: 'WS', repo: '/owned/source', profile: 'legacy',
     expiresAtUtcMs: Number.MAX_SAFE_INTEGER, evidenceClass: 'deterministic', roots: new Map(), agents: new Map(), secrets: [],
     readApi: unsupported, readFiles: unsupported, resolveAgent: unsupported, verify: async () => {}, dispose: async () => { await cleanup?.(); } };
-  fixture.operationAuthority = createFixtureOperationAuthority({ leaseId: fixture.leaseId, runId: fixture.runId, suiteId: fixture.suiteId, scope: fixture.scope, caseId: fixture.caseId, profile: fixture.profile }, { 'loom.fixture.configure': { evidenceClass: 'deterministic', effects: ['write-fixture'] } });
+  fixture.operationAuthority = createFixtureOperationAuthority({ leaseId: fixture.leaseId, runId: fixture.runId, suiteId: fixture.suiteId, scope: fixture.scope, caseId: fixture.caseId, profile: fixture.profile }, { 'loom.fixture.configure': { evidenceClass: 'deterministic', effects: [...LegacyOperationEffects['loom.fixture.configure']] } });
   putFixture(suite, fixture);
   // This bounded unit accessor exercises provider state across cases; actual
   // runner suite authorization remains the engine's separate integration gate.
@@ -132,13 +135,15 @@ test('registry authorizes operation classes and external effects before factorie
       exitCode: command.argv[4] === 'task' ? null : 0, complete: command.argv[4] !== 'task', stdout: '[]', stderr: '' }; },
     registerProcess: async () => {}, stimulate: unused, request: unused, validateSeedPath: unused, seedCommit: unused,
     snapshot: unused, restore: unused, writeConfiguration: unused, enrollCleanup: () => {} };
-  for (const provider of createLegacyProviders(pin, pin.sha256, () => { factories++; return access; })) registry.register(provider);
+  for (const provider of createLegacyProviders(pin, pin.sha256, () => { factories++; return access; }, { taskExecution: 'live-provider' })) registry.register(provider);
   const context = createCapabilityContext({ file: 'declared-live-double.yaml', line: 1 }, registry); Object.assign(context, { runId: 'mixed-run' });
   const evidenceRoot = await realpath(await mkdtemp(fileURLToPath(new URL('.seed-test-evidence-', import.meta.url))));
-  t.after(() => rm(evidenceRoot, { recursive: true, force: true })); putEvidenceStore(context, await createEvidenceStore(evidenceRoot));
+  t.after(() => rm(evidenceRoot, { recursive: true, force: true })); const evidenceStore = await createEvidenceStore(evidenceRoot); putEvidenceStore(context, evidenceStore);
   const fixture: OwnedFixture = { leaseId: lease.id, runId: lease.runId, suiteId: context.suiteId, scope: context.scope, caseId: context.caseId,
     workspaceId: 'WS', repo: '/injected/work', profile: 'legacy-real-codex', expiresAtUtcMs: Number.MAX_SAFE_INTEGER, evidenceClass: 'real-native',
     roots: new Map(), agents: new Map(), secrets: [], readApi: unused, readFiles: unused, resolveAgent: unused, verify: async () => {}, dispose: async () => {} };
+  fixture.readWorkspaceLegacyAgent = unused;
+  fixture.ownedWorkspaces = await testLegacyRoster(fixture, evidenceStore, [{ workspaceId: 'WS', repo: fixture.repo, agentIds: ['worker'] }]);
   putFixture(context, fixture);
   const task = { leaseId: lease.id, workspaceId: 'WS', agentName: 'worker', backend: 'codex', mode: 'once', issueId: null };
   const invoke = (id: string, input: unknown) => registry.invoke({ id, version: 1, input: {} }, input, context);
@@ -147,8 +152,8 @@ test('registry authorizes operation classes and external effects before factorie
   fixture.operationAuthority = createFixtureOperationAuthority(owner, { 'loom.cli.task': { evidenceClass: 'live-provider', effects: ['start-owned-process'] } });
   assert.equal((await invoke('loom.cli.task', task)).availability, 'unsupported'); assert.equal(factories, 0);
   fixture.operationAuthority = createFixtureOperationAuthority(owner, {
-    'loom.cli.role': { evidenceClass: 'real-native', effects: ['read-api'] },
-    'loom.cli.task': { evidenceClass: 'live-provider', effects: ['start-owned-process','external-provider'] },
+    'loom.cli.role': { evidenceClass: 'real-native', effects: [...LegacyOperationEffects['loom.cli.role']] },
+    'loom.cli.task': { evidenceClass: 'live-provider', effects: [...LegacyOperationEffects['loom.cli.task'], 'external-provider'] },
   });
   assert.equal((await invoke('loom.cli.task', { ...task, backend: 'claude' })).availability, 'unsupported'); assert.equal(factories, 0);
   await assert.rejects(invoke('loom.cli.task', { ...task, model: 'unreviewed-paid-model' })); assert.equal(factories, 0);
@@ -173,12 +178,12 @@ test('legacy redaction receipts distinguish omitted source fields from absence',
   for (const provider of createLegacyProviders(pin, pin.sha256, () => access)) registry.register(provider);
   const context = createCapabilityContext({ file: 'privacy-double.yaml', line: 1 }, registry); Object.assign(context, { runId: lease.runId });
   const evidenceRoot = await realpath(await mkdtemp(fileURLToPath(new URL('.seed-test-evidence-', import.meta.url))));
-  t.after(() => rm(evidenceRoot, { recursive: true, force: true })); putEvidenceStore(context, await createEvidenceStore(evidenceRoot));
+  t.after(() => rm(evidenceRoot, { recursive: true, force: true })); const evidenceStore = await createEvidenceStore(evidenceRoot); putEvidenceStore(context, evidenceStore);
   const fixture: OwnedFixture = { leaseId: lease.id, runId: lease.runId, suiteId: context.suiteId, scope: context.scope, caseId: context.caseId,
     workspaceId: 'WS', repo: '/injected/work', profile: 'legacy-deterministic', expiresAtUtcMs: Number.MAX_SAFE_INTEGER, evidenceClass: 'deterministic',
     roots: new Map(), agents: new Map(), secrets: lease.secrets, readApi: unused, readFiles: unused, resolveAgent: unused, verify: async () => {}, dispose: async () => {} };
   fixture.operationAuthority = createFixtureOperationAuthority({ leaseId: fixture.leaseId, runId: fixture.runId, suiteId: fixture.suiteId,
-    scope: fixture.scope, caseId: fixture.caseId, profile: fixture.profile }, { 'loom.cli.role': { evidenceClass: 'deterministic', effects: ['read-api'] } }); putFixture(context, fixture);
+    scope: fixture.scope, caseId: fixture.caseId, profile: fixture.profile }, { 'loom.cli.role': { evidenceClass: 'deterministic', effects: [...LegacyOperationEffects['loom.cli.role']] } }); fixture.ownedWorkspaces = await testLegacyRoster(fixture, evidenceStore); putFixture(context, fixture);
   const result = await registry.invoke({ id: 'loom.cli.role', version: 1, input: {} }, { leaseId: lease.id, workspaceId: 'WS', operation: 'list', name: null }, context);
   assert.equal(result.availability, 'observed');
   const data = RoleOutput.parse(result.data);
@@ -186,4 +191,49 @@ test('legacy redaction receipts distinguish omitted source fields from absence',
   assert.deepEqual(data.receipt.factsRedaction, { omittedPaths: ['/body/authorization'], replacedTextPaths: ['/body/nested/text'] });
   assert.ok(data.redaction.omittedPaths.includes('/body/authorization')); assert.ok(data.redaction.replacedTextPaths.includes('/body/nested/text'));
   assert.equal(JSON.stringify(data).includes('literal-private'), false);
+});
+
+test('legacy names are scoped by retained workspace kind and dynamic enrollment before factories', async t => {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const pin = calculateImplementationPin(root, ['legacy/providers.ts','legacy/effects.ts','workspaces.ts'], 'legacy/providers.ts', 'createLegacyProviders');
+  const registry = new CapabilityRegistry(); let factories = 0, effects = 0, nativeReads = 0;
+  const unused = async (): Promise<never> => { throw new Error('Unused injected transport'); };
+  const lease: LegacyLease = { id: 'roster-lease', runId: 'roster-run', active: true, evidence: 'deterministic', secrets: [],
+    binary: '/injected/loom', cwd: '/injected/repo', env: {}, workspaces: ['WS','OTHER'],
+    agents: ['WS','OTHER'].flatMap(workspaceId => ['worker','child','cycle'].map(name => ({ workspaceId, id: name, name, generation: 'row-revision' }))),
+    roles: [], issues: [], repos: [], processes: [], fixtures: [] };
+  const access: LegacyAccess = { lease: async () => lease,
+    execute: async () => { effects++; return { processId: 'p', generation: 'g', exitCode: 0, complete: true, stdout: '{}', stderr: '' }; },
+    registerProcess: unused, stimulate: unused, request: unused, validateSeedPath: unused, seedCommit: unused,
+    snapshot: unused, restore: unused, writeConfiguration: unused, enrollCleanup: () => {} };
+  for (const provider of createLegacyProviders(pin, pin.sha256, () => { factories++; return access; })) registry.register(provider);
+  const context = createCapabilityContext({ file: 'roster-double.yaml', line: 1 }, registry); Object.assign(context, { runId: lease.runId });
+  const evidenceRoot = await realpath(await mkdtemp(fileURLToPath(new URL('.seed-test-evidence-', import.meta.url))));
+  t.after(() => rm(evidenceRoot, { recursive: true, force: true })); const store = await createEvidenceStore(evidenceRoot); putEvidenceStore(context, store);
+  const fixture: OwnedFixture = { leaseId: lease.id, runId: lease.runId, suiteId: context.suiteId, scope: context.scope, caseId: context.caseId,
+    workspaceId: 'WS', repo: '/injected/repo', profile: 'legacy-deterministic', expiresAtUtcMs: Number.MAX_SAFE_INTEGER, evidenceClass: 'deterministic',
+    roots: new Map(), agents: new Map(), secrets: [], readApi: unused, readFiles: unused, resolveAgent: unused,
+    readWorkspaceAgent: async () => { nativeReads++; throw new Error('Legacy name must never use native ID reader'); }, verify: async () => {}, dispose: async () => {} };
+  const owner = { leaseId: fixture.leaseId, runId: fixture.runId, suiteId: fixture.suiteId, scope: fixture.scope, caseId: fixture.caseId, profile: fixture.profile };
+  fixture.operationAuthority = createFixtureOperationAuthority(owner, { 'loom.cli.usage': { evidenceClass: 'deterministic', effects: [...LegacyOperationEffects['loom.cli.usage']] } });
+  fixture.ownedWorkspaces = await testLegacyRoster(fixture, store, ['WS','OTHER'].map(workspaceId => ({ workspaceId, repo: '/injected/repo', agentIds: ['worker'] })));
+  fixture.readWorkspaceLegacyAgent = async (workspaceId, name) => ({ kind: 'legacy-agent-enrolled', identityKind: 'legacy-agent-name', ...owner,
+    workspaceId, name, repo: '/injected/repo', commonDir: '/injected/repo/.git', storeId: 'injected-legacy-store', storeGeneration: 'injected-store-generation',
+    parentName: name === 'worker' ? null : name === 'cycle' ? 'cycle' : 'worker', createdAt: '2026-10-09T00:00:00Z', updatedAt: '2026-10-09T00:01:00Z' });
+  putFixture(context, fixture);
+  const invoke = (workspaceId: string, agentId: string) => registry.invoke({ id: 'loom.cli.usage', version: 1, input: {} },
+    { agent: { fixtureLeaseId: lease.id, workspaceId, agentId } }, context);
+  assert.equal((await invoke('FOREIGN','worker')).availability, 'error'); assert.equal(factories, 0); assert.equal(effects, 0);
+  assert.equal((await invoke('WS','cycle')).availability, 'error'); assert.equal(factories, 0); assert.equal(effects, 0);
+  for (const workspaceId of ['WS','OTHER']) {
+    const result = await invoke(workspaceId, 'worker'); assert.equal(result.availability, 'observed');
+    assert.equal(result.provenance.identity.workspaceId, workspaceId);
+  }
+  const initial = fixture.ownedWorkspaces![0]!.creationReceipt;
+  const child = await invoke('WS','child'); assert.equal(child.availability, 'observed'); assert.equal(nativeReads, 0);
+  assert.equal(fixture.ownedWorkspaces![0]!.creationReceipt.id, initial.id, 'Dynamic enrollment preserves original creation bytes');
+  assert.equal(fixture.ownedWorkspaces![0]!.enrollmentReceipts.length, 1);
+  const receipt = JSON.parse(await readFile(await store.resolve(fixture.ownedWorkspaces![0]!.enrollmentReceipts[0]!.id), 'utf8'));
+  assert.equal(receipt.identityKind, 'legacy-agent-name'); assert.equal(receipt.name, 'child'); assert.equal(receipt.parentName, 'worker');
+  assert.equal(factories, 1); assert.equal(effects, 3);
 });

@@ -17,6 +17,7 @@ import { productionLegacyAccess } from './host-access.js';
 import { LegacyError } from './operations.js';
 import { createFixtureOperationAuthority } from '../authority.js';
 import { LegacyOperationEffects } from './providers.js';
+import { testLegacyRoster } from './test-roster.js';
 
 const hash = (bytes: string) => createHash('sha256').update(bytes).digest('hex');
 async function setup() {
@@ -84,7 +85,7 @@ async function setup() {
   const adapterRoot = fileURLToPath(new URL('..', import.meta.url));
   const pin = calculateImplementationPin(adapterRoot, ['fixture/providers.ts'], 'fixture/providers.ts', 'createFixtureProviders');
   const legacyPin = calculateImplementationPin(adapterRoot, ['legacy/providers.ts','legacy/host-access.ts','legacy/cli-plan.ts'], 'legacy/providers.ts', 'createLegacyProviders');
-  const registry = new CapabilityRegistry();
+  const registry = new CapabilityRegistry(); let factories = 0;
   for (const provider of createFixtureProviders({ implementation: pin, implementationSha256: pin.sha256, plans: [plan], driver: () => driver,
     evidenceAfterFailure: () => createEvidenceStore(path.join(driver.runtimeRoot, 'evidence')),
     async bind(_driver, acquired, input, context) {
@@ -92,12 +93,12 @@ async function setup() {
       return { evidenceClass: 'deterministic', operationAuthority: createFixtureOperationAuthority({ leaseId: acquired.lease.id, runId: context.runId,
         suiteId: context.suiteId, scope: context.scope, caseId: context.caseId, profile: input.profile },
         Object.fromEntries(Object.entries(LegacyOperationEffects).map(([operation, effects]) => [operation, { evidenceClass: 'deterministic' as const,
-          effects: operation === 'loom.runtime.stimulate' ? ['stop-owned-process','restart-owned-service'] : [...effects] }]))),
+          effects: operation === 'loom.runtime.stimulate' ? [...effects, 'restart-owned-service'] : [...effects] }]))),
         roots: new Map([['runtime', { path: driver.runtimeRoot, device: stat.dev, inode: stat.ino }]]), secrets: [],
         evidenceStore: await createEvidenceStore(path.join(driver.runtimeRoot, 'evidence')), readApi: async () => { throw new Error('Unused'); },
         readFiles: async () => { throw new Error('Unused'); }, resolveAgent: async () => { throw new Error('No native-v1 registration'); } };
     } })) registry.register(provider);
-  for (const provider of createLegacyProviders(legacyPin, legacyPin.sha256, (_context, fixture) => productionLegacyAccess(fixture))) registry.register(provider);
+  for (const provider of createLegacyProviders(legacyPin, legacyPin.sha256, (_context, fixture) => { factories++; return productionLegacyAccess(fixture); })) registry.register(provider);
   const context = createCapabilityContext({ file: 'injected-host.yaml', line: 1 }, registry); Object.assign(context, { runId: 'binding-run' });
   const invoke = (id: string, input: unknown) => registry.invoke({ id, version: 1, input: {} }, input, context);
   const acquired = await invoke('loom.fixture.acquire', { runId: 'binding-run', profile: plan.profile, loomRevision: revision,
@@ -105,7 +106,10 @@ async function setup() {
   assert.equal(acquired.availability, 'observed');
   const leaseId = (acquired.data as { lease: { id: string } }).lease.id;
   const fixture = getRegisteredResource(context, `${fixturesKey}:${leaseId}`, leaseId) as OwnedFixture;
-  return { root, driver, fixture, leaseId, invoke, launches, stops,
+  fixture.readWorkspaceLegacyAgent = async () => { throw new Error('Injected member needs no enrollment lookup'); };
+  fixture.ownedWorkspaces = await testLegacyRoster(fixture, await createEvidenceStore(path.join(driver.runtimeRoot, 'evidence')),
+    [{ workspaceId: fixture.workspaceId, repo: fixture.repo, agentIds: ['worker'] }]);
+  return { root, driver, fixture, leaseId, invoke, launches, stops, factories: () => factories,
     badAgents: () => { badAgents = true; }, badRoles: () => { badRoles = true; }, failLaunch: (kind: 'proven' | 'uncertain' = 'proven') => { failLaunch = kind; },
     processFailure: () => { exitCode = 17; stderr = 'exact process diagnostic'; }, restored: () => restoredBytes,
     async cleanup() { await fs.rm(root, { recursive: true, force: true }); } };
@@ -150,6 +154,7 @@ test('configuration restores exact private bytes through lease cleanup after exp
   const bytes = `  ${original}\n`; await fs.writeFile(filename, bytes);
   const configured = await r.invoke('loom.fixture.configure', { leaseId: r.leaseId, setting: 'provider-default', model: 'aft/m', harness: 'opencode' });
   assert.equal(configured.availability, 'observed'); assert.notEqual(await fs.readFile(filename, 'utf8'), bytes);
+  assert.equal(r.launches.length, 0, 'Configuration has no role discovery CLI effect');
   assert.deepEqual((configured.data as { previous: unknown }).previous, { model: 'aft/m', harness: 'opencode' });
   r.fixture.expiresAtUtcMs = 0;
   const backup = `${filename}.owned-backup`; await fs.rename(filename, backup); await fs.symlink(backup, filename);
@@ -216,4 +221,22 @@ test('uncertain no-handle launch failure keeps the exact resource ledger for ret
   assert.equal(released.availability, 'observed');
   const data = released.data as { released: boolean; remainingOwnedResources: string[] };
   assert.equal(data.released, false); assert.ok(data.remainingOwnedResources.some(id => id.startsWith('cli-')));
+});
+
+test('canonical registry denies missing process effect before actual host factory and discovery', async t => {
+  const r = await setup(); t.after(r.cleanup);
+  r.fixture.operationAuthority = createFixtureOperationAuthority({ leaseId: r.fixture.leaseId, runId: r.fixture.runId,
+    suiteId: r.fixture.suiteId, scope: r.fixture.scope, caseId: r.fixture.caseId, profile: r.fixture.profile },
+    { 'loom.cli.role': { evidenceClass: 'deterministic', effects: ['read-api'] } });
+  const result = await r.invoke('loom.cli.role', { leaseId: r.leaseId, workspaceId: 'E2E-WS', operation: 'list', name: null });
+  assert.equal(result.availability, 'unsupported'); assert.equal(r.factories(), 0); assert.equal(r.launches.length, 0);
+});
+
+test('real execution grant cannot reuse the deterministic task descriptor or start host discovery', async t => {
+  const r = await setup(); t.after(r.cleanup);
+  r.fixture.operationAuthority = createFixtureOperationAuthority({ leaseId: r.fixture.leaseId, runId: r.fixture.runId,
+    suiteId: r.fixture.suiteId, scope: r.fixture.scope, caseId: r.fixture.caseId, profile: r.fixture.profile },
+    { 'loom.cli.task': { evidenceClass: 'live-provider', effects: ['read-api','start-owned-process','external-provider'] } });
+  const result = await r.invoke('loom.cli.task', { leaseId: r.leaseId, workspaceId: 'E2E-WS', agentName: 'worker', backend: 'codex', mode: 'once', issueId: null });
+  assert.equal(result.availability, 'error'); assert.equal(r.factories(), 0); assert.equal(r.launches.length, 0);
 });
