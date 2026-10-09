@@ -167,16 +167,15 @@ func (st LineageState) Reason(predecessor string) string {
 	case st.State != "stale":
 		return ""
 	}
-	base := fmt.Sprintf("built on %s's revision %d", predecessor, st.Pinned.PredecessorRevision)
+	// Plain words for the reviewer: the API carries the revision numbers.
+	base := fmt.Sprintf("built on an older version of %s's code", predecessor)
 	if st.Rejected {
-		base += ", which was rejected"
-	} else {
-		base += ", which was replaced"
+		base = fmt.Sprintf("built on %s's code, which was rejected", predecessor)
 	}
 	if st.Available > 0 {
-		return fmt.Sprintf("%s: rebuild it on revision %d", base, st.Available)
+		return fmt.Sprintf("%s: rebuild it on %s's new code", base, predecessor)
 	}
-	return fmt.Sprintf("%s: rebuild it once %s has a new revision", base, predecessor)
+	return fmt.Sprintf("%s: rebuild it once %s has new code", base, predecessor)
 }
 
 // DependentLineage reads the lineage of the task behind change: its state and

@@ -310,8 +310,7 @@ export function RevisionsSection({
                       disabled={Boolean(busy)}
                       onClick={() => void rebuild(revision)}
                     >
-                      Rebuild on {revision.depends_on}&apos;s revision{" "}
-                      {revision.rebuild_on}
+                      Rebuild on {revision.depends_on}&apos;s new code
                     </button>
                   )}
               </div>

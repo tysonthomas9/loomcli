@@ -3626,7 +3626,7 @@ paths:
       operationId: rebuildStaleTask
       tags: [git]
       summary: Rebuild a task whose code was built on a rejected or replaced revision
-      description: Rejects the task's newest revision with the rebuild as the reason, cancels any approval of it still waiting to apply, and moves the task's base to the newest revision of the task it depends on, so the task reopens for a new attempt. Never automatic. Refused with 409 when the task is not stale or there is no newer revision to build on yet.
+      description: A human action (an actor of any other kind is refused with review_required). Rejects the task's newest revision with the rebuild as the reason, cancels any approval of it still waiting to apply, and moves the task's base to the newest revision of the task it depends on, so the task reopens for a new attempt. Never automatic. Refused with 409 when the task is not stale or there is no newer revision to build on yet.
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - name: id
@@ -3678,7 +3678,7 @@ paths:
                         type: string
                         description: reject, or empty when the revision was already rejected.
         "409":
-          description: Not stale, nothing newer to build on, or the revision is already applied.
+          description: Not a human actor, not stale, nothing newer to build on, or the revision is already applied.
           content:
             application/json:
               schema:
@@ -6802,7 +6802,7 @@ components:
           description: Set when the code this revision was built on is no longer the code to build on. stale means that task's revision was rejected or replaced; Approve is refused until the task is rebuilt (Override is not). Absent when the base is current.
         lineage_reason:
           type: string
-          description: 'Why the base is stale and what a rebuild would build on, such as "built on T1''s revision 1, which was rejected: rebuild it on revision 2".'
+          description: 'Why the base is stale and what a rebuild would build on, such as "built on T1''s code, which was rejected: rebuild it on T1''s new code". Plain words; the revision numbers are in rebuild_on.'
         rebuild_on:
           type: integer
           description: The revision of depends_on a rebuild would build on; absent while there is none yet.

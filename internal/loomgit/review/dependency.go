@@ -110,12 +110,16 @@ type RebuildResult struct {
 	VerdictKind string `json:"verdict"`
 }
 
-// Rebuild sets a stale dependent's newest revision aside and rebuilds it on
+// Rebuild, a human action, sets a stale dependent's newest revision aside and rebuilds it on
 // its predecessor's newer revision. It rejects that revision with the rebuild
 // as the reason, so the task reopens for a new attempt; cancels any approval
 // of it still waiting to apply; and drops the dependent's pin, so the attempt
 // builds on the predecessor's newest revision.
 func (l *Local) Rebuild(ctx context.Context, workspace, task string, actor Actor) (RebuildResult, error) {
+	// A human decides to throw a dependent's code away, as with Override.
+	if actor.Kind != "human" || actor.ID == "" {
+		return RebuildResult{}, required("rebuild requires a human actor")
+	}
 	revisions, err := l.store.ListTaskRevisions(ctx, workspace, task)
 	if err != nil {
 		return RebuildResult{}, err
@@ -146,7 +150,7 @@ func (l *Local) Rebuild(ctx context.Context, workspace, task string, actor Actor
 		}
 		return RebuildResult{}, loomgit.NewError(loomgit.Conflict, "the revision is already applied; unapply it first", nil)
 	}
-	reason := fmt.Sprintf("rebuild on %s's revision %d", predecessor, state.Available)
+	reason := fmt.Sprintf("rebuild on %s's new code", predecessor)
 	if err := l.store.SpendWaitingApprovals(ctx, workspace, newest.Change, newest.Number, state.Reason(predecessor)); err != nil {
 		return RebuildResult{}, err
 	}

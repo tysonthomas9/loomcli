@@ -142,7 +142,7 @@ func TestRejectedPredecessorMakesDependentStale(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := followWithStore(ctx, f.store, cfg, "W", "L")
-	const waitReason = "built on T1's revision 1, which was rejected: rebuild it once T1 has a new revision"
+	const waitReason = "built on T1's code, which was rejected: rebuild it once T1 has new code"
 	if err != nil || len(result.Spent) != 1 || result.Spent[0].Reason != waitReason || len(result.Applied) != 0 {
 		t.Fatalf("stale dependent approval was not spent: %+v, %v", result, err)
 	}
@@ -165,15 +165,18 @@ func TestRejectedPredecessorMakesDependentStale(t *testing.T) {
 	}
 	next, _ := addRevision(t, f, "C1", f.base, "change-again")
 	got = revisionOf(t, f.dbPath, "T2")
-	if got.RebuildOn != next || !strings.HasSuffix(got.LineageReason, "rebuild it on revision 2") {
+	if got.RebuildOn != next || got.LineageReason != "built on T1's code, which was rejected: rebuild it on T1's new code" {
 		t.Fatalf("dependent with a new predecessor revision = %+v", got)
+	}
+	if _, err := local.Rebuild(ctx, "W", "T2", review.Actor{Kind: "agent", ID: "worker"}); !hasCode(err, loomgit.ReviewRequired) {
+		t.Fatalf("rebuild by an agent = %v, want refused", err)
 	}
 	rebuilt, err := local.Rebuild(ctx, "W", "T2", reviewer)
 	if err != nil || rebuilt.Change != "C2" || rebuilt.RebuildOn != next || rebuilt.VerdictKind != "reject" {
 		t.Fatalf("Rebuild = %+v, %v", rebuilt, err)
 	}
 	verdict, err := f.store.LatestVerdict(ctx, loomgit.Revision{Workspace: "W", Change: "C2", Number: number})
-	if err != nil || verdict.Kind != "reject" || verdict.Reason != "rebuild on T1's revision 2" {
+	if err != nil || verdict.Kind != "reject" || verdict.Reason != "rebuild on T1's new code" {
 		t.Fatalf("rebuild verdict = %+v, %v", verdict, err)
 	}
 	if _, err := f.store.LocalLineage(ctx, "W", "T2", "repo"); !errors.Is(err, journal.ErrNotFound) {

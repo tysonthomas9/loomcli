@@ -3124,7 +3124,7 @@ type ReviewRevision struct {
 	HeadSha      string  `json:"head_sha"`
 	Incomplete   bool    `json:"incomplete"`
 
-	// LineageReason Why the base is stale and what a rebuild would build on, such as "built on T1's revision 1, which was rejected: rebuild it on revision 2".
+	// LineageReason Why the base is stale and what a rebuild would build on, such as "built on T1's code, which was rejected: rebuild it on T1's new code". Plain words; the revision numbers are in rebuild_on.
 	LineageReason *string `json:"lineage_reason,omitempty"`
 
 	// LineageState Set when the code this revision was built on is no longer the code to build on. stale means that task's revision was rejected or replaced; Approve is refused until the task is rebuilt (Override is not). Absent when the base is current.

@@ -149,7 +149,7 @@ func TestDependentWaitsThenGoesStaleAndRebuilds(t *testing.T) {
 	if code, body := verdict(t, mux, a, "reject"); code != 200 {
 		t.Fatalf("reject A = %d %v", code, body)
 	}
-	const stale = "built on A's revision 1, which was rejected: rebuild it once A has a new revision"
+	const stale = "built on A's code, which was rejected: rebuild it once A has new code"
 	if got := newestRevision(t, mux, "B"); got["lineage_state"] != "stale" || got["lineage_reason"] != stale {
 		t.Fatalf("B after A was rejected = %v", got)
 	}
@@ -166,6 +166,10 @@ func TestDependentWaitsThenGoesStaleAndRebuilds(t *testing.T) {
 	next := freeze("A", "a2", "a again\n")
 	if got := newestRevision(t, mux, "B"); got["rebuild_on"] != float64(next.number) {
 		t.Fatalf("B once A has revision %d = %v", next.number, got)
+	}
+	byAgent := map[string]any{"actor": map[string]string{"kind": "agent", "id": "worker"}}
+	if code, body := serve(t, mux, "POST", "/api/workspaces/W/issues/B/rebuild", byAgent); code != http.StatusConflict || body["error"] != "review_required" {
+		t.Fatalf("rebuild by an agent = %d %v, want refused", code, body)
 	}
 	settled = nil
 	code, body = serve(t, mux, "POST", "/api/workspaces/W/issues/B/rebuild", rebuild)

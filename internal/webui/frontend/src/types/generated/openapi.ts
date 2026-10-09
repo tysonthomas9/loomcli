@@ -1862,7 +1862,7 @@ export interface paths {
     put?: never;
     /**
      * Rebuild a task whose code was built on a rejected or replaced revision
-     * @description Rejects the task's newest revision with the rebuild as the reason, cancels any approval of it still waiting to apply, and moves the task's base to the newest revision of the task it depends on, so the task reopens for a new attempt. Never automatic. Refused with 409 when the task is not stale or there is no newer revision to build on yet.
+     * @description A human action (an actor of any other kind is refused with review_required). Rejects the task's newest revision with the rebuild as the reason, cancels any approval of it still waiting to apply, and moves the task's base to the newest revision of the task it depends on, so the task reopens for a new attempt. Never automatic. Refused with 409 when the task is not stale or there is no newer revision to build on yet.
      */
     post: operations["rebuildStaleTask"];
     delete?: never;
@@ -3502,7 +3502,7 @@ export interface components {
        * @enum {string}
        */
       lineage_state?: "stale" | "dependency_abandoned";
-      /** @description Why the base is stale and what a rebuild would build on, such as "built on T1's revision 1, which was rejected: rebuild it on revision 2". */
+      /** @description Why the base is stale and what a rebuild would build on, such as "built on T1's code, which was rejected: rebuild it on T1's new code". Plain words; the revision numbers are in rebuild_on. */
       lineage_reason?: string;
       /** @description The revision of depends_on a rebuild would build on; absent while there is none yet. */
       rebuild_on?: number;
@@ -8188,7 +8188,7 @@ export interface operations {
           };
         };
       };
-      /** @description Not stale, nothing newer to build on, or the revision is already applied. */
+      /** @description Not a human actor, not stale, nothing newer to build on, or the revision is already applied. */
       409: {
         headers: {
           [name: string]: unknown;

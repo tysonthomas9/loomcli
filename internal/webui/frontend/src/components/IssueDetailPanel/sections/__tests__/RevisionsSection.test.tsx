@@ -342,7 +342,7 @@ describe("RevisionsSection", () => {
 
   it("refuses Approve on a stale dependent and offers Rebuild", async () => {
     const reason =
-      "built on A's revision 1, which was rejected: rebuild it on revision 2";
+      "built on A's code, which was rejected: rebuild it on A's new code";
     const stale = {
       ...revision,
       depends_on: "A",
@@ -378,7 +378,7 @@ describe("RevisionsSection", () => {
     expect(screen.getByTestId("approve-menu-toggle")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Override" })).toBeEnabled();
     fireEvent.click(
-      screen.getByRole("button", { name: "Rebuild on A's revision 2" }),
+      screen.getByRole("button", { name: "Rebuild on A's new code" }),
     );
     await waitFor(() => expect(rebuildTask).toHaveBeenCalledWith("W", "B"));
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
@@ -394,12 +394,12 @@ describe("RevisionsSection", () => {
         depends_on: "A",
         lineage_state: "stale",
         lineage_reason:
-          "built on A's revision 1, which was rejected: rebuild it once A has a new revision",
+          "built on A's code, which was rejected: rebuild it once A has new code",
       },
     ]);
     render(<RevisionsSection workspaceId="W" taskId="B" lead="lead" />);
     expect(await screen.findByTestId("revision-stale")).toHaveTextContent(
-      "rebuild it once A has a new revision",
+      "rebuild it once A has new code",
     );
     expect(screen.queryByTestId("rebuild")).not.toBeInTheDocument();
   });
@@ -408,8 +408,7 @@ describe("RevisionsSection", () => {
     submitRevisionVerdict.mockRejectedValue(
       new ApiError(409, "Conflict", {
         error: "stale",
-        message:
-          "approve is refused: built on A's revision 1, which was rejected",
+        message: "approve is refused: built on A's code, which was rejected",
       }),
     );
     render(<RevisionsSection workspaceId="W" taskId="B" lead="lead" />);
@@ -417,7 +416,7 @@ describe("RevisionsSection", () => {
       await screen.findByRole("button", { name: "Approve and create PR" }),
     );
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "approve is refused: built on A's revision 1, which was rejected",
+      "approve is refused: built on A's code, which was rejected",
     );
   });
 
