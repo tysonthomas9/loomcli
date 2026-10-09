@@ -35,7 +35,7 @@ export type Http = (origin: string, method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
 export const readHttp: Http = async (origin, method, relative, body, signal) => {
   check(relative.startsWith('/') && !relative.startsWith('//') && !relative.includes('\\') && !decodeURIComponent(relative).split(/[/?]/).includes('..'));
   const response = await fetch(new URL(relative, origin), { method, signal, redirect: 'error',
-    ...(method === 'POST' || method === 'PATCH' ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}) });
+    ...((method === 'POST' || method === 'PATCH') && body !== undefined ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}) });
   const text = await response.text(); check(Buffer.byteLength(text) <= 4 * 1024 * 1024, 'observation-failed');
   return { status: response.status, body: relative === '/readyz' ? text : text ? JSON.parse(text) : null };
 };
@@ -171,7 +171,7 @@ export class HostFixtureDriver implements FixtureDriver {
             check(owned.repo===source.repo&&owned.commonDir===common);
             const after=await this.files.lstat(worktree);check(!after.isSymbolicLink()&&before.dev===after.dev&&before.ino===after.ino);
           },nextId:()=>this.uuid(),stop:(fact,generation,abort)=>this.requestOwnedHttpChecked('api','POST',
-            `/api/workspaces/${encodeURIComponent(fact.workspaceId)}/agents/${encodeURIComponent(fact.agentId)}/stop`,null,abort,generation)},this.descendants!,this.files);
+            `/api/workspaces/${encodeURIComponent(fact.workspaceId)}/agents/${encodeURIComponent(fact.agentId)}/stop`,undefined,abort,generation)},this.descendants!,this.files);
       }
       return this.workerRegistrations.refresh(signal);
     });
