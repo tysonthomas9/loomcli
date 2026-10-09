@@ -43,6 +43,36 @@ async function setup(t: { after(fn: () => Promise<void>): void }) {
   return { registry, context, fixture, invoke, evidenceStore, get reads() { return reads; }, get disposed() { return disposed; }, setPayload(value: Json) { payload = value; } };
 }
 const input = { agent: { fixtureLeaseId: 'lease', workspaceId: 'workspace', agentId: 'agt_owned' }, after: 0, pageSize: 2, maxPages: 2, maxRecords: 10, kinds: [] };
+test('public native bind consumes separate empty and repository-addition receipts without choosing an initial physical source',async t=>{
+  const h=await setup(t);const {createOwnedWorkspaceRoster}=await import('./workspaces.js');
+  const owner={leaseId:h.fixture.leaseId,runId:h.context.runId,suiteId:h.context.suiteId,scope:h.context.scope,caseId:h.context.caseId,profile:h.fixture.profile};
+  const primary={identityKind:'native-agent-id' as const,workspaceId:'workspace',repo:'/owned/source',commonDir:'/owned/source/.git',
+    storeId:'actual-store',storeGeneration:'actual-store-generation',agentIds:['agt_owned']};
+  const primaryReceipt=await h.evidenceStore.retain(JSON.stringify({kind:'workspace-created',...owner,...primary}));
+  const initialCreationReceipt=await h.evidenceStore.retain(JSON.stringify({kind:'workspace-created-empty',...owner,
+    identityKind:'native-agent-id',workspaceId:'empty-then-added',storeId:'actual-store',storeGeneration:'actual-store-generation',
+    httpStatus:201,repositories:[],agentIds:[]}));
+  const added={...primary,workspaceId:'empty-then-added',repo:'/owned/beta',commonDir:'/owned/beta/.git',agentIds:[],
+    repositories:[{repoName:'beta',sourceRepoId:'actual-source-beta',repo:'/owned/beta',commonDir:'/owned/beta/.git',groups:[]}],agentSources:[]};
+  const creationReceipt=await h.evidenceStore.retain(JSON.stringify({kind:'workspace-repositories-added',...owner,...added,httpStatus:201,initialCreationReceipt}));
+  h.fixture.ownedWorkspaces=await createOwnedWorkspaceRoster(owner,[{...primary,creationReceipt:primaryReceipt},{...added,creationReceipt}],h.evidenceStore);
+  h.fixture.readWorkspaceAgent=async(workspaceId,agentId)=>({kind:'agent-enrolled',...owner,identityKind:'native-agent-id',workspaceId,agentId,
+    repo:'/owned/beta',commonDir:'/owned/beta/.git',storeId:'actual-store',storeGeneration:'actual-store-generation',
+    parentAgentId:null,rootAgentId:null,createdByKind:'user',createdById:null,revision:1});
+  const original=h.fixture.agents.get('agt_owned')!.row;let commonDir='/foreign/.git';
+  h.fixture.resolveAgent=async(agentId,_signal,workspaceId)=>({row:AgentRow.parse({...original,agent_id:agentId,workspace_id:workspaceId,
+    repo:'/owned/beta',worktree_path:'/owned/beta/trees/actual',harness_session_id:'actual-beta-session'}),commonDir});
+  const request={leaseId:'lease',workspaceId:'empty-then-added',agentId:'agt_added'};
+  assert.equal((await h.invoke('loom.agent.bind',request)).availability,'error');
+  assert.equal(h.fixture.agents.has('agt_added'),false);
+  commonDir='/owned/beta/.git';
+  const result=await h.invoke('loom.agent.bind',request);
+  assert.equal(result.availability,'observed');
+  assert.ok(result.data&&typeof result.data==='object'&&!Array.isArray(result.data));
+  assert.equal(result.data.repo,'/owned/beta');assert.notEqual(result.data.repo,'/owned/source');
+  assert.equal(result.data.nativeSessionId,'actual-beta-session');
+  assert.deepEqual(result.data.agentRef,{fixtureLeaseId:'lease',workspaceId:'empty-then-added',agentId:'agt_added'});
+});
 test('agent observations distinguish missing requested model/outcome from actual nullable and completed values', async t => {
   const harness = await setup(t);
   const missing = await harness.invoke('loom.agent.observe',{agent:input.agent});

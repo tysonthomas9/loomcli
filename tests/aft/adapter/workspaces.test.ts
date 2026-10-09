@@ -23,6 +23,82 @@ async function setup(t:{after(fn:()=>Promise<void>):void}) {
   };
   return {store,record};
 }
+function emptyCreation(extra:Record<string,unknown>={}) {
+  return {kind:'workspace-created-empty',...owner,identityKind:'native-agent-id',workspaceId:'later',storeId:'store',storeGeneration:'generation',
+    httpStatus:201,repositories:[],agentIds:[],...extra};
+}
+const addedFields={...fields,workspaceId:'later',repo:'/owned/beta',commonDir:'/owned/beta/.git',agentIds:[],
+  repositories:[{repoName:'beta',sourceRepoId:'actual-beta',repo:'/owned/beta',commonDir:'/owned/beta/.git',groups:[]}],agentSources:[]};
+test('separate empty creation and repository addition retain exact receipts before native source enrollment',async t=>{
+  const {store,record}=await setup(t);
+  const initialCreationReceipt=await store.retain(JSON.stringify(emptyCreation()));
+  const addition={kind:'workspace-repositories-added',...owner,...addedFields,httpStatus:201,initialCreationReceipt};
+  const creationReceipt=await store.retain(JSON.stringify(addition));
+  const fixture=makeFixture(await createOwnedWorkspaceRoster(owner,[await record(),{...addedFields,creationReceipt}],store));
+  assert.equal(requireOwnedWorkspace(fixture,'later').repo,'/owned/beta');
+  assert.equal(requireOwnedWorkspace(fixture,'later').sourceRepoId,'actual-beta');
+  assert.throws(()=>requireOwnedWorkspace(fixture,'later','agt_later'));
+  const {enrollOwnedWorkspaceAgent}=await import('./workspaces.js');
+  fixture.readWorkspaceAgent=async(workspaceId,agentId)=>({kind:'agent-enrolled',...owner,identityKind:'native-agent-id',workspaceId,agentId,
+    repo:'/owned/beta',commonDir:'/owned/beta/.git',storeId:'store',storeGeneration:'generation',parentAgentId:null,rootAgentId:null,
+    createdByKind:'user',createdById:null,revision:1});
+  await enrollOwnedWorkspaceAgent(fixture,'later','agt_later',new AbortController().signal,store);
+  assert.equal(requireOwnedWorkspace(fixture,'later','agt_later').repoName,'beta');
+  assert.throws(()=>requireOwnedWorkspace(fixture,'later','agt_later','native-agent-id','alpha'));
+  assert.deepEqual(JSON.parse(await readFile(await store.resolve(initialCreationReceipt.id),'utf8')),emptyCreation());
+  assert.deepEqual(JSON.parse(await readFile(await store.resolve(creationReceipt.id),'utf8')),addition);
+});
+test('initial empty receipt never grants a repository and closed response schemas preserve the existing variant',async t=>{
+  const {WorkspaceEmptyCreationFact,WorkspaceRepositoriesAddedFact,WorkspaceCreationFact,FinalWorkspaceCreationFact}=await import('./workspaces.js');
+  const {store}=await setup(t);const empty=emptyCreation(),creationReceipt=await store.retain(JSON.stringify(empty));
+  assert.equal(WorkspaceEmptyCreationFact.safeParse(empty).success,true);
+  assert.equal(WorkspaceCreationFact.safeParse(empty).success,false);
+  assert.equal(FinalWorkspaceCreationFact.safeParse(empty).success,false);
+  await assert.rejects(createOwnedWorkspaceRoster(owner,[{...addedFields,creationReceipt}],store));
+  for(const change of [{repo:'/unobserved'},{commonDir:'/unobserved/.git'},{httpStatus:200},{repositories:addedFields.repositories},{agentIds:['agt_early']}])
+    assert.equal(WorkspaceEmptyCreationFact.safeParse({...empty,...change}).success,false);
+  const added={kind:'workspace-repositories-added',...owner,...addedFields,httpStatus:201,initialCreationReceipt:creationReceipt};
+  for(const change of [{httpStatus:200},{agentIds:['agt_early']},{agentSources:[{agentId:'agt_early',repoNames:['beta']}]},
+    {initialCreationReceipt:undefined},{repositories:[]},{identityKind:'legacy-agent-name'},{unknown:true}])
+    assert.equal(WorkspaceRepositoriesAddedFact.safeParse({...added,...change}).success,false);
+  assert.equal(WorkspaceCreationFact.safeParse({kind:'workspace-created',...owner,...fields}).success,true);
+});
+test('repository addition authenticates initial owner, workspace and store before physical authority',async t=>{
+  const {store,record}=await setup(t);const primary=await record();let physicalEffects=0;
+  for(const mismatch of [{leaseId:'other'},{runId:'other'},{suiteId:'other'},{caseId:'other'},{scope:'case'},{profile:'other'},
+    {workspaceId:'other'},{storeId:'other'},{storeGeneration:'other'},{identityKind:'legacy-agent-name'},{httpStatus:200},
+    {agentIds:['unexpected']},{repositories:addedFields.repositories}]) {
+    const initialCreationReceipt=await store.retain(JSON.stringify(emptyCreation(mismatch)));
+    const creationReceipt=await store.retain(JSON.stringify({kind:'workspace-repositories-added',...owner,...addedFields,httpStatus:201,initialCreationReceipt}));
+    await assert.rejects(async()=>{
+      const fixture=makeFixture(await createOwnedWorkspaceRoster(owner,[primary,{...addedFields,creationReceipt}],store));
+      requireOwnedWorkspace(fixture,'later');physicalEffects++;
+    });
+  }
+  assert.equal(physicalEffects,0);
+});
+test('missing, foreign-store, substituted and changed initial receipts cannot complete repository creation',async t=>{
+  const {readWorkspaceRepositoriesAddedFact}=await import('./workspaces.js');const {store}=await setup(t);
+  const foreign=await setup(t);const initialCreationReceipt=await foreign.store.retain(JSON.stringify(emptyCreation()));
+  const addition={kind:'workspace-repositories-added',...owner,...addedFields,httpStatus:201,initialCreationReceipt};
+  const retained=async(value:unknown)=>store.retain(JSON.stringify(value));
+  await assert.rejects(readWorkspaceRepositoriesAddedFact(owner,await retained(addition),store));
+  const initial=await store.retain(JSON.stringify(emptyCreation()));
+  for(const change of [{id:'missing'},{sha256:'0'.repeat(64)},{bytes:initial.bytes+1},{bytes:4_000_001}])
+    await assert.rejects(readWorkspaceRepositoriesAddedFact(owner,await retained({...addition,initialCreationReceipt:{...initial,...change}}),store));
+  const final=await retained({...addition,initialCreationReceipt:initial});
+  await writeFile(await store.resolve(initial.id),JSON.stringify(emptyCreation({storeGeneration:'replaced'})));
+  await assert.rejects(readWorkspaceRepositoriesAddedFact(owner,final,store));
+});
+test('repository addition denies foreign or ambiguous final topology and preexisting actor membership',async t=>{
+  const {store,record}=await setup(t);const primary=await record();const initialCreationReceipt=await store.retain(JSON.stringify(emptyCreation()));
+  for(const change of [{repo:'/foreign'},{commonDir:'/foreign/.git'},{repositories:[addedFields.repositories[0]!,addedFields.repositories[0]!]},
+    {repositories:[addedFields.repositories[0]!,{...addedFields.repositories[0]!,repoName:'gamma',repo:'/owned/gamma',commonDir:'/owned/gamma/.git'}]},
+    {agentIds:['agt_early']},{agentSources:[{agentId:'agt_early',repoNames:['beta']}]},{runId:'foreign'},{storeGeneration:'replaced'}]) {
+    const creationReceipt=await store.retain(JSON.stringify({kind:'workspace-repositories-added',...owner,...addedFields,httpStatus:201,initialCreationReceipt,...change}));
+    await assert.rejects(createOwnedWorkspaceRoster(owner,[primary,{...addedFields,...change,creationReceipt}],store));
+  }
+});
 test('creation receipts authorize exactly the finite workspace/agent/source roster',async t=>{
   const {store,record}=await setup(t);
   const roster=await createOwnedWorkspaceRoster(owner,[await record(),await record({workspaceId:'E2E-WS-AGENT',agentIds:['nova']})],store);
