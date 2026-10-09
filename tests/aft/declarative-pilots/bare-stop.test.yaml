@@ -81,6 +81,14 @@ setup:
                 binding: fixture
                 pointer: /repo
             - literal: ${AFT_AGENT_FLOW_REPO}
+  - assert:
+      op: matches
+      args:
+        - ref:
+            binding: fixture
+            pointer: /fixtureRunId
+        - literal: ^af[a-z0-9]{8}$
+    intent: Require the actual source-compatible fixture RUN_ID captured from the same owned container.
 exports:
   lease:
     resource:
@@ -101,6 +109,10 @@ exports:
     data:
       binding: fixture
       pointer: /repo
+  fixtureRunId:
+    data:
+      binding: fixture
+      pointer: /fixtureRunId
 teardown:
   - capability:
       request:
@@ -154,6 +166,20 @@ tests:
               - ref:
                   binding: apiOrigin
               - literal: /api/workspaces/${AFT_WS}/v1/agents
+          /api/body/name:
+            op: concat
+            args:
+              - literal: cov-controls-stop-
+              - ref:
+                  binding: fixtureRunId
+              - literal: ""
+          /api/headers/Idempotency-Key:
+            op: concat
+            args:
+              - literal: cov-controls-stop-
+              - ref:
+                  binding: fixtureRunId
+              - literal: -create
         intent: Create an owned production ask-policy Agent API actor with the real model
       - bind:
           as: leadId
@@ -207,7 +233,12 @@ tests:
                 - ref:
                     binding: leadRow
                     pointer: /body/name
-                - literal: cov-controls-stop-${RUN_ID}
+                - op: concat
+                  args:
+                    - literal: cov-controls-stop-
+                    - ref:
+                        binding: fixtureRunId
+                    - literal: ""
             - op: eq
               args:
                 - ref:
@@ -291,6 +322,20 @@ tests:
           label: Message
           value: "BARE_STOP_${RUN_ID}: use your shell tool to run exactly printf 'STOP_EFFECT_${RUN_ID}\\n' > /tmp/cov-controls-stop-effect-${RUN_ID}, then report its output."
         intent: Trigger the real pr-review-interactive bash ask for an exact harmless owned command
+        resolve:
+          /fill/value:
+            op: concat
+            args:
+              - literal: BARE_STOP_
+              - ref:
+                  binding: fixtureRunId
+              - literal: ": use your shell tool to run exactly printf 'STOP_EFFECT_"
+              - ref:
+                  binding: fixtureRunId
+              - literal: \n' > /tmp/cov-controls-stop-effect-
+              - ref:
+                  binding: fixtureRunId
+              - literal: ", then report its output."
       - screenshot: bare-stop-s05
         intent: Trigger the real pr-review-interactive bash ask for an exact harmless owned command
       - press: Enter
@@ -309,7 +354,12 @@ tests:
             args:
               - ref:
                   binding: askCard
-              - literal: cov-controls-stop-effect-${RUN_ID}
+              - op: concat
+                args:
+                  - literal: cov-controls-stop-effect-
+                  - ref:
+                      binding: fixtureRunId
+                  - literal: ""
           deadline:
             clockId: host
             withinMs: 180000
@@ -1205,6 +1255,14 @@ tests:
           label: Message
           value: "STOP_RECOVER_${RUN_ID}: use your read tool to read README.md and cite its test command."
         intent: Ask a new real repository question on the same agent
+        resolve:
+          /fill/value:
+            op: concat
+            args:
+              - literal: STOP_RECOVER_
+              - ref:
+                  binding: fixtureRunId
+              - literal: ": use your read tool to read README.md and cite its test command."
       - screenshot: bare-stop-s15
         intent: Ask a new real repository question on the same agent
       - press: Enter
@@ -1693,6 +1751,33 @@ tests:
                     binding: recoveredNativeModels
                     pointer: /records/0/model
             - literal: ${AFT_REAL_MODEL}
+        intent: Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model
+      - assert:
+          every:
+            collection:
+              ref:
+                binding: recoveredNativeModels
+                pointer: /records
+            as: nativeFinishedRecord
+            satisfies:
+              all:
+                - op: ne
+                  args:
+                    - ref:
+                        binding: nativeFinishedRecord
+                        pointer: /finish
+                    - literal: ""
+                - op: eq
+                  args:
+                    - ref:
+                        binding: nativeFinishedRecord
+                        pointer: /errorTruthy
+                    - literal: false
+                - op: exists
+                  args:
+                    - ref:
+                        binding: nativeFinishedRecord
+                        pointer: /errorFieldPresent
         intent: Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model
       - screenshot: bare-stop-s18
         intent: Check the saved recovered turn, preserved lost ask, absent command effect, and its real native completed assistant model

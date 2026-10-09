@@ -7067,7 +7067,7 @@
       ],
       "id": "bare-stop",
       "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
-      "sha256": "94ca1dae9323661576f30173e7ab9047808df5558eff4870797ba6f65f3879ff",
+      "sha256": "b5cb1efdce6cff0bc0b46692542ac05f6e19de9bf6c56d16f555e7874897e467",
       "skipped": true,
       "oldSteps": [
         {
@@ -7100,7 +7100,7 @@
                 "steps",
                 0
               ],
-              "line": 134
+              "line": 146
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7110,7 +7110,7 @@
                 "steps",
                 1
               ],
-              "line": 158
+              "line": 184
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7120,7 +7120,7 @@
                 "steps",
                 2
               ],
-              "line": 165
+              "line": 191
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7130,7 +7130,7 @@
                 "steps",
                 3
               ],
-              "line": 180
+              "line": 206
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7140,7 +7140,7 @@
                 "steps",
                 4
               ],
-              "line": 196
+              "line": 222
             }
           ],
           "checkpoint": {
@@ -7151,7 +7151,7 @@
               "steps",
               5
             ],
-            "line": 243
+            "line": 274
           }
         },
         {
@@ -7184,7 +7184,7 @@
                 "steps",
                 6
               ],
-              "line": 245
+              "line": 276
             }
           ],
           "checkpoint": {
@@ -7195,7 +7195,7 @@
               "steps",
               7
             ],
-            "line": 256
+            "line": 287
           }
         },
         {
@@ -7230,7 +7230,7 @@
                 "steps",
                 8
               ],
-              "line": 258
+              "line": 289
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7240,7 +7240,7 @@
                 "steps",
                 9
               ],
-              "line": 263
+              "line": 294
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7250,7 +7250,7 @@
                 "steps",
                 10
               ],
-              "line": 274
+              "line": 305
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7260,7 +7260,7 @@
                 "steps",
                 11
               ],
-              "line": 279
+              "line": 310
             }
           ],
           "checkpoint": {
@@ -7271,7 +7271,7 @@
               "steps",
               12
             ],
-            "line": 286
+            "line": 317
           }
         },
         {
@@ -7296,7 +7296,7 @@
           "gaps": [
             {
               "gap": "stop-owned-marker-root",
-              "reason": "loom.filesystem.observe requires owned rootId; fixture does not yet expose exact container /tmp marker root lease. No direct absolute /tmp root in YAML."
+              "reason": "Approved fixture3418425b exposes same-container fixture-temporary root and actual acquired fixtureRunId. Canonical filesystem.observe currently requires relativePaths array; Value has no array constructor for runtime concat(cov-controls-stop-effect-,fixtureRunId). Generic single-relativePath branch is parent-assigned, pending reviewed coherent core interface; no invented token/array or direct host /tmp fallback."
             }
           ],
           "deadlineMs": 30000,
@@ -7309,7 +7309,7 @@
               "steps",
               13
             ],
-            "line": 288
+            "line": 319
           }
         },
         {
@@ -7345,7 +7345,7 @@
                 "steps",
                 14
               ],
-              "line": 290
+              "line": 321
             }
           ],
           "checkpoint": {
@@ -7356,7 +7356,7 @@
               "steps",
               15
             ],
-            "line": 294
+            "line": 339
           }
         },
         {
@@ -7389,7 +7389,7 @@
                 "steps",
                 16
               ],
-              "line": 296
+              "line": 341
             }
           ],
           "checkpoint": {
@@ -7400,7 +7400,7 @@
               "steps",
               17
             ],
-            "line": 298
+            "line": 343
           }
         },
         {
@@ -7436,7 +7436,7 @@
                 "steps",
                 18
               ],
-              "line": 300
+              "line": 345
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7446,7 +7446,7 @@
                 "steps",
                 19
               ],
-              "line": 317
+              "line": 367
             }
           ],
           "checkpoint": {
@@ -7457,7 +7457,7 @@
               "steps",
               20
             ],
-            "line": 334
+            "line": 384
           }
         },
         {
@@ -7490,7 +7490,7 @@
                 "steps",
                 21
               ],
-              "line": 336
+              "line": 386
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7500,7 +7500,7 @@
                 "steps",
                 22
               ],
-              "line": 352
+              "line": 402
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7510,7 +7510,7 @@
                 "steps",
                 23
               ],
-              "line": 369
+              "line": 419
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7520,7 +7520,7 @@
                 "steps",
                 24
               ],
-              "line": 376
+              "line": 426
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7530,7 +7530,7 @@
                 "steps",
                 25
               ],
-              "line": 383
+              "line": 433
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7540,7 +7540,7 @@
                 "steps",
                 26
               ],
-              "line": 404
+              "line": 454
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7550,7 +7550,7 @@
                 "steps",
                 27
               ],
-              "line": 420
+              "line": 470
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7560,7 +7560,7 @@
                 "steps",
                 28
               ],
-              "line": 437
+              "line": 487
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7570,7 +7570,7 @@
                 "steps",
                 29
               ],
-              "line": 456
+              "line": 506
             }
           ],
           "checkpoint": {
@@ -7581,7 +7581,7 @@
               "steps",
               30
             ],
-            "line": 475
+            "line": 525
           }
         },
         {
@@ -7616,7 +7616,7 @@
                 "steps",
                 31
               ],
-              "line": 477
+              "line": 527
             }
           ],
           "checkpoint": {
@@ -7627,7 +7627,7 @@
               "steps",
               32
             ],
-            "line": 480
+            "line": 530
           }
         },
         {
@@ -7663,7 +7663,7 @@
                 "steps",
                 33
               ],
-              "line": 482
+              "line": 532
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7673,7 +7673,7 @@
                 "steps",
                 34
               ],
-              "line": 499
+              "line": 549
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7683,7 +7683,7 @@
                 "steps",
                 35
               ],
-              "line": 516
+              "line": 566
             }
           ],
           "checkpoint": {
@@ -7694,7 +7694,7 @@
               "steps",
               36
             ],
-            "line": 533
+            "line": 583
           }
         },
         {
@@ -7727,7 +7727,7 @@
             },
             {
               "gap": "stop-owned-marker-root",
-              "reason": "Repeat exact owned marker absence at stopped checkpoint pending fixture root lease."
+              "reason": "Approved fixture3418425b exposes same-container fixture-temporary root and actual acquired fixtureRunId. Canonical filesystem.observe currently requires relativePaths array; Value has no array constructor for runtime concat(cov-controls-stop-effect-,fixtureRunId). Generic single-relativePath branch is parent-assigned, pending reviewed coherent core interface; no invented token/array or direct host /tmp fallback."
             }
           ],
           "deadlineMs": 30000,
@@ -7740,7 +7740,7 @@
                 "steps",
                 37
               ],
-              "line": 535
+              "line": 585
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7750,7 +7750,7 @@
                 "steps",
                 38
               ],
-              "line": 551
+              "line": 601
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7760,7 +7760,7 @@
                 "steps",
                 39
               ],
-              "line": 566
+              "line": 616
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7770,7 +7770,7 @@
                 "steps",
                 40
               ],
-              "line": 587
+              "line": 637
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7780,7 +7780,7 @@
                 "steps",
                 41
               ],
-              "line": 603
+              "line": 653
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7790,7 +7790,7 @@
                 "steps",
                 42
               ],
-              "line": 624
+              "line": 674
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7800,7 +7800,7 @@
                 "steps",
                 43
               ],
-              "line": 655
+              "line": 705
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7810,7 +7810,7 @@
                 "steps",
                 44
               ],
-              "line": 669
+              "line": 719
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7820,7 +7820,7 @@
                 "steps",
                 45
               ],
-              "line": 683
+              "line": 733
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7830,7 +7830,7 @@
                 "steps",
                 46
               ],
-              "line": 697
+              "line": 747
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7840,7 +7840,7 @@
                 "steps",
                 47
               ],
-              "line": 716
+              "line": 766
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7850,7 +7850,7 @@
                 "steps",
                 48
               ],
-              "line": 730
+              "line": 780
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7860,7 +7860,7 @@
                 "steps",
                 49
               ],
-              "line": 761
+              "line": 811
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7870,7 +7870,7 @@
                 "steps",
                 50
               ],
-              "line": 792
+              "line": 842
             }
           ],
           "checkpoint": {
@@ -7881,7 +7881,7 @@
               "steps",
               51
             ],
-            "line": 823
+            "line": 873
           }
         },
         {
@@ -7914,7 +7914,7 @@
                 "steps",
                 52
               ],
-              "line": 825
+              "line": 875
             }
           ],
           "checkpoint": {
@@ -7925,7 +7925,7 @@
               "steps",
               53
             ],
-            "line": 827
+            "line": 877
           }
         },
         {
@@ -7960,7 +7960,7 @@
                 "steps",
                 54
               ],
-              "line": 829
+              "line": 879
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7970,7 +7970,7 @@
                 "steps",
                 55
               ],
-              "line": 846
+              "line": 896
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7980,7 +7980,7 @@
                 "steps",
                 56
               ],
-              "line": 863
+              "line": 913
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -7990,7 +7990,7 @@
                 "steps",
                 57
               ],
-              "line": 880
+              "line": 930
             }
           ],
           "checkpoint": {
@@ -8001,7 +8001,7 @@
               "steps",
               58
             ],
-            "line": 897
+            "line": 947
           }
         },
         {
@@ -8034,7 +8034,7 @@
             },
             {
               "gap": "stop-owned-marker-root",
-              "reason": "Repeat exact owned marker absence at reloaded checkpoint pending fixture root lease."
+              "reason": "Approved fixture3418425b exposes same-container fixture-temporary root and actual acquired fixtureRunId. Canonical filesystem.observe currently requires relativePaths array; Value has no array constructor for runtime concat(cov-controls-stop-effect-,fixtureRunId). Generic single-relativePath branch is parent-assigned, pending reviewed coherent core interface; no invented token/array or direct host /tmp fallback."
             }
           ],
           "deadlineMs": 30000,
@@ -8047,7 +8047,7 @@
                 "steps",
                 59
               ],
-              "line": 899
+              "line": 949
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8057,7 +8057,7 @@
                 "steps",
                 60
               ],
-              "line": 915
+              "line": 965
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8067,7 +8067,7 @@
                 "steps",
                 61
               ],
-              "line": 930
+              "line": 980
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8077,7 +8077,7 @@
                 "steps",
                 62
               ],
-              "line": 951
+              "line": 1001
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8087,7 +8087,7 @@
                 "steps",
                 63
               ],
-              "line": 967
+              "line": 1017
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8097,7 +8097,7 @@
                 "steps",
                 64
               ],
-              "line": 988
+              "line": 1038
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8107,7 +8107,7 @@
                 "steps",
                 65
               ],
-              "line": 1019
+              "line": 1069
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8117,7 +8117,7 @@
                 "steps",
                 66
               ],
-              "line": 1033
+              "line": 1083
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8127,7 +8127,7 @@
                 "steps",
                 67
               ],
-              "line": 1047
+              "line": 1097
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8137,7 +8137,7 @@
                 "steps",
                 68
               ],
-              "line": 1061
+              "line": 1111
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8147,7 +8147,7 @@
                 "steps",
                 69
               ],
-              "line": 1080
+              "line": 1130
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8157,7 +8157,7 @@
                 "steps",
                 70
               ],
-              "line": 1094
+              "line": 1144
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8167,7 +8167,7 @@
                 "steps",
                 71
               ],
-              "line": 1109
+              "line": 1159
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8177,7 +8177,7 @@
                 "steps",
                 72
               ],
-              "line": 1140
+              "line": 1190
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8187,7 +8187,7 @@
                 "steps",
                 73
               ],
-              "line": 1171
+              "line": 1221
             }
           ],
           "checkpoint": {
@@ -8198,7 +8198,7 @@
               "steps",
               74
             ],
-            "line": 1202
+            "line": 1252
           }
         },
         {
@@ -8234,7 +8234,7 @@
                 "steps",
                 75
               ],
-              "line": 1204
+              "line": 1254
             }
           ],
           "checkpoint": {
@@ -8245,7 +8245,7 @@
               "steps",
               76
             ],
-            "line": 1208
+            "line": 1266
           }
         },
         {
@@ -8278,7 +8278,7 @@
                 "steps",
                 77
               ],
-              "line": 1210
+              "line": 1268
             }
           ],
           "checkpoint": {
@@ -8289,7 +8289,7 @@
               "steps",
               78
             ],
-            "line": 1212
+            "line": 1270
           }
         },
         {
@@ -8325,7 +8325,7 @@
                 "steps",
                 79
               ],
-              "line": 1214
+              "line": 1272
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8335,7 +8335,7 @@
                 "steps",
                 80
               ],
-              "line": 1231
+              "line": 1289
             }
           ],
           "checkpoint": {
@@ -8346,7 +8346,7 @@
               "steps",
               81
             ],
-            "line": 1248
+            "line": 1306
           }
         },
         {
@@ -8379,15 +8379,15 @@
             },
             {
               "gap": "stop-owned-marker-root",
-              "reason": "Repeat exact owned marker absence at reused checkpoint pending fixture root lease."
+              "reason": "Approved fixture3418425b exposes same-container fixture-temporary root and actual acquired fixtureRunId. Canonical filesystem.observe currently requires relativePaths array; Value has no array constructor for runtime concat(cov-controls-stop-effect-,fixtureRunId). Generic single-relativePath branch is parent-assigned, pending reviewed coherent core interface; no invented token/array or direct host /tmp fallback."
             },
             {
               "gap": "native-completed-finish-error",
-              "reason": "Approved core77ba247 native.ts:144 already selects assistant messages with completed time, nonempty finish and no error; source inspection confirms this eligibility filter. Output schema/native.ts:23-25 and projection:146 omit explicit finish/error facts for YAML assertions. Exact original first-valid-completion/model and child all-record consistency mappings remain unauthored/unvalidated; no runtime or raw-suite preservation credit."
+              "reason": "Approved native58696995 exposes finish/errorTruthy/errorFieldPresent; YAML now asserts those eligibility facts over returned records. Original Stop-native.sh:71 selects truthy completed time, whereas generic native view uses !=null. Original first truthy-completed record/model selection remains unresolved; no stronger every-time-truthy or later-existential-model substitute."
             },
             {
               "gap": "native-session-model-requested-facts",
-              "reason": "Original child probe retains registry requested model,state/outcome, nullable native-session-selected model and matches UI lead target as separate facts. Completed-model output alone cannot replace them; request/session observations and same-source correlation still needed."
+              "reason": "Stop-native.sh:25-29 requires owning native Agent row requested model == target alongside current native/worktree identity, and fixed service root/binary checks:32-54. Approved requestedModel/outcome facts require coherent integration/provenance review before exact caller mapping; child-only state/outcome/selectedModel/all-model predicates are separate obligations, not Stop requirements."
             },
             {
               "gap": "recovered-turn-event-correlation",
@@ -8404,7 +8404,7 @@
                 "steps",
                 82
               ],
-              "line": 1250
+              "line": 1308
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8414,7 +8414,7 @@
                 "steps",
                 83
               ],
-              "line": 1266
+              "line": 1324
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8424,7 +8424,7 @@
                 "steps",
                 84
               ],
-              "line": 1281
+              "line": 1339
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8434,7 +8434,7 @@
                 "steps",
                 85
               ],
-              "line": 1302
+              "line": 1360
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8444,7 +8444,7 @@
                 "steps",
                 86
               ],
-              "line": 1318
+              "line": 1376
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8454,7 +8454,7 @@
                 "steps",
                 87
               ],
-              "line": 1339
+              "line": 1397
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8464,7 +8464,7 @@
                 "steps",
                 88
               ],
-              "line": 1370
+              "line": 1428
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8474,7 +8474,7 @@
                 "steps",
                 89
               ],
-              "line": 1384
+              "line": 1442
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8484,7 +8484,7 @@
                 "steps",
                 90
               ],
-              "line": 1398
+              "line": 1456
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8494,7 +8494,7 @@
                 "steps",
                 91
               ],
-              "line": 1412
+              "line": 1470
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8504,7 +8504,7 @@
                 "steps",
                 92
               ],
-              "line": 1431
+              "line": 1489
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8514,7 +8514,7 @@
                 "steps",
                 93
               ],
-              "line": 1445
+              "line": 1503
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8524,7 +8524,7 @@
                 "steps",
                 94
               ],
-              "line": 1460
+              "line": 1518
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8534,7 +8534,7 @@
                 "steps",
                 95
               ],
-              "line": 1491
+              "line": 1549
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8544,7 +8544,7 @@
                 "steps",
                 96
               ],
-              "line": 1522
+              "line": 1580
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8554,7 +8554,7 @@
                 "steps",
                 97
               ],
-              "line": 1553
+              "line": 1611
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8564,7 +8564,7 @@
                 "steps",
                 98
               ],
-              "line": 1566
+              "line": 1624
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8574,7 +8574,7 @@
                 "steps",
                 99
               ],
-              "line": 1598
+              "line": 1656
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8584,7 +8584,7 @@
                 "steps",
                 100
               ],
-              "line": 1635
+              "line": 1693
             },
             {
               "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8594,7 +8594,17 @@
                 "steps",
                 101
               ],
-              "line": 1683
+              "line": 1741
+            },
+            {
+              "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                102
+              ],
+              "line": 1755
             }
           ],
           "checkpoint": {
@@ -8603,9 +8613,9 @@
               "tests",
               0,
               "steps",
-              102
+              103
             ],
-            "line": 1697
+            "line": 1782
           }
         }
       ],
@@ -8639,7 +8649,7 @@
                     "steps",
                     28
                   ],
-                  "line": 437
+                  "line": 487
                 },
                 {
                   "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8649,7 +8659,7 @@
                     "steps",
                     29
                   ],
-                  "line": 456
+                  "line": 506
                 }
               ],
               "mappingNote": "Reviewed typed YAML comparison against same authenticated identity/event fact. Loader/runner/runtime preservation acceptance is still unearned.",
@@ -8685,7 +8695,7 @@
                     "steps",
                     38
                   ],
-                  "line": 551
+                  "line": 601
                 },
                 {
                   "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8695,7 +8705,7 @@
                     "steps",
                     60
                   ],
-                  "line": 915
+                  "line": 965
                 }
               ],
               "mappingNote": "Reviewed typed YAML comparison against same authenticated identity/event fact. Loader/runner/runtime preservation acceptance is still unearned.",
@@ -8731,7 +8741,7 @@
                     "steps",
                     42
                   ],
-                  "line": 624
+                  "line": 674
                 },
                 {
                   "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8741,7 +8751,7 @@
                     "steps",
                     64
                   ],
-                  "line": 988
+                  "line": 1038
                 }
               ],
               "mappingNote": "Reviewed typed YAML comparison against same authenticated identity/event fact. Loader/runner/runtime preservation acceptance is still unearned.",
@@ -8777,7 +8787,7 @@
                     "steps",
                     42
                   ],
-                  "line": 624
+                  "line": 674
                 },
                 {
                   "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8787,7 +8797,7 @@
                     "steps",
                     64
                   ],
-                  "line": 988
+                  "line": 1038
                 }
               ],
               "mappingNote": "Reviewed typed YAML comparison against same authenticated identity/event fact. Loader/runner/runtime preservation acceptance is still unearned.",
@@ -8823,7 +8833,7 @@
                     "steps",
                     46
                   ],
-                  "line": 697
+                  "line": 747
                 },
                 {
                   "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8833,7 +8843,7 @@
                     "steps",
                     49
                   ],
-                  "line": 761
+                  "line": 811
                 },
                 {
                   "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8843,7 +8853,7 @@
                     "steps",
                     68
                   ],
-                  "line": 1061
+                  "line": 1111
                 },
                 {
                   "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -8853,7 +8863,7 @@
                     "steps",
                     72
                   ],
-                  "line": 1140
+                  "line": 1190
                 }
               ],
               "mappingNote": "Reviewed typed YAML comparison against same authenticated identity/event fact. Loader/runner/runtime preservation acceptance is still unearned.",
@@ -10063,7 +10073,7 @@
                     "steps",
                     43
                   ],
-                  "line": 655
+                  "line": 705
                 },
                 {
                   "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -10073,7 +10083,7 @@
                     "steps",
                     44
                   ],
-                  "line": 669
+                  "line": 719
                 },
                 {
                   "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -10083,7 +10093,7 @@
                     "steps",
                     45
                   ],
-                  "line": 683
+                  "line": 733
                 },
                 {
                   "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -10093,7 +10103,7 @@
                     "steps",
                     46
                   ],
-                  "line": 697
+                  "line": 747
                 },
                 {
                   "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -10103,7 +10113,7 @@
                     "steps",
                     65
                   ],
-                  "line": 1019
+                  "line": 1069
                 },
                 {
                   "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -10113,7 +10123,7 @@
                     "steps",
                     66
                   ],
-                  "line": 1033
+                  "line": 1083
                 },
                 {
                   "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -10123,7 +10133,7 @@
                     "steps",
                     67
                   ],
-                  "line": 1047
+                  "line": 1097
                 },
                 {
                   "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -10133,7 +10143,7 @@
                     "steps",
                     68
                   ],
-                  "line": 1061
+                  "line": 1111
                 },
                 {
                   "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -10143,7 +10153,7 @@
                     "steps",
                     88
                   ],
-                  "line": 1370
+                  "line": 1428
                 },
                 {
                   "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -10153,7 +10163,7 @@
                     "steps",
                     89
                   ],
-                  "line": 1384
+                  "line": 1442
                 },
                 {
                   "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -10163,7 +10173,7 @@
                     "steps",
                     90
                   ],
-                  "line": 1398
+                  "line": 1456
                 },
                 {
                   "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -10173,7 +10183,7 @@
                     "steps",
                     91
                   ],
-                  "line": 1412
+                  "line": 1470
                 }
               ],
               "mappingNote": "Reviewed typed YAML comparison against same authenticated identity/event fact. Loader/runner/runtime preservation acceptance is still unearned.",
@@ -10210,7 +10220,7 @@
                     "steps",
                     48
                   ],
-                  "line": 730
+                  "line": 780
                 },
                 {
                   "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -10220,7 +10230,7 @@
                     "steps",
                     49
                   ],
-                  "line": 761
+                  "line": 811
                 },
                 {
                   "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -10230,7 +10240,7 @@
                     "steps",
                     50
                   ],
-                  "line": 792
+                  "line": 842
                 },
                 {
                   "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -10240,7 +10250,7 @@
                     "steps",
                     71
                   ],
-                  "line": 1109
+                  "line": 1159
                 },
                 {
                   "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -10250,7 +10260,7 @@
                     "steps",
                     72
                   ],
-                  "line": 1140
+                  "line": 1190
                 },
                 {
                   "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -10260,7 +10270,7 @@
                     "steps",
                     73
                   ],
-                  "line": 1171
+                  "line": 1221
                 },
                 {
                   "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -10270,7 +10280,7 @@
                     "steps",
                     94
                   ],
-                  "line": 1460
+                  "line": 1518
                 },
                 {
                   "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -10280,7 +10290,7 @@
                     "steps",
                     95
                   ],
-                  "line": 1491
+                  "line": 1549
                 },
                 {
                   "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -10290,7 +10300,7 @@
                     "steps",
                     96
                   ],
-                  "line": 1522
+                  "line": 1580
                 }
               ],
               "mappingNote": "Reviewed typed YAML comparison against same authenticated identity/event fact. Loader/runner/runtime preservation acceptance is still unearned.",
@@ -41288,7 +41298,14 @@
       "raw SSE replay",
       "authenticated RAF/tree/arrival ledger and source projection",
       "exact owned container temporary root producer and original RUN_ID",
-      "reachable helper branch translation and negative oracle preservation"
-    ]
+      "reachable helper branch translation and negative oracle preservation",
+      "generic scalar relativePath filesystem input",
+      "Stop first truthy-completed selection"
+    ],
+    "approvedFactLeaves": {
+      "fixtureRunId": "3418425b29896b221621ff7108c9ec3e8752f3f1",
+      "native": "58696995caf6ae64c2c6d16e1cd1305483702392",
+      "consumption": "authoring only; coherent integrated core SHA and raw/public runner validation pending"
+    }
   }
 }

@@ -1,6 +1,6 @@
 {
   "status": "incomplete-raw-admission-failed",
-  "at": "2026-10-09T09:02:57.612Z",
+  "at": "2026-10-09T09:29:27.792441+00:00",
   "evidenceClass": "static source mapping plus deterministic adapter-interface controls only",
   "engineBuild": {
     "head": "e8eee6bb6d8d5d2c8e65bae36154732a74742212",
@@ -9,7 +9,7 @@
     "receipt": "/private/tmp/aft-interface-a43468f0/final-e8eee6bb/source-build-receipt.json"
   },
   "rawAdmission": {
-    "at": "2026-10-09T09:01:01.826Z",
+    "at": "2026-10-09T09:29:06.112Z",
     "status": "failed",
     "engine": "e8eee6bb6d8d5d2c8e65bae36154732a74742212",
     "adapterSource": "77ba247c0f85b86dd70c02651e2fed4b86127eb0",
@@ -17,7 +17,7 @@
     "files": [
       {
         "file": "bare-stop.test.yaml",
-        "sha256": "94ca1dae9323661576f30173e7ab9047808df5558eff4870797ba6f65f3879ff"
+        "sha256": "b5cb1efdce6cff0bc0b46692542ac05f6e19de9bf6c56d16f555e7874897e467"
       },
       {
         "file": "child-repeat.test.yaml",
@@ -48,12 +48,12 @@
     "rawSuiteAcceptance": false
   },
   "expandedStepSchema": {
-    "count": 681,
+    "count": 683,
     "errors": [],
     "files": [
       {
         "file": "bare-stop.test.yaml",
-        "sha256": "94ca1dae9323661576f30173e7ab9047808df5558eff4870797ba6f65f3879ff"
+        "sha256": "b5cb1efdce6cff0bc0b46692542ac05f6e19de9bf6c56d16f555e7874897e467"
       },
       {
         "file": "child-repeat.test.yaml",
@@ -326,6 +326,67 @@
         "canonicalAttempt": "Preview stream maxSources20 and raw frames/lifecycle with maxSamples<=10000",
         "missingObservation": "Source-bound counts and complete frame/source/lifecycle accounting still need actual canonical raw-ledger mapping and YAML predicates; combined raw maxSamples alone earns no predicate credit."
       }
-    ]
+    ],
+    "currentStopBytesMatch": false
+  },
+  "currentAuthoring": {
+    "at": "2026-10-09T09:26:40.703Z",
+    "status": "authored-unvalidated",
+    "file": "bare-stop.test.yaml",
+    "sha256": "b5cb1efdce6cff0bc0b46692542ac05f6e19de9bf6c56d16f555e7874897e467",
+    "approvedFactLeaves": {
+      "fixtureRunId": "3418425b29896b221621ff7108c9ec3e8752f3f1",
+      "native": "58696995caf6ae64c2c6d16e1cd1305483702392",
+      "consumption": "authoring only; coherent integrated core SHA and raw/public runner validation pending"
+    },
+    "changes": [
+      "export actual fixtureRunId safeDATA; consume in actor name/idempotency, original prompt strings and marker display predicate",
+      "assert native finish/error explicit facts; original truthy-completion first-record selection remains unresolved"
+    ],
+    "acceptedRawGate": "Actual latest raw bytes rejected for all5 by accepted e8+approved77ba registry beforeeffects; updated fact-leaf coherent core consumption/public runner still unvalidated.",
+    "developmentRawGate": "Prior phase2 raw receipt likewise historical for previous Stop bytes; no accepted engine pin change.",
+    "runtimeExecuted": 0,
+    "individualStepSchemaCount": 683,
+    "rawAttemptAt": "2026-10-09T09:29:06.112Z"
+  },
+  "previousAcceptedRawAdmission": {
+    "at": "2026-10-09T09:01:01.826Z",
+    "status": "failed",
+    "engine": "e8eee6bb6d8d5d2c8e65bae36154732a74742212",
+    "adapterSource": "77ba247c0f85b86dd70c02651e2fed4b86127eb0",
+    "adapterImplementationSha256": "7ab7b5130f47c9d9777565f96d3f2426c2ccbe60fa47e2f532068f3715006848",
+    "files": [
+      {
+        "file": "bare-stop.test.yaml",
+        "sha256": "94ca1dae9323661576f30173e7ab9047808df5558eff4870797ba6f65f3879ff"
+      },
+      {
+        "file": "child-repeat.test.yaml",
+        "sha256": "4acc0d8a8c4bfaa02046b6d9a0f9ecd95a4e6ebf760a0908267ab756d43f0112"
+      },
+      {
+        "file": "files-save-reload.test.yaml",
+        "sha256": "e4cf23de94b4a36a63886ccf05d12421d96db034e1f6a36f5cd3376268ca2954"
+      },
+      {
+        "file": "sse-cursor.test.yaml",
+        "sha256": "1d4827e218db9f503906814d8dd1e39229d527e76705c765e5d564fde142c7ea"
+      },
+      {
+        "file": "stream-render-clock.test.yaml",
+        "sha256": "3c4f74c82305fb4bcfa199cd1f1bbfddb2db9b92bc1fd8ccb4bd96495728340d"
+      }
+    ],
+    "errors": [
+      "invalid capability input loom.fixture.acquire: [\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"loomRevision\",\n      \"commit\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"fleetRevision\",\n      \"commit\"\n    ]\n  }\n]",
+      "invalid capability input loom.fixture.acquire: [\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"loomRevision\",\n      \"commit\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"fleetRevision\",\n      \"commit\"\n    ]\n  }\n]",
+      "invalid capability input loom.fixture.acquire: [\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"loomRevision\",\n      \"commit\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"fleetRevision\",\n      \"commit\"\n    ]\n  }\n]",
+      "invalid capability input loom.fixture.acquire: [\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"loomRevision\",\n      \"commit\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"fleetRevision\",\n      \"commit\"\n    ]\n  }\n]",
+      "invalid capability input loom.fixture.acquire: [\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"loomRevision\",\n      \"commit\"\n    ]\n  },\n  {\n    \"validation\": \"regex\",\n    \"code\": \"invalid_string\",\n    \"message\": \"Invalid\",\n    \"path\": [\n      \"fleetRevision\",\n      \"commit\"\n    ]\n  }\n]"
+    ],
+    "effects": 0,
+    "skippedSuiteCount": 5,
+    "rawSuiteAcceptance": false,
+    "currentStopBytesMatch": false
   }
 }

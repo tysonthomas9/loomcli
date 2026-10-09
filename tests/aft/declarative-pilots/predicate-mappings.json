@@ -1241,7 +1241,7 @@
             "steps",
             28
           ],
-          "line": 437
+          "line": 487
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1251,7 +1251,7 @@
             "steps",
             29
           ],
-          "line": 456
+          "line": 506
         }
       ],
       "bounds": {
@@ -1325,7 +1325,7 @@
             "steps",
             38
           ],
-          "line": 551
+          "line": 601
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1335,7 +1335,7 @@
             "steps",
             60
           ],
-          "line": 915
+          "line": 965
         }
       ],
       "bounds": {
@@ -1409,7 +1409,7 @@
             "steps",
             42
           ],
-          "line": 624
+          "line": 674
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1419,7 +1419,7 @@
             "steps",
             64
           ],
-          "line": 988
+          "line": 1038
         }
       ],
       "bounds": {
@@ -1493,7 +1493,7 @@
             "steps",
             42
           ],
-          "line": 624
+          "line": 674
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1503,7 +1503,7 @@
             "steps",
             64
           ],
-          "line": 988
+          "line": 1038
         }
       ],
       "bounds": {
@@ -1577,7 +1577,7 @@
             "steps",
             46
           ],
-          "line": 697
+          "line": 747
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1587,7 +1587,7 @@
             "steps",
             49
           ],
-          "line": 761
+          "line": 811
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1597,7 +1597,7 @@
             "steps",
             68
           ],
-          "line": 1061
+          "line": 1111
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1607,7 +1607,7 @@
             "steps",
             72
           ],
-          "line": 1140
+          "line": 1190
         }
       ],
       "bounds": {
@@ -1699,7 +1699,7 @@
             "steps",
             43
           ],
-          "line": 655
+          "line": 705
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1709,7 +1709,7 @@
             "steps",
             44
           ],
-          "line": 669
+          "line": 719
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1719,7 +1719,7 @@
             "steps",
             45
           ],
-          "line": 683
+          "line": 733
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1729,7 +1729,7 @@
             "steps",
             46
           ],
-          "line": 697
+          "line": 747
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1739,7 +1739,7 @@
             "steps",
             65
           ],
-          "line": 1019
+          "line": 1069
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1749,7 +1749,7 @@
             "steps",
             66
           ],
-          "line": 1033
+          "line": 1083
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1759,7 +1759,7 @@
             "steps",
             67
           ],
-          "line": 1047
+          "line": 1097
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1769,7 +1769,7 @@
             "steps",
             68
           ],
-          "line": 1061
+          "line": 1111
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1779,7 +1779,7 @@
             "steps",
             88
           ],
-          "line": 1370
+          "line": 1428
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1789,7 +1789,7 @@
             "steps",
             89
           ],
-          "line": 1384
+          "line": 1442
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1799,7 +1799,7 @@
             "steps",
             90
           ],
-          "line": 1398
+          "line": 1456
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1809,7 +1809,7 @@
             "steps",
             91
           ],
-          "line": 1412
+          "line": 1470
         }
       ],
       "bounds": {
@@ -1901,7 +1901,7 @@
             "steps",
             48
           ],
-          "line": 730
+          "line": 780
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1911,7 +1911,7 @@
             "steps",
             49
           ],
-          "line": 761
+          "line": 811
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1921,7 +1921,7 @@
             "steps",
             50
           ],
-          "line": 792
+          "line": 842
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1931,7 +1931,7 @@
             "steps",
             71
           ],
-          "line": 1109
+          "line": 1159
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1941,7 +1941,7 @@
             "steps",
             72
           ],
-          "line": 1140
+          "line": 1190
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1951,7 +1951,7 @@
             "steps",
             73
           ],
-          "line": 1171
+          "line": 1221
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1961,7 +1961,7 @@
             "steps",
             94
           ],
-          "line": 1460
+          "line": 1518
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1971,7 +1971,7 @@
             "steps",
             95
           ],
-          "line": 1491
+          "line": 1549
         },
         {
           "file": "tests/aft/declarative-pilots/bare-stop.test.yaml",
@@ -1981,7 +1981,7 @@
             "steps",
             96
           ],
-          "line": 1522
+          "line": 1580
         }
       ],
       "bounds": {
