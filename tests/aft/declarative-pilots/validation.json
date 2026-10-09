@@ -5013,7 +5013,7 @@
     "runtime": 0
   },
   "gf1FourBodyCorrection": {
-    "status": "candidate new-operator controls match; full editor chain blocked at existing count capture SyntaxError",
+    "status": "27 new-operator diagnostic controls matched; previous full editor count-chain RED now GREEN on exact6a82 single-control replay; archive/fullpilot runtime still unverified",
     "rawAfterSha256": "acc39721f43989fd02a41c153247aaf10dd314a3378f7ae5dc8cfdd25b7f3174",
     "mappingFile": "tests/aft/declarative-pilots/preservation.json",
     "mappingPointer": "/pilots/0/fourBodyCorrection",
@@ -5556,5 +5556,87 @@
       "fullAdmission": "pending reviewed coherent flat consumer and corrected count package",
       "runtime": 0
     }
+  },
+  "gf1CountCaptureCorrectionDiagnostic": {
+    "at": "2026-10-09T21:48:52.219137+00:00",
+    "scope": "single original RED editor-control public loader/runFiles replay with JSDOM CLI double, no real browser/API/runtime or preservation acceptance",
+    "sourceAuthoredRawSha256": "acc39721f43989fd02a41c153247aaf10dd314a3378f7ae5dc8cfdd25b7f3174",
+    "currentPilotRawSha256": "4d47e8162b22c89f034cc99c9b5c9d15da47c48c5a6149c73bd83b5f56ab652c",
+    "generatedRegressionRawSha256": "e8d907f086663fb7dec649a3e40bad0ca8ba45905797477ece1e5c0fa8c09802",
+    "generatedRegressionBytesUnchanged": true,
+    "assertedOriginalSteps": [
+      79,
+      80,
+      81,
+      82
+    ],
+    "parentEngine": "ffff830b8762fa2670396edde2b5bfccc13d73df",
+    "correctedEngine": "6a82d623ae5074332e2187ff4db81e2f31628eb3",
+    "correctedTree": "6c72dd1e8e0c9d579aedb91de62c31a785fdef36",
+    "deliveryPRHead": "c49cdd24ce234e1fb4f2d1cd042c3c0c1b39a094",
+    "parentStatus": "failed SyntaxError at unchanged count step79 before DOM access",
+    "correctedStatus": "passed all5 generated steps including injected expectedEdit binding plus original four steps",
+    "installedBytesMatch": {
+      "buildFiles": 116,
+      "installedPackageFiles": 149
+    },
+    "engineAcceptance": "review candidate, no maintained pin change",
+    "scriptChanges": "only raw source path points to immutable acc397 authored-before; restricted run to initial failing control; package/source label updated; assertion/locator operands unchanged",
+    "artifacts": [
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-count-correction-w82ltntl/package.json",
+        "sha256": "2786131d2fe8142f06cd405f31d3ff669b096bfa4139e5b8246cce0da1d42713"
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-count-correction-w82ltntl/package-lock.json",
+        "sha256": "d261f4e06b7da94cdd95a9e9554365e3b12bfcdbbd84988bedf95b37806d77c9"
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-count-correction-w82ltntl/install.log",
+        "sha256": "06cfbcd165a6e73385403702e1e4ef7658d767b0e159ff9c5842be48382c5358"
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-count-correction-w82ltntl/installed-byte-receipt.json",
+        "sha256": "e000208ed1b8fe9075e87087fed6bf89730d0a9746287669350e284133d1c898"
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-count-correction-w82ltntl/authored-before.yaml",
+        "sha256": "acc39721f43989fd02a41c153247aaf10dd314a3378f7ae5dc8cfdd25b7f3174"
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-count-correction-w82ltntl/count-replay.mjs",
+        "sha256": "7c1c2cbf00e887870fbc4f40d1ee9ba280624d7ae414f9f0acd152f52068dd7d"
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-count-correction-w82ltntl/count-replay.log",
+        "sha256": "da7dc29e4b8ab5d8b0aff141ca07dbcfb6cba91c3a336dbf6a708cb3a553647c"
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-count-correction-w82ltntl/.diagnostic/gf1-controls/receipt.json",
+        "sha256": "96cc71edb70da71e2ced37e95216fa1900a1da3fd7dba923ea3a499150227749"
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-engine-candidate-ynzfk96j/tests/aft/adapter/.diagnostic/gf1-initial-red/gf1-public-proof.mjs",
+        "sha256": "52edaf46f10124a44dd71672d7a017fb4a3ef7318e26acf1ad43fafd451cf0bd"
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-engine-candidate-ynzfk96j/tests/aft/adapter/.diagnostic/gf1-initial-red/partial-results.json",
+        "sha256": "40ccd06208ce6200770bfa093b139d3c730e846f16ae9f4941634e7752c674d4"
+      },
+      {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-engine-candidate-ynzfk96j/tests/aft/adapter/.diagnostic/gf1-initial-red/log.txt",
+        "sha256": "6d331c4e26196ec531f55105bdc87cb385c703b884acf51b1716277939da0a08"
+      },
+      {
+        "path": "/private/tmp/aft-interface-a43468f0/final-gf1-6a82d623/source-build-receipt.json",
+        "sha256": "2caa0aadb770fe56c276a8e64b954ce6c8b7a9ee87b4b87cb89d84282dd3dbbe"
+      }
+    ],
+    "remaining": [
+      "reviewed coherent flat archive integration full raw admission of current233step GF1",
+      "actual source helper/read branch and parent authorized paired runtime with explicit failure cleanup deviation"
+    ],
+    "receiptPath": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-count-correction-w82ltntl/red-green-receipt.json",
+    "receiptSha256": "1ba36d0b754cd616fdd9af06b2f26a6ba9c5911a9eac6806ce20e524c599bd85"
   }
 }
