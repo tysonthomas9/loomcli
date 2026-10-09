@@ -35,6 +35,10 @@ export const NativeOutput = z.discriminatedUnion('view', [
     complete: z.literal(true), records: z.array(z.object({agentId: Id,harness:z.literal('opencode'),nativeSessionId:Id,nativeRoot:z.string()}).strict()),
   }).strict(),
 ]);
+export const NativeRegistrationInput = z.object({agent: AgentRef,
+  maxRegistrations: z.number().int().min(1).max(1000),
+}).strict();
+export const NativeRegistrationOutput = NativeOutput.options[6];
 const Message = z.object({ id: Id, sessionID: Id, type: Id, time: z.object({
   created: z.union([z.string(), z.number()]).optional(), completed: z.union([z.string(), z.number()]).nullable().optional(),
 }).passthrough(), model: z.object({ providerID: Id, id: Id }).passthrough().optional(),
@@ -61,6 +65,17 @@ export async function verifyNativeService(access: NativeAccess, expectedGenerati
     !Array.isArray(info.body) && info.body.pid === registration.pid,
   'identity-mismatch', 'Native info does not match the registered process');
   return registration;
+}
+/** Capture identity from the owned store/service rather than a caller hint.
+ * Subsequent observations still require the captured generation explicitly. */
+export async function observeNativeRegistration(input: z.infer<typeof NativeRegistrationInput>, access: NativeAccess,
+  owned: AgentRow, signal: AbortSignal): Promise<z.infer<typeof NativeRegistrationOutput>> {
+  signal.throwIfAborted();
+  const registration = ServiceRegistration.parse(await access.registration());
+  return NativeRegistrationOutput.parse(await observeNative({agent:input.agent,view:'registrations',
+    nativeSessionId:owned.harness_session_id,nativeRoot:owned.harness_session_root,
+    expectedGeneration:registration.generation,expectedEndpointId:registration.endpointId,expectedServicePid:registration.pid,
+    maxMessages:1,maxRegistrations:input.maxRegistrations},access,owned,signal));
 }
 export async function observeNative(input: z.infer<typeof NativeInput>, access: NativeAccess,
   owned: AgentRow, signal: AbortSignal, probe?: SyntheticProbe, secrets: readonly string[] = []): Promise<z.infer<typeof NativeOutput>> {

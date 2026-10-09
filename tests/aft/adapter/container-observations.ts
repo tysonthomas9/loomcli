@@ -7,6 +7,7 @@ import { observeGitLifecycle, GitLifecycleOutput, type GitLifecycleInput } from 
 import { observeGit, GitOutput, type GitInput, type GitReader } from './git.js';
 
 const RootSelector = z.discriminatedUnion('kind', [z.object({ kind: z.literal('managed-repo') }).strict(),
+  z.object({ kind: z.literal('fixture-temporary') }).strict(),
   z.object({ kind: z.literal('agent-worktree'), agentId: Id }).strict()]);
 const Paths = z.array(RelativePath).min(1).max(1000);
 const Bounds = { maxBytes: z.number().int().min(1).max(16 * 1024 * 1024), maxEntries: z.number().int().min(1).max(10000) };
@@ -20,7 +21,10 @@ export const ContainerObservationRequest = z.discriminatedUnion('operation', [
 ]);
 export const ContainerRootIdentity = z.object({ path: Id, device: z.number().int().nonnegative(), inode: z.number().int().nonnegative() }).strict();
 export const ContainerFilesystemOutput = z.object({ root: ContainerRootIdentity, data: FilesystemOutput }).strict();
-export interface ContainerOwnedPaths { workspaceId: string; repo: string; worktreeParent: string; commonDir: string }
+export interface ContainerOwnedPaths { workspaceId: string; repo: string; worktreeParent: string; commonDir: string;
+  /** Set only by the reader running inside the exact lease-owned namespace. */
+  temporaryRoot?: '/tmp';
+}
 /** Runs inside the exact owned container through its fixed source-built reader.
  * Paths are product-resolved from the attested source/agent store, never YAML. */
 export async function readContainerObservation(raw: unknown, access: NativeAccess, paths: ContainerOwnedPaths, reader?: GitReader) {
@@ -46,7 +50,9 @@ export async function readContainerObservation(raw: unknown, access: NativeAcces
       view: request.view, paths: request.paths, maxBytes: request.maxBytes },
       { worktree: row.worktree_path, commonDir: paths.commonDir, branch: row.branch }, reader);
   }
-  const root = request.root.kind === 'managed-repo' ? paths.repo : (await ownedAgent(request.root.agentId)).worktree_path;
+  if (request.root.kind === 'fixture-temporary')
+    requireFact(paths.temporaryRoot === '/tmp','ownership-mismatch','Fixture temporary namespace is not attested');
+  const root = request.root.kind === 'managed-repo' ? paths.repo : request.root.kind === 'fixture-temporary' ? '/tmp' : (await ownedAgent(request.root.agentId)).worktree_path;
   const canonical = await realpath(root); const before = await lstat(root);
   requireFact(canonical === root && before.isDirectory() && !before.isSymbolicLink(), 'ownership-mismatch', 'Container filesystem root is foreign');
   const identity = { path: root, device: before.dev, inode: before.ino };
