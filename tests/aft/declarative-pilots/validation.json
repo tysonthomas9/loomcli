@@ -2904,5 +2904,25 @@
     "runtimeStarted": 0,
     "receipt": "geometryCompatibilityAuthoring",
     "selectionBasis": "NEW098ab03f actual changed5file selection+perversion actualpin/publicenv; not e34d or historical recovery"
+  },
+  "ca73MetadataVerification": {
+    "path": "/private/tmp/loom-aft-pilot-validation-16e28787/accepted-ca73-child-admission-o9k9fe45/metadata-verification.json",
+    "sha256": "99e2cb60fcd4d5ce4801a502a350b24db41d5bcaef766516a9ec19b190024e1c",
+    "result": {
+      "at": "2026-10-09T13:57:49.991969+00:00",
+      "headChecked": "ab4d9d1130810acc3f80e5609449a6fd7a6d2289",
+      "preservationSha256": "9912910b382fac763bede980ae5ce9d09d8e85f1f20c69d4d390a646d80148c0",
+      "jsonParse": "PASS",
+      "artifactHashes": "13/13 PASS",
+      "oldSteps": 207,
+      "allFiveYamlHashes": "unchanged PASS",
+      "allFiveSkipped": true,
+      "inventoryClassification": "unchanged",
+      "admittedCurrentCa73Cases": 1,
+      "runtime": 0,
+      "fullPreservationAcceptedCount": 0,
+      "diffCheck": "PASS",
+      "initialCheckErratum": "Initial diagnostic harness asserted existing fullPreservationAccepted count0 is booleanFalse; Python identity rejected int0. Corrected equality check passes; no source/receipt evidence failure and no preservation credit added."
+    }
   }
 }
