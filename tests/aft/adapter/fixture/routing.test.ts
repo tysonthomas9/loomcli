@@ -4,6 +4,7 @@ import { fixtureRouting, fixtureOperationAuthority } from './routing.js';
 import { getFixtureOperationAuthority } from '../authority.js';
 import type { OwnedFixture } from '../ownership.js';
 import type { FixturePlan } from './lifecycle.js';
+import { LegacyOperationEffects, legacyTaskEffects } from '../legacy/effects.js';
 const owner={leaseId:'lease',runId:'run',suiteId:'suite',scope:'case' as const,caseId:'case',profile:'legacy-real-codex'};
 const revision={repository:'test',commit:'a'.repeat(40),tree:'b'.repeat(40),sourceManifestSha256:'c'.repeat(64),buildManifestSha256:'d'.repeat(64)};
 const plan:FixturePlan={profile:owner.profile,loomRevision:revision,fleetRevision:revision,engineRevision:revision,adapterRevision:revision,model:'openai/model',maxCases:1,caseCount:1,selectionSha256:'e'.repeat(64),leaseDurationMs:10000};
@@ -27,4 +28,13 @@ test('deterministic backend routing rejects paid authority and exposes only the 
  assert.equal(getFixtureOperationAuthority(fixture,'loom.cli.task',['start-owned-process']).evidenceClass,'deterministic');
  assert.throws(()=>getFixtureOperationAuthority(fixture,'loom.cli.task',['external-provider']));
  assert.deepEqual(fixtureRouting(stub).allowedTaskBackends,['codex','claude','cursor','opencode']);
+});
+test('fixture grants preserve the shared API/filesystem/CLI effect contract for every fixed legacy operation',()=>{
+ const stub={...plan,profile:'legacy-deterministic',model:'aft/m'};
+ const fixture={...owner,profile:stub.profile,operationAuthority:fixtureOperationAuthority({...owner,profile:stub.profile},stub)} as OwnedFixture;
+ for(const [operation,effects] of Object.entries(LegacyOperationEffects))assert.equal(getFixtureOperationAuthority(fixture,operation as keyof typeof LegacyOperationEffects,effects).evidenceClass,'deterministic');
+ assert.equal(getFixtureOperationAuthority(fixture,'loom.runtime.stimulate',[...LegacyOperationEffects['loom.runtime.stimulate'],'restart-owned-service']).evidenceClass,'deterministic');
+ const paid={...owner,operationAuthority:fixtureOperationAuthority(owner,{...plan,liveProvider:{backend:'codex',model:plan.model}})} as OwnedFixture;
+ assert.equal(getFixtureOperationAuthority(paid,'loom.cli.task',legacyTaskEffects({taskExecution:'live-provider'})).evidenceClass,'live-provider');
+ assert.throws(()=>getFixtureOperationAuthority(fixture,'loom.cli.task',legacyTaskEffects({taskExecution:'live-provider'})));
 });
