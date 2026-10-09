@@ -140,3 +140,85 @@ test('missing serialized identity kind fails before receipt lookup and cannot gr
     commonDir:fields.commonDir,storeId:fields.storeId,storeGeneration:fields.storeGeneration,parentAgentId:null,rootAgentId:null,
     createdByKind:'user',createdById:'observed-user',revision:1}).success,false);
 });
+
+const repositories=[{repoName:'alpha',sourceRepoId:'source-alpha',repo:fields.repo,commonDir:fields.commonDir,groups:['shared']},
+  {repoName:'beta',sourceRepoId:'source-beta',repo:'/owned/beta',commonDir:'/owned/beta/.git',groups:['beta-only','shared']}];
+test('finite named repositories resolve actual native actors without a primary or position alias',async t=>{
+  const {enrollOwnedWorkspaceAgent,requireOwnedWorkspaceRecord}=await import('./workspaces.js');const {store}=await setup(t);
+  const initial={...fields,agentIds:[],repositories,agentSources:[]};
+  const creationReceipt=await store.retain(JSON.stringify({kind:'workspace-created',...owner,...initial}));
+  const roster=await createOwnedWorkspaceRoster(owner,[{...initial,creationReceipt}],store),fixture=makeFixture(roster);
+  assert.equal(requireOwnedWorkspaceRecord(fixture,'workspace')!.repositories!.length,2);
+  assert.throws(()=>requireOwnedWorkspace(fixture,'workspace'),/ambiguous/);
+  assert.equal(requireOwnedWorkspace(fixture,'workspace',undefined,'native-agent-id','beta').repo,'/owned/beta');
+  fixture.readWorkspaceAgent=async(workspaceId,agentId)=>({kind:'agent-enrolled',identityKind:'native-agent-id',...owner,workspaceId,agentId,
+    repo:'/owned/beta',commonDir:'/owned/beta/.git',storeId:fields.storeId,storeGeneration:fields.storeGeneration,parentAgentId:null,rootAgentId:null,
+    createdByKind:'user',createdById:'actual-user',revision:1});
+  await enrollOwnedWorkspaceAgent(fixture,'workspace','agt_later',new AbortController().signal,store);
+  const selected=requireOwnedWorkspace(fixture,'workspace','agt_later');assert.equal(selected.repoName,'beta');assert.equal(selected.sourceRepoId,'source-beta');
+  assert.throws(()=>requireOwnedWorkspace(fixture,'workspace','agt_later','native-agent-id','alpha'));
+  assert.deepEqual(fixture.ownedWorkspaces![0]!.agentSources,[{agentId:'agt_later',repoNames:['beta']}]);
+  assert.ok(Object.isFrozen(fixture.ownedWorkspaces![0]!.repositories)&&Object.isFrozen(fixture.ownedWorkspaces![0]!.agentSources![0]!.repoNames));
+  let effects=0;const effect=()=>{requireOwnedWorkspace(fixture,'workspace','agt_later','native-agent-id','alpha');effects++;};assert.throws(effect);assert.equal(effects,0);
+});
+test('repository ambiguity, changed source, missing associations and same actor cross-repo deny ownership',async t=>{
+  const {store}=await setup(t);const initial={...fields,repositories,agentSources:[{agentId:'agt_primary',repoNames:['alpha']}]};
+  const creationReceipt=await store.retain(JSON.stringify({kind:'workspace-created',...owner,...initial}));
+  for(const change of [
+    {...initial,repositories:[repositories[0]!,{...repositories[1]!,repoName:'alpha'}]},
+    {...initial,repositories:[repositories[0]!,{...repositories[1]!,repo:fields.repo}]},
+    {...initial,repositories:[repositories[0]!,{...repositories[1]!,commonDir:'/foreign/.git'}]},
+    {...initial,agentSources:undefined},
+    {...initial,agentSources:[{agentId:'agt_primary',repoNames:['foreign']}]},
+    {...initial,agentSources:[{agentId:'agt_primary',repoNames:['alpha','beta']}]},
+    {...initial,agentIds:['agt_primary','agt_primary'],agentSources:[{agentId:'agt_primary',repoNames:['alpha']},{agentId:'agt_primary',repoNames:['beta']}]},
+  ])await assert.rejects(createOwnedWorkspaceRoster(owner,[{...change,creationReceipt}],store));
+});
+test('legacy actual empty Repos means the finite owned set and explicit source selection is required',async t=>{
+  const {enrollOwnedLegacyAgent}=await import('./workspaces.js');const {store}=await setup(t);
+  const initial={...fields,identityKind:'legacy-agent-name' as const,agentIds:[],repositories,agentSources:[]};
+  const creationReceipt=await store.retain(JSON.stringify({kind:'workspace-created',...owner,...initial}));
+  const fixture=makeFixture(await createOwnedWorkspaceRoster(owner,[{...initial,creationReceipt}],store));
+  let assignment:string[]|undefined;
+  fixture.readWorkspaceLegacyAgent=async(workspaceId,name)=>({kind:'legacy-agent-enrolled',identityKind:'legacy-agent-name',...owner,workspaceId,name,
+    repo:fields.repo,commonDir:fields.commonDir,storeId:fields.storeId,storeGeneration:fields.storeGeneration,parentName:null,
+    createdAt:'actual-created',updatedAt:'actual-updated',assignedRepos:assignment,assignedRepoGroups:[]});
+  await assert.rejects(enrollOwnedLegacyAgent(fixture,'workspace','operator',new AbortController().signal,store));
+  assignment=['foreign'];await assert.rejects(enrollOwnedLegacyAgent(fixture,'workspace','operator',new AbortController().signal,store));
+  assignment=[];await enrollOwnedLegacyAgent(fixture,'workspace','operator',new AbortController().signal,store);
+  assert.throws(()=>requireOwnedWorkspace(fixture,'workspace','operator','legacy-agent-name'),/ambiguous/);
+  assert.equal(requireOwnedWorkspace(fixture,'workspace','operator','legacy-agent-name','beta').repo,'/owned/beta');
+  assert.throws(()=>requireOwnedWorkspace(fixture,'workspace','operator','native-agent-id','beta'));
+});
+test('created workspace append authenticates receipts and cannot restore a stale or foreign roster',async t=>{
+  const {appendCreatedWorkspaces}=await import('./workspaces.js');const {store,record}=await setup(t);
+  const prior=await createOwnedWorkspaceRoster(owner,[await record()],store),fixture=makeFixture(prior),signal=new AbortController().signal;
+  await appendCreatedWorkspaces(fixture,[await record({workspaceId:'later',agentIds:['agt_new']})],signal,store);
+  assert.equal(requireOwnedWorkspace(fixture,'later','agt_new').repo,fields.repo);
+  const next=fixture.ownedWorkspaces!;
+  await assert.rejects(appendCreatedWorkspaces(fixture,[await record({workspaceId:'foreign',agentIds:[]},{runId:'foreign'})],signal,store));
+  assert.equal(fixture.ownedWorkspaces,next);
+  await assert.rejects(appendCreatedWorkspaces(fixture,[await record({workspaceId:'later',agentIds:[]})],signal,store));
+  fixture.ownedWorkspaces=prior;assert.throws(()=>requireOwnedWorkspace(fixture,'workspace','agt_primary'),/stale/);
+});
+
+test('legacy groups restrict actual sources and never turn empty explicit Repos into all-repo authority',async t=>{
+  const {enrollOwnedLegacyAgent}=await import('./workspaces.js');const {store}=await setup(t);
+  const initial={...fields,identityKind:'legacy-agent-name' as const,agentIds:[],repositories,agentSources:[]};
+  const creationReceipt=await store.retain(JSON.stringify({kind:'workspace-created',...owner,...initial}));
+  const fixture=makeFixture(await createOwnedWorkspaceRoster(owner,[{...initial,creationReceipt}],store));
+  let groups:string[]|undefined;let repo='/owned/beta';let assignedRepos:string[]=[];
+  fixture.readWorkspaceLegacyAgent=async(workspaceId,name)=>({kind:'legacy-agent-enrolled',identityKind:'legacy-agent-name',...owner,workspaceId,name,
+    repo,commonDir:repo===fields.repo?fields.commonDir:'/owned/beta/.git',storeId:fields.storeId,storeGeneration:fields.storeGeneration,parentName:null,
+    createdAt:'actual-created',updatedAt:'actual-updated',assignedRepos,assignedRepoGroups:groups});
+  const signal=new AbortController().signal;
+  await assert.rejects(enrollOwnedLegacyAgent(fixture,'workspace','grouped',signal,store));
+  groups=['unknown'];await assert.rejects(enrollOwnedLegacyAgent(fixture,'workspace','grouped',signal,store));
+  groups=['beta-only'];repo=fields.repo;await assert.rejects(enrollOwnedLegacyAgent(fixture,'workspace','grouped',signal,store));
+  repo='/owned/beta';await enrollOwnedLegacyAgent(fixture,'workspace','grouped',signal,store);
+  assert.equal(requireOwnedWorkspace(fixture,'workspace','grouped','legacy-agent-name').repo,'/owned/beta');
+  assert.throws(()=>requireOwnedWorkspace(fixture,'workspace','grouped','legacy-agent-name','alpha'));
+  assignedRepos=['alpha'];groups=['shared'];await enrollOwnedLegacyAgent(fixture,'workspace','union',signal,store);
+  assert.deepEqual(fixture.ownedWorkspaces![0]!.agentSources!.find(value=>value.agentId==='union')!.repoNames,['alpha','beta']);
+  assert.ok(Object.isFrozen(fixture.ownedWorkspaces![0]!.repositories![0]!.groups));
+});

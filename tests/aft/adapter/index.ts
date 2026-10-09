@@ -4,7 +4,7 @@ import type { ObservationResult } from '@tysonthomas9/aft/types';
 import { z } from 'zod';
 import { AgentRef, AgentRow, AgentHistory, Id, requireFact, redact, type AgentRow as Row } from './protocol.js';
 import { getFixtureEvidenceStore } from './evidence.js';
-import { enrollOwnedWorkspaceAgent, requireOwnedWorkspace } from './workspaces.js';
+import { enrollOwnedWorkspaceAgent, requireOwnedWorkspaceRecord, requireOwnedWorkspace } from './workspaces.js';
 import { defineOperation } from './operation.js';
 import { getSyntheticProbe } from './synthetic-probe.js';
 import { getFixture, getAgent, type OwnedFixture } from './ownership.js';
@@ -73,7 +73,7 @@ export function createCoreProviders(implementation: ImplementationPin & { sha256
     defineOperation({ ...common, id: 'loom.agent.bind', inputSchema: BindAgentInput, outputSchema: BindAgentOutput,
       async run(input, context) {
         const fixture = await getFixture(context, input.leaseId);
-        requireOwnedWorkspace(fixture,input.workspaceId);
+        requireOwnedWorkspaceRecord(fixture,input.workspaceId);
         if(fixture.ownedWorkspaces&&!fixture.ownedWorkspaces.find(value=>value.workspaceId===input.workspaceId&&value.identityKind==='native-agent-id')!.agentIds.includes(input.agentId))
           await enrollOwnedWorkspaceAgent(fixture,input.workspaceId,input.agentId,context.signal,getFixtureEvidenceStore(context,fixture.leaseId));
         const workspace = requireOwnedWorkspace(fixture,input.workspaceId,input.agentId);
