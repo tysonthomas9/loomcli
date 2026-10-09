@@ -871,7 +871,7 @@
     "coherentFollowup": "Parent approved maintained f3776276f88c31c5a89d6787ae824012ebb0be02 with HTTPS lock correction after this477 diagnostic; f377 not installed/run by pilot. No anonymous-network/CI transport or archive-integrity proof claimed."
   },
   "currentPublication": {
-    "at": "2026-10-09T16:09:49.010772+00:00",
+    "at": "2026-10-09T21:09:53.712Z",
     "status": "in-progress reviewable draft; not preservation-complete",
     "taskNoteId": "16e28787-7a4a-4c16-a257-cfe012e4f24c",
     "branch": "codex/aft-declarative-pilots",
@@ -887,7 +887,7 @@
       },
       {
         "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-        "sha256": "e4cf23de94b4a36a63886ccf05d12421d96db034e1f6a36f5cd3376268ca2954"
+        "sha256": "fe4d3ccb741f5c6f30bfe8db9b574e71cfb41cf90dad7a72b8e4866ef6030077"
       },
       {
         "file": "tests/aft/declarative-pilots/predicate-mappings.json",
@@ -895,7 +895,7 @@
       },
       {
         "file": "tests/aft/declarative-pilots/preservation.json",
-        "sha256": "6595e9757d4ed044732dcbedc9a5eb43c5785f4bf70123df2f09b2888b3eb262"
+        "sha256": "5c221ec5525df96cd83289b169f51b1d77691f4f86d26544e4a23400a251e28c"
       },
       {
         "file": "tests/aft/declarative-pilots/sse-cursor.test.yaml",
@@ -914,7 +914,7 @@
         "count": 699,
         "errors": 0,
         "credit": "individual schema only",
-        "scope": "Historical699schema-onlysteps before later4geometry+2pathname+37callerprefix additions; no revised historicalschema-count credit. Currentstatic bodytotal701, currentchangedvisual fullraw admitted separately."
+        "scope": "Historical699schema-onlysteps retained unchanged. Current static bodytotal703 after GF1 two added guard steps; new text-content-list/keys/join canonical validation PENDING. Historical currentvisual fullraw admitted separately."
       },
       "latestFullLoaderAttempt": {
         "engine": "ca73f637d46fa618e2a67f987b89698e914f21cd",
@@ -931,7 +931,8 @@
       "approvedCoherentConsumer": "8dd51b4f6bfda5d9113a4ab7293dfff3602f5845",
       "f377PilotChecksObtained": true,
       "f377Note": "Historical c71/f377 source-shaped timeout profile retained separately. New parent-approved584 source-built isolated f377 raw admission completes all5 unchanged files with no effects/runtime. No maintained root pin or preservation claim.",
-      "maintainedEngine": "ca73f637d46fa618e2a67f987b89698e914f21cd"
+      "maintainedEngine": "ca73f637d46fa618e2a67f987b89698e914f21cd",
+      "gf1CurrentRawStatus": "Changed fe4d3ccb draft: canonical new-operation validation pending; old Files584 admission applies only to prior e4cf23de bytes. skiptrue/runtime0."
     },
     "sourceMapping": {
       "originalSteps": 207,
@@ -2528,7 +2529,7 @@
         "status": "REJECTED canonical unchanged raw suite",
         "guardMs": 60000,
         "errors": [
-          "invalid suite /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:603:9: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe), maxEntries: Required\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:605:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe), kind: Invalid literal value, expected \"resources\"\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:607:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe): unknown key \"sampling\" — expected one of: operation, kind, clockId, id, maxEntries, maxBytes, representation, withinMs\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:608:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe): unknown key \"regions\" — expected one of: operation, kind, clockId, id, maxEntries, maxBytes, representation, withinMs\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:697:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe): unknown key \"maxSamples\" — expected one of: operation, kind, clockId, id, maxEntries, maxBytes, representation, withinMs\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:698:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe): unknown key \"maxNodes\" — expected one of: operation, kind, clockId, id, maxEntries, maxBytes, representation, withinMs"
+          "invalid suite /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:603:9: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe), maxEntries: Required\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:605:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe), kind: Invalid literal value, expected \"resources\"\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:607:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe): unknown key \"sampling\" \u2014 expected one of: operation, kind, clockId, id, maxEntries, maxBytes, representation, withinMs\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:608:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe): unknown key \"regions\" \u2014 expected one of: operation, kind, clockId, id, maxEntries, maxBytes, representation, withinMs\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:697:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe): unknown key \"maxSamples\" \u2014 expected one of: operation, kind, clockId, id, maxEntries, maxBytes, representation, withinMs\n  /private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/child-repeat.test.yaml:698:11: test \"repeated child attempts keep two keyed results and one final Lead summary\", step 60 (observe): unknown key \"maxNodes\" \u2014 expected one of: operation, kind, clockId, id, maxEntries, maxBytes, representation, withinMs"
         ],
         "rawUnchangedAfter": true
       },
@@ -5010,5 +5011,68 @@
     "newRawLoaderRun": false,
     "effects": 0,
     "runtime": 0
+  },
+  "gf1FourBodyCorrection": {
+    "status": "authored-awaiting-canonical-package-validation",
+    "rawAfterSha256": "fe4d3ccb741f5c6f30bfe8db9b574e71cfb41cf90dad7a72b8e4866ef6030077",
+    "mappingFile": "tests/aft/declarative-pilots/preservation.json",
+    "mappingPointer": "/pilots/0/fourBodyCorrection",
+    "sourceOracleControls": {
+      "counts": {
+        "editor": 7,
+        "addedLine": 7,
+        "keyset": 6
+      },
+      "sourceBase": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+      "sourceHelperSha256": "a8b86238ea03769f9fbeef13777d3bde01d6b804d21e6c508db39431a38e96bf",
+      "sourceSuiteSha256": "dc7a9bede0e917b9e61fec4c1a6a1e56679b8f595f4f40c1fa771c8e931cb44c",
+      "evidenceClass": "deterministic frozen-source oracle controls only; no canonical new-operation or browser/runtime validation",
+      "artifacts": [
+        {
+          "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-four-body-20261009/author.mjs",
+          "sha256": "5cba467cb6e52e491a22a7429777be2b1f81d313e631e95e60474e06b3f69bfd"
+        },
+        {
+          "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-four-body-20261009/finalize-authoring.mjs",
+          "sha256": "d790343a27839da20984eb57a3e1540af9a12a417ad3942d74d79111f18e16ab"
+        },
+        {
+          "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-four-body-20261009/extract-source.py",
+          "sha256": "ae1aeb23e312ead545060edfeaa6e431fd31983e1b3b88cdd0aab7e4c18fcd05"
+        },
+        {
+          "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-four-body-20261009/source-oracles.mjs",
+          "sha256": "49c545dcc6ecfcd2922fee303279cbd263171b4d00895ce3731337952d7024fa"
+        },
+        {
+          "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-four-body-20261009/source-extract.json",
+          "sha256": "0b7d9e943a3be4b7cdfe32dae65fc7e7d373e38a9029bde5843335dbc0f63cc7"
+        },
+        {
+          "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-four-body-20261009/source-oracle-receipt.json",
+          "sha256": "39b8448f01aa2b6fdd6bd826f0f3c33f55fd48938edeab58c1ed39cdf4df7f4c"
+        }
+      ]
+    },
+    "runtimeExecuted": 0,
+    "preservationAccepted": false,
+    "remainingDependencies": [
+      "exact new canonical package loader and public runner validation",
+      "supported current UI-created Agent/store/source/physical binding and effects grant",
+      "source archive teardown: child-first actual RUN/name guard, literal cancel:true, exact stable idempotency,15s,409-only",
+      "separately authorized identical-build original/declarative fresh-run parity"
+    ],
+    "mappingIntegrity": {
+      "receipt": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-four-body-20261009/mapping-integrity-receipt.json",
+      "sha256": "99ed1eafed033e150d839dc66637de38d57cdd6ecffe54935e45043811689ece",
+      "checkedCurrentLocations": 994,
+      "staticBodyTotal": 703,
+      "allOtherBodyStepsHooksScreenshotsOtherPilotsUnchanged": true,
+      "canonicalCredit": false,
+      "checker": {
+        "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-four-body-20261009/check-map.mjs",
+        "sha256": "33c68cdf6f2e6e8d6d4143d9fa7781a4928385c0d1d3b794b168cee5c75e8068"
+      }
+    }
   }
 }

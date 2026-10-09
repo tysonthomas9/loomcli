@@ -781,15 +781,42 @@ tests:
       - capture:
           source: dom
           locator:
-            selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) .cm-content[contenteditable=true]"
-          view: editable-text
-          as: editorText
+            selector: .cm-content[contenteditable=true]
+            first: true
+            within:
+              selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])"
+              first: true
+          view: count
+          as: editorCount
         intent: Compare every visible editor line with the exact expected bytes before Save
       - assert:
           op: eq
           args:
             - ref:
-                binding: editorText
+                binding: editorCount
+            - literal: 1
+        intent: Compare every visible editor line with the exact expected bytes before Save
+      - capture:
+          source: dom
+          locator:
+            selector: .cm-line
+            within:
+              selector: .cm-content[contenteditable=true]
+              first: true
+              within:
+                selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])"
+                first: true
+          view: text-content-list
+          as: editorLines
+        intent: Compare every visible editor line with the exact expected bytes before Save
+      - assert:
+          op: eq
+          args:
+            - op: join
+              args:
+                - ref:
+                    binding: editorLines
+                - literal: "\n"
             - ref:
                 binding: expectedEdit
         intent: Compare every visible editor line with the exact expected bytes before Save
@@ -1021,11 +1048,21 @@ tests:
               - literal: "&repo=source-repo&path="
         intent: Verify exact saved content, changed strong version and one scoped checkout change
       - assert:
-          op: exists
-          args:
-            - ref:
-                binding: gitSaved
-                pointer: /body/status/README.md
+          all:
+            - op: exists
+              args:
+                - ref:
+                    binding: gitSaved
+                    pointer: /body/status/README.md
+            - op: sameMembers
+              args:
+                - op: keys
+                  args:
+                    - ref:
+                        binding: gitSaved
+                        pointer: /body/status
+                - literal:
+                    - README.md
         intent: Verify exact saved content, changed strong version and one scoped checkout change
       - api:
           method: GET
@@ -1108,12 +1145,30 @@ tests:
         intent: Open the changed file's patch
       - screenshot: files-save-reload-s28
         intent: Open the changed file's patch
-      - capture:
-          source: dom
-          locator:
-            selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [data-type=add]"
-          view: text
-          as: addedLines
+      - await:
+          observation:
+            source: dom
+            locator:
+              selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [data-type=add]"
+            view: text-content-list
+            as: addedLines
+          satisfies:
+            not:
+              every:
+                collection:
+                  ref:
+                    binding: addedLines
+                as: addedLine
+                satisfies:
+                  not:
+                    op: contains
+                    args:
+                      - ref:
+                          binding: addedLine
+                      - literal: COV_FILES_${RUN_ID}_EDITOR
+          deadline:
+            clockId: host
+            withinMs: 30000
         intent: Show the added marker line in the visible Files diff
       - screenshot: files-save-reload-s29
         intent: Show the added marker line in the visible Files diff
@@ -1277,11 +1332,21 @@ tests:
               - literal: "&repo=source-repo&path="
         intent: Read the same saved content and strong version immediately after reload
       - assert:
-          op: exists
-          args:
-            - ref:
-                binding: gitReloaded
-                pointer: /body/status/README.md
+          all:
+            - op: exists
+              args:
+                - ref:
+                    binding: gitReloaded
+                    pointer: /body/status/README.md
+            - op: sameMembers
+              args:
+                - op: keys
+                  args:
+                    - ref:
+                        binding: gitReloaded
+                        pointer: /body/status
+                - literal:
+                    - README.md
         intent: Read the same saved content and strong version immediately after reload
       - api:
           method: GET

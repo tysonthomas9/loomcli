@@ -68,7 +68,7 @@
       ],
       "id": "files-save-reload",
       "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-      "sha256": "e4cf23de94b4a36a63886ccf05d12421d96db034e1f6a36f5cd3376268ca2954",
+      "sha256": "fe4d3ccb741f5c6f30bfe8db9b574e71cfb41cf90dad7a72b8e4866ef6030077",
       "skipped": true,
       "oldSteps": [
         {
@@ -1347,7 +1347,7 @@
           "gaps": [
             {
               "gap": "editor-line-bytes",
-              "reason": "Original compares every .cm-line textContent joined by newline; editable-text uses innerText. Need canonical line-byte projection to prove exact original per-line oracle independently."
+              "reason": "Original compares every .cm-line textContent joined by newline; editable-text uses innerText. Need canonical line-byte projection to prove exact original per-line oracle independently. Proposed canonical correction now authored; raw-loader/public-runner validation of the new engine interface is pending. Original source ownership/setup/teardown is not credited."
             }
           ],
           "deadlineMs": 30000,
@@ -1410,7 +1410,27 @@
                 "steps",
                 79
               ],
-              "line": 788
+              "line": 792
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                80
+              ],
+              "line": 799
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                81
+              ],
+              "line": 812
             }
           ],
           "checkpoint": {
@@ -1419,9 +1439,14 @@
               "tests",
               0,
               "steps",
-              80
+              82
             ],
-            "line": 796
+            "line": 823
+          },
+          "fourBodyCorrection": {
+            "status": "authored-awaiting-canonical-package-validation",
+            "recordOldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/20",
+            "recordLocation": "pilots/files-save-reload/fourBodyCorrection/records"
           }
         },
         {
@@ -1454,9 +1479,9 @@
                 "tests",
                 0,
                 "steps",
-                81
+                83
               ],
-              "line": 798
+              "line": 825
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -1464,9 +1489,9 @@
                 "tests",
                 0,
                 "steps",
-                82
+                84
               ],
-              "line": 815
+              "line": 842
             }
           ],
           "checkpoint": {
@@ -1475,9 +1500,9 @@
               "tests",
               0,
               "steps",
-              83
+              85
             ],
-            "line": 823
+            "line": 850
           }
         },
         {
@@ -1508,29 +1533,9 @@
                 "tests",
                 0,
                 "steps",
-                84
-              ],
-              "line": 825
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                85
-              ],
-              "line": 830
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
                 86
               ],
-              "line": 841
+              "line": 852
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -1540,7 +1545,7 @@
                 "steps",
                 87
               ],
-              "line": 846
+              "line": 857
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -1550,7 +1555,7 @@
                 "steps",
                 88
               ],
-              "line": 853
+              "line": 868
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -1560,7 +1565,7 @@
                 "steps",
                 89
               ],
-              "line": 862
+              "line": 873
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -1570,7 +1575,27 @@
                 "steps",
                 90
               ],
-              "line": 870
+              "line": 880
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                91
+              ],
+              "line": 889
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                92
+              ],
+              "line": 897
             }
           ],
           "checkpoint": {
@@ -1579,9 +1604,9 @@
               "tests",
               0,
               "steps",
-              91
+              93
             ],
-            "line": 877
+            "line": 904
           }
         },
         {
@@ -1614,9 +1639,9 @@
                 "tests",
                 0,
                 "steps",
-                92
+                94
               ],
-              "line": 879
+              "line": 906
             }
           ],
           "checkpoint": {
@@ -1625,9 +1650,9 @@
               "tests",
               0,
               "steps",
-              93
+              95
             ],
-            "line": 896
+            "line": 923
           }
         },
         {
@@ -1652,7 +1677,7 @@
           "gaps": [
             {
               "gap": "files-status-keyset",
-              "reason": "Exact sole README status-key assertion needs typed object-key projection or AgentRef-backed complete Git status; existence alone is insufficient."
+              "reason": "Exact sole README status-key assertion needs typed object-key projection or AgentRef-backed complete Git status; existence alone is insufficient. Proposed canonical correction now authored; raw-loader/public-runner validation of the new engine interface is pending. Original source ownership/setup/teardown is not credited."
             }
           ],
           "deadlineMs": 30000,
@@ -1663,29 +1688,9 @@
                 "tests",
                 0,
                 "steps",
-                94
-              ],
-              "line": 898
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                95
-              ],
-              "line": 915
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
                 96
               ],
-              "line": 972
+              "line": 925
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -1695,7 +1700,7 @@
                 "steps",
                 97
               ],
-              "line": 989
+              "line": 942
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -1705,7 +1710,7 @@
                 "steps",
                 98
               ],
-              "line": 1006
+              "line": 999
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -1715,7 +1720,7 @@
                 "steps",
                 99
               ],
-              "line": 1023
+              "line": 1016
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -1725,7 +1730,7 @@
                 "steps",
                 100
               ],
-              "line": 1030
+              "line": 1033
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -1735,7 +1740,7 @@
                 "steps",
                 101
               ],
-              "line": 1044
+              "line": 1050
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -1745,7 +1750,27 @@
                 "steps",
                 102
               ],
-              "line": 1064
+              "line": 1067
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                103
+              ],
+              "line": 1081
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                104
+              ],
+              "line": 1101
             }
           ],
           "checkpoint": {
@@ -1754,9 +1779,14 @@
               "tests",
               0,
               "steps",
-              103
+              105
             ],
-            "line": 1080
+            "line": 1117
+          },
+          "fourBodyCorrection": {
+            "status": "authored-awaiting-canonical-package-validation",
+            "recordOldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/24",
+            "recordLocation": "pilots/files-save-reload/fourBodyCorrection/records"
           }
         },
         {
@@ -1789,9 +1819,9 @@
                 "tests",
                 0,
                 "steps",
-                104
+                106
               ],
-              "line": 1082
+              "line": 1119
             }
           ],
           "checkpoint": {
@@ -1800,9 +1830,9 @@
               "tests",
               0,
               "steps",
-              105
+              107
             ],
-            "line": 1085
+            "line": 1122
           }
         },
         {
@@ -1835,9 +1865,9 @@
                 "tests",
                 0,
                 "steps",
-                106
+                108
               ],
-              "line": 1087
+              "line": 1124
             }
           ],
           "checkpoint": {
@@ -1846,9 +1876,9 @@
               "tests",
               0,
               "steps",
-              107
+              109
             ],
-            "line": 1104
+            "line": 1141
           }
         },
         {
@@ -1881,9 +1911,9 @@
                 "tests",
                 0,
                 "steps",
-                108
+                110
               ],
-              "line": 1106
+              "line": 1143
             }
           ],
           "checkpoint": {
@@ -1892,9 +1922,9 @@
               "tests",
               0,
               "steps",
-              109
+              111
             ],
-            "line": 1109
+            "line": 1146
           }
         },
         {
@@ -1921,7 +1951,7 @@
           "gaps": [
             {
               "gap": "added-line-some",
-              "reason": "Original some added-line substring is not equivalent to every line; canonical DOM capture scalar/array cardinality requires stable list-text capture with collection any predicate or safe source projection. No weakening to panel text."
+              "reason": "Original some added-line substring is not equivalent to every line; canonical DOM capture scalar/array cardinality requires stable list-text capture with collection any predicate or safe source projection. No weakening to panel text. Proposed canonical correction now authored; raw-loader/public-runner validation of the new engine interface is pending. Original source ownership/setup/teardown is not credited."
             }
           ],
           "deadlineMs": 30000,
@@ -1932,9 +1962,9 @@
                 "tests",
                 0,
                 "steps",
-                110
+                112
               ],
-              "line": 1111
+              "line": 1148
             }
           ],
           "checkpoint": {
@@ -1943,9 +1973,14 @@
               "tests",
               0,
               "steps",
-              111
+              113
             ],
-            "line": 1118
+            "line": 1173
+          },
+          "fourBodyCorrection": {
+            "status": "authored-awaiting-canonical-package-validation",
+            "recordOldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/28",
+            "recordLocation": "pilots/files-save-reload/fourBodyCorrection/records"
           }
         },
         {
@@ -1976,9 +2011,9 @@
                 "tests",
                 0,
                 "steps",
-                112
+                114
               ],
-              "line": 1120
+              "line": 1175
             }
           ],
           "checkpoint": {
@@ -1987,9 +2022,9 @@
               "tests",
               0,
               "steps",
-              113
+              115
             ],
-            "line": 1122
+            "line": 1177
           }
         },
         {
@@ -2020,29 +2055,9 @@
                 "tests",
                 0,
                 "steps",
-                114
-              ],
-              "line": 1124
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                115
-              ],
-              "line": 1129
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
                 116
               ],
-              "line": 1140
+              "line": 1179
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2052,7 +2067,27 @@
                 "steps",
                 117
               ],
-              "line": 1145
+              "line": 1184
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                118
+              ],
+              "line": 1195
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                119
+              ],
+              "line": 1200
             }
           ],
           "checkpoint": {
@@ -2061,9 +2096,9 @@
               "tests",
               0,
               "steps",
-              118
+              120
             ],
-            "line": 1152
+            "line": 1207
           }
         },
         {
@@ -2088,7 +2123,7 @@
           "gaps": [
             {
               "gap": "files-status-keyset",
-              "reason": "Exact sole README status-key assertion needs typed object-key projection or AgentRef-backed complete Git status; existence alone is insufficient."
+              "reason": "Exact sole README status-key assertion needs typed object-key projection or AgentRef-backed complete Git status; existence alone is insufficient. Proposed canonical correction now authored; raw-loader/public-runner validation of the new engine interface is pending. Original source ownership/setup/teardown is not credited."
             }
           ],
           "deadlineMs": 30000,
@@ -2099,29 +2134,9 @@
                 "tests",
                 0,
                 "steps",
-                119
-              ],
-              "line": 1154
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                120
-              ],
-              "line": 1171
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
                 121
               ],
-              "line": 1228
+              "line": 1209
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2131,7 +2146,7 @@
                 "steps",
                 122
               ],
-              "line": 1245
+              "line": 1226
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2141,7 +2156,7 @@
                 "steps",
                 123
               ],
-              "line": 1262
+              "line": 1283
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2151,7 +2166,7 @@
                 "steps",
                 124
               ],
-              "line": 1279
+              "line": 1300
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2161,7 +2176,7 @@
                 "steps",
                 125
               ],
-              "line": 1286
+              "line": 1317
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2171,7 +2186,7 @@
                 "steps",
                 126
               ],
-              "line": 1300
+              "line": 1334
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2181,7 +2196,7 @@
                 "steps",
                 127
               ],
-              "line": 1320
+              "line": 1351
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2191,7 +2206,27 @@
                 "steps",
                 128
               ],
-              "line": 1336
+              "line": 1365
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                129
+              ],
+              "line": 1385
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                130
+              ],
+              "line": 1401
             }
           ],
           "checkpoint": {
@@ -2200,9 +2235,14 @@
               "tests",
               0,
               "steps",
-              129
+              131
             ],
-            "line": 1346
+            "line": 1411
+          },
+          "fourBodyCorrection": {
+            "status": "authored-awaiting-canonical-package-validation",
+            "recordOldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/31",
+            "recordLocation": "pilots/files-save-reload/fourBodyCorrection/records"
           }
         },
         {
@@ -2233,29 +2273,9 @@
                 "tests",
                 0,
                 "steps",
-                130
-              ],
-              "line": 1348
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                131
-              ],
-              "line": 1353
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
                 132
               ],
-              "line": 1364
+              "line": 1413
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2265,7 +2285,7 @@
                 "steps",
                 133
               ],
-              "line": 1369
+              "line": 1418
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2275,7 +2295,7 @@
                 "steps",
                 134
               ],
-              "line": 1376
+              "line": 1429
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2285,7 +2305,7 @@
                 "steps",
                 135
               ],
-              "line": 1381
+              "line": 1434
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2295,7 +2315,7 @@
                 "steps",
                 136
               ],
-              "line": 1386
+              "line": 1441
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2305,7 +2325,7 @@
                 "steps",
                 137
               ],
-              "line": 1395
+              "line": 1446
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2315,7 +2335,27 @@
                 "steps",
                 138
               ],
-              "line": 1410
+              "line": 1451
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                139
+              ],
+              "line": 1460
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                140
+              ],
+              "line": 1475
             }
           ],
           "checkpoint": {
@@ -2324,9 +2364,9 @@
               "tests",
               0,
               "steps",
-              139
+              141
             ],
-            "line": 1413
+            "line": 1478
           }
         },
         {
@@ -2359,29 +2399,9 @@
                 "tests",
                 0,
                 "steps",
-                140
-              ],
-              "line": 1415
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                141
-              ],
-              "line": 1436
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
                 142
               ],
-              "line": 1443
+              "line": 1480
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2391,7 +2411,7 @@
                 "steps",
                 143
               ],
-              "line": 1450
+              "line": 1501
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2401,7 +2421,27 @@
                 "steps",
                 144
               ],
-              "line": 1460
+              "line": 1508
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                145
+              ],
+              "line": 1515
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                146
+              ],
+              "line": 1525
             }
           ],
           "checkpoint": {
@@ -2410,9 +2450,9 @@
               "tests",
               0,
               "steps",
-              145
+              147
             ],
-            "line": 1487
+            "line": 1552
           }
         },
         {
@@ -2443,29 +2483,9 @@
                 "tests",
                 0,
                 "steps",
-                146
-              ],
-              "line": 1489
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                147
-              ],
-              "line": 1496
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
                 148
               ],
-              "line": 1503
+              "line": 1554
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2475,7 +2495,7 @@
                 "steps",
                 149
               ],
-              "line": 1513
+              "line": 1561
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2485,7 +2505,7 @@
                 "steps",
                 150
               ],
-              "line": 1540
+              "line": 1568
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2495,7 +2515,7 @@
                 "steps",
                 151
               ],
-              "line": 1543
+              "line": 1578
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2505,7 +2525,7 @@
                 "steps",
                 152
               ],
-              "line": 1548
+              "line": 1605
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2515,7 +2535,7 @@
                 "steps",
                 153
               ],
-              "line": 1550
+              "line": 1608
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2525,7 +2545,7 @@
                 "steps",
                 154
               ],
-              "line": 1557
+              "line": 1613
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2535,7 +2555,7 @@
                 "steps",
                 155
               ],
-              "line": 1564
+              "line": 1615
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2545,7 +2565,27 @@
                 "steps",
                 156
               ],
-              "line": 1574
+              "line": 1622
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                157
+              ],
+              "line": 1629
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                158
+              ],
+              "line": 1639
             }
           ],
           "checkpoint": {
@@ -2554,9 +2594,9 @@
               "tests",
               0,
               "steps",
-              157
+              159
             ],
-            "line": 1594
+            "line": 1659
           }
         },
         {
@@ -2589,29 +2629,9 @@
                 "tests",
                 0,
                 "steps",
-                158
-              ],
-              "line": 1596
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                159
-              ],
-              "line": 1601
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
                 160
               ],
-              "line": 1612
+              "line": 1661
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2621,7 +2641,7 @@
                 "steps",
                 161
               ],
-              "line": 1617
+              "line": 1666
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2631,7 +2651,27 @@
                 "steps",
                 162
               ],
-              "line": 1624
+              "line": 1677
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                163
+              ],
+              "line": 1682
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                164
+              ],
+              "line": 1689
             }
           ],
           "checkpoint": {
@@ -2640,9 +2680,9 @@
               "tests",
               0,
               "steps",
-              163
+              165
             ],
-            "line": 1641
+            "line": 1706
           }
         },
         {
@@ -2675,9 +2715,9 @@
                 "tests",
                 0,
                 "steps",
-                164
+                166
               ],
-              "line": 1643
+              "line": 1708
             }
           ],
           "checkpoint": {
@@ -2686,9 +2726,9 @@
               "tests",
               0,
               "steps",
-              165
+              167
             ],
-            "line": 1646
+            "line": 1711
           }
         },
         {
@@ -2721,29 +2761,9 @@
                 "tests",
                 0,
                 "steps",
-                166
-              ],
-              "line": 1648
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                167
-              ],
-              "line": 1665
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
                 168
               ],
-              "line": 1672
+              "line": 1713
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2753,7 +2773,27 @@
                 "steps",
                 169
               ],
-              "line": 1683
+              "line": 1730
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                170
+              ],
+              "line": 1737
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                171
+              ],
+              "line": 1748
             }
           ],
           "checkpoint": {
@@ -2762,9 +2802,9 @@
               "tests",
               0,
               "steps",
-              170
+              172
             ],
-            "line": 1690
+            "line": 1755
           }
         },
         {
@@ -2795,9 +2835,9 @@
                 "tests",
                 0,
                 "steps",
-                171
+                173
               ],
-              "line": 1692
+              "line": 1757
             }
           ],
           "checkpoint": {
@@ -2806,9 +2846,9 @@
               "tests",
               0,
               "steps",
-              172
+              174
             ],
-            "line": 1694
+            "line": 1759
           }
         },
         {
@@ -2839,29 +2879,9 @@
                 "tests",
                 0,
                 "steps",
-                173
-              ],
-              "line": 1696
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                174
-              ],
-              "line": 1701
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
                 175
               ],
-              "line": 1712
+              "line": 1761
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2871,7 +2891,27 @@
                 "steps",
                 176
               ],
-              "line": 1717
+              "line": 1766
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                177
+              ],
+              "line": 1777
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                178
+              ],
+              "line": 1782
             }
           ],
           "checkpoint": {
@@ -2880,9 +2920,9 @@
               "tests",
               0,
               "steps",
-              177
+              179
             ],
-            "line": 1724
+            "line": 1789
           }
         },
         {
@@ -2915,29 +2955,9 @@
                 "tests",
                 0,
                 "steps",
-                178
-              ],
-              "line": 1726
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                179
-              ],
-              "line": 1731
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
                 180
               ],
-              "line": 1742
+              "line": 1791
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2947,7 +2967,7 @@
                 "steps",
                 181
               ],
-              "line": 1747
+              "line": 1796
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2957,7 +2977,27 @@
                 "steps",
                 182
               ],
-              "line": 1754
+              "line": 1807
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                183
+              ],
+              "line": 1812
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                184
+              ],
+              "line": 1819
             }
           ],
           "checkpoint": {
@@ -2966,9 +3006,9 @@
               "tests",
               0,
               "steps",
-              183
+              185
             ],
-            "line": 1771
+            "line": 1836
           }
         },
         {
@@ -3001,9 +3041,9 @@
                 "tests",
                 0,
                 "steps",
-                184
+                186
               ],
-              "line": 1773
+              "line": 1838
             }
           ],
           "checkpoint": {
@@ -3012,9 +3052,9 @@
               "tests",
               0,
               "steps",
-              185
+              187
             ],
-            "line": 1776
+            "line": 1841
           }
         },
         {
@@ -3047,29 +3087,9 @@
                 "tests",
                 0,
                 "steps",
-                186
-              ],
-              "line": 1778
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                187
-              ],
-              "line": 1783
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
                 188
               ],
-              "line": 1794
+              "line": 1843
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -3079,7 +3099,7 @@
                 "steps",
                 189
               ],
-              "line": 1799
+              "line": 1848
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -3089,7 +3109,27 @@
                 "steps",
                 190
               ],
-              "line": 1806
+              "line": 1859
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                191
+              ],
+              "line": 1864
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                192
+              ],
+              "line": 1871
             }
           ],
           "checkpoint": {
@@ -3098,9 +3138,9 @@
               "tests",
               0,
               "steps",
-              191
+              193
             ],
-            "line": 1823
+            "line": 1888
           }
         },
         {
@@ -3131,9 +3171,9 @@
                 "tests",
                 0,
                 "steps",
-                192
+                194
               ],
-              "line": 1825
+              "line": 1890
             }
           ],
           "checkpoint": {
@@ -3142,9 +3182,9 @@
               "tests",
               0,
               "steps",
-              193
+              195
             ],
-            "line": 1827
+            "line": 1892
           }
         },
         {
@@ -3175,29 +3215,9 @@
                 "tests",
                 0,
                 "steps",
-                194
-              ],
-              "line": 1829
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                195
-              ],
-              "line": 1834
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
                 196
               ],
-              "line": 1845
+              "line": 1894
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -3207,7 +3227,27 @@
                 "steps",
                 197
               ],
-              "line": 1850
+              "line": 1899
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                198
+              ],
+              "line": 1910
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                199
+              ],
+              "line": 1915
             }
           ],
           "checkpoint": {
@@ -3216,9 +3256,9 @@
               "tests",
               0,
               "steps",
-              198
+              200
             ],
-            "line": 1857
+            "line": 1922
           }
         },
         {
@@ -3251,9 +3291,9 @@
                 "tests",
                 0,
                 "steps",
-                199
+                201
               ],
-              "line": 1859
+              "line": 1924
             }
           ],
           "checkpoint": {
@@ -3262,9 +3302,9 @@
               "tests",
               0,
               "steps",
-              200
+              202
             ],
-            "line": 1862
+            "line": 1927
           }
         },
         {
@@ -3297,29 +3337,9 @@
                 "tests",
                 0,
                 "steps",
-                201
-              ],
-              "line": 1864
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                202
-              ],
-              "line": 1869
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
                 203
               ],
-              "line": 1880
+              "line": 1929
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -3329,7 +3349,7 @@
                 "steps",
                 204
               ],
-              "line": 1885
+              "line": 1934
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -3339,7 +3359,27 @@
                 "steps",
                 205
               ],
-              "line": 1892
+              "line": 1945
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                206
+              ],
+              "line": 1950
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                207
+              ],
+              "line": 1957
             }
           ],
           "checkpoint": {
@@ -3348,9 +3388,9 @@
               "tests",
               0,
               "steps",
-              206
+              208
             ],
-            "line": 1909
+            "line": 1974
           }
         },
         {
@@ -3381,9 +3421,9 @@
                 "tests",
                 0,
                 "steps",
-                207
+                209
               ],
-              "line": 1911
+              "line": 1976
             }
           ],
           "checkpoint": {
@@ -3392,9 +3432,9 @@
               "tests",
               0,
               "steps",
-              208
+              210
             ],
-            "line": 1913
+            "line": 1978
           }
         },
         {
@@ -3425,29 +3465,9 @@
                 "tests",
                 0,
                 "steps",
-                209
-              ],
-              "line": 1915
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                210
-              ],
-              "line": 1920
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
                 211
               ],
-              "line": 1931
+              "line": 1980
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -3457,7 +3477,27 @@
                 "steps",
                 212
               ],
-              "line": 1936
+              "line": 1985
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                213
+              ],
+              "line": 1996
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                214
+              ],
+              "line": 2001
             }
           ],
           "checkpoint": {
@@ -3466,9 +3506,9 @@
               "tests",
               0,
               "steps",
-              213
+              215
             ],
-            "line": 1943
+            "line": 2008
           }
         },
         {
@@ -3501,9 +3541,9 @@
                 "tests",
                 0,
                 "steps",
-                214
+                216
               ],
-              "line": 1945
+              "line": 2010
             }
           ],
           "checkpoint": {
@@ -3512,9 +3552,9 @@
               "tests",
               0,
               "steps",
-              215
+              217
             ],
-            "line": 1948
+            "line": 2013
           }
         },
         {
@@ -3547,29 +3587,9 @@
                 "tests",
                 0,
                 "steps",
-                216
-              ],
-              "line": 1950
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                217
-              ],
-              "line": 1955
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
                 218
               ],
-              "line": 1966
+              "line": 2015
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -3579,7 +3599,7 @@
                 "steps",
                 219
               ],
-              "line": 1971
+              "line": 2020
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -3589,7 +3609,27 @@
                 "steps",
                 220
               ],
-              "line": 1978
+              "line": 2031
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                221
+              ],
+              "line": 2036
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                222
+              ],
+              "line": 2043
             }
           ],
           "checkpoint": {
@@ -3598,9 +3638,9 @@
               "tests",
               0,
               "steps",
-              221
+              223
             ],
-            "line": 1995
+            "line": 2060
           }
         },
         {
@@ -3631,9 +3671,9 @@
                 "tests",
                 0,
                 "steps",
-                222
+                224
               ],
-              "line": 1997
+              "line": 2062
             }
           ],
           "checkpoint": {
@@ -3642,9 +3682,9 @@
               "tests",
               0,
               "steps",
-              223
+              225
             ],
-            "line": 1999
+            "line": 2064
           }
         },
         {
@@ -3675,29 +3715,9 @@
                 "tests",
                 0,
                 "steps",
-                224
-              ],
-              "line": 2001
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                225
-              ],
-              "line": 2006
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
                 226
               ],
-              "line": 2017
+              "line": 2066
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -3707,7 +3727,27 @@
                 "steps",
                 227
               ],
-              "line": 2022
+              "line": 2071
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                228
+              ],
+              "line": 2082
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                229
+              ],
+              "line": 2087
             }
           ],
           "checkpoint": {
@@ -3716,9 +3756,9 @@
               "tests",
               0,
               "steps",
-              228
+              230
             ],
-            "line": 2029
+            "line": 2094
           }
         }
       ],
@@ -5439,6 +5479,15 @@
                 "sourceReason": "all actual .cm-line textContent strings joined by newline equals same prepared expected text BEFORE Save, no textContent flattening equivalence assumed",
                 "excludedReason": null,
                 "acceptance": "source reachability only; authored/uncovered predicate status unchanged, no schema/admission/runtime/preservation credit"
+              },
+              "fourBodyAuthoredCorrection": {
+                "status": "authored-awaiting-canonical-package-validation",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/20"
+                ],
+                "recordLocation": "pilots/files-save-reload/fourBodyCorrection/records",
+                "runtimeExecuted": 0,
+                "preservationAccepted": false
               }
             },
             {
@@ -7076,6 +7125,16 @@
                 "sourceReason": "label editor in both selected calls; stage saved at24, reloaded at31; fresh file/stat/status/checkouts reads and before-edit snapshot required",
                 "excludedReason": null,
                 "acceptance": "source reachability only; authored/uncovered predicate status unchanged, no schema/admission/runtime/preservation credit"
+              },
+              "fourBodyAuthoredCorrection": {
+                "status": "authored-awaiting-canonical-package-validation",
+                "callerOldStepIds": [
+                  "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/24",
+                  "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/31"
+                ],
+                "recordLocation": "pilots/files-save-reload/fourBodyCorrection/records",
+                "runtimeExecuted": 0,
+                "preservationAccepted": false
               }
             },
             {
@@ -7814,6 +7873,252 @@
           "destination": [],
           "missingCanonicalEvidence": "Closed fixed archive wire/header port, actual current name and immutable creation-incarnation facts under same AgentRef/store/lineage/serve generation, child-first captured ordering, exact source key/15s/outcome handling and declared actual lifecycle/retire effects remain pending. Existing fixture.release is not this actor.",
           "strongerOwnershipChecks": "Any proposed creation-incarnation recheck beyond source name/run guard must be identified explicitly; mutable model/revision/name must not be treated as immutable whole-row identity."
+        }
+      },
+      "fourBodyCorrection": {
+        "at": "2026-10-09T21:09:53.712Z",
+        "purpose": "GF1 exactly four original body assertion gaps; new canonical primitives pending package validation",
+        "parentHead": "ce6e392365c5339a63fb70fd94ee7c9848c9be49",
+        "originalSourceBase": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+        "helperSha256": "a8b86238ea03769f9fbeef13777d3bde01d6b804d21e6c508db39431a38e96bf",
+        "rawBeforeSha256": "e4cf23de94b4a36a63886ccf05d12421d96db034e1f6a36f5cd3376268ca2954",
+        "rawAfterSha256": "fe4d3ccb741f5c6f30bfe8db9b574e71cfb41cf90dad7a72b8e4866ef6030077",
+        "oldBodySteps": 229,
+        "newBodySteps": 231,
+        "changedOldCandidateIndices": [
+          78,
+          79,
+          99,
+          124,
+          110
+        ],
+        "records": [
+          {
+            "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/20",
+            "source": {
+              "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                20
+              ],
+              "line": 81,
+              "column": 9,
+              "end_line": 85
+            },
+            "helper": {
+              "path": "tests/aft/scripts/coverage-git-files-evidence.py",
+              "lines": [
+                312,
+                313,
+                314,
+                315,
+                323
+              ]
+            },
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  78
+                ],
+                "line": 781
+              },
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  79
+                ],
+                "line": 792
+              },
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  80
+                ],
+                "line": 799
+              },
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  81
+                ],
+                "line": 812
+              }
+            ],
+            "status": "authored-awaiting-canonical-package-validation",
+            "deadlineMs": null,
+            "runtimeExecuted": 0,
+            "preservationAccepted": false
+          },
+          {
+            "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/24",
+            "source": {
+              "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                24
+              ],
+              "line": 99,
+              "column": 9,
+              "end_line": 103
+            },
+            "helper": {
+              "path": "tests/aft/scripts/coverage-git-files-evidence.py",
+              "lines": [
+                288
+              ]
+            },
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  101
+                ],
+                "line": 1050
+              }
+            ],
+            "status": "authored-awaiting-canonical-package-validation",
+            "deadlineMs": null,
+            "runtimeExecuted": 0,
+            "preservationAccepted": false
+          },
+          {
+            "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/28",
+            "source": {
+              "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                28
+              ],
+              "line": 111,
+              "column": 9,
+              "end_line": 115
+            },
+            "helper": null,
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  112
+                ],
+                "line": 1148
+              }
+            ],
+            "status": "authored-awaiting-canonical-package-validation",
+            "deadlineMs": 30000,
+            "runtimeExecuted": 0,
+            "preservationAccepted": false
+          },
+          {
+            "oldStepId": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml#tests/0/steps/31",
+            "source": {
+              "file_id": "campaign:tests/aft/live-agent-coverage-suites/git-files.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                31
+              ],
+              "line": 119,
+              "column": 9,
+              "end_line": 123
+            },
+            "helper": {
+              "path": "tests/aft/scripts/coverage-git-files-evidence.py",
+              "lines": [
+                288
+              ]
+            },
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  126
+                ],
+                "line": 1334
+              }
+            ],
+            "status": "authored-awaiting-canonical-package-validation",
+            "deadlineMs": null,
+            "runtimeExecuted": 0,
+            "preservationAccepted": false
+          }
+        ],
+        "unchangedOtherSteps": true,
+        "unchangedHooksProfileSkipScreenshots": true,
+        "otherFourPilotChanges": 0,
+        "enginePinAdopted": false,
+        "canonicalValidation": "pending",
+        "runtimeExecuted": 0,
+        "remainingDependencies": [
+          "exact new canonical package loader and public runner validation",
+          "supported current UI-created Agent/store/source/physical binding and effects grant",
+          "source archive teardown: child-first actual RUN/name guard, literal cancel:true, exact stable idempotency,15s,409-only",
+          "separately authorized identical-build original/declarative fresh-run parity"
+        ],
+        "sourceOracleControls": {
+          "counts": {
+            "editor": 7,
+            "addedLine": 7,
+            "keyset": 6
+          },
+          "sourceBase": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+          "sourceHelperSha256": "a8b86238ea03769f9fbeef13777d3bde01d6b804d21e6c508db39431a38e96bf",
+          "sourceSuiteSha256": "dc7a9bede0e917b9e61fec4c1a6a1e56679b8f595f4f40c1fa771c8e931cb44c",
+          "evidenceClass": "deterministic frozen-source oracle controls only; no canonical new-operation or browser/runtime validation",
+          "artifacts": [
+            {
+              "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-four-body-20261009/author.mjs",
+              "sha256": "5cba467cb6e52e491a22a7429777be2b1f81d313e631e95e60474e06b3f69bfd"
+            },
+            {
+              "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-four-body-20261009/finalize-authoring.mjs",
+              "sha256": "d790343a27839da20984eb57a3e1540af9a12a417ad3942d74d79111f18e16ab"
+            },
+            {
+              "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-four-body-20261009/extract-source.py",
+              "sha256": "ae1aeb23e312ead545060edfeaa6e431fd31983e1b3b88cdd0aab7e4c18fcd05"
+            },
+            {
+              "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-four-body-20261009/source-oracles.mjs",
+              "sha256": "49c545dcc6ecfcd2922fee303279cbd263171b4d00895ce3731337952d7024fa"
+            },
+            {
+              "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-four-body-20261009/source-extract.json",
+              "sha256": "0b7d9e943a3be4b7cdfe32dae65fc7e7d373e38a9029bde5843335dbc0f63cc7"
+            },
+            {
+              "path": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-four-body-20261009/source-oracle-receipt.json",
+              "sha256": "39b8448f01aa2b6fdd6bd826f0f3c33f55fd48938edeab58c1ed39cdf4df7f4c"
+            }
+          ]
         }
       }
     },
@@ -15105,7 +15410,7 @@
           },
           "original": {
             "wait": {
-              "fn": "(() => { const row=Array.from(document.querySelectorAll('[data-tray-row]')).find(x=>x.textContent?.includes('cov-child-repeat-${RUN_ID}'));\n  return row?.getAttribute('data-tray-row') && row.textContent?.includes(' · ') &&\n    row.textContent?.match(/(▸|💭)/); })()"
+              "fn": "(() => { const row=Array.from(document.querySelectorAll('[data-tray-row]')).find(x=>x.textContent?.includes('cov-child-repeat-${RUN_ID}'));\n  return row?.getAttribute('data-tray-row') && row.textContent?.includes(' \u00b7 ') &&\n    row.textContent?.match(/(\u25b8|\ud83d\udcad)/); })()"
             },
             "intent": "Screenshot the running child's current harmless tool or reasoning step and elapsed time (DF2)"
           },
@@ -15144,7 +15449,7 @@
             "end_line": 105
           },
           "original": {
-            "run": "set -eu\nid=\"$(cat \"$AFT_WORK_DIR/coverage-children-activity/repeat.id\")\"\nagent-browser --session \"$AFT_SESSION\" wait --fn \"(() => { const row=document.querySelector('[data-testid=agent-tray] [data-tray-row=\\\"$id\\\"]'); const running=row?.querySelector('[data-status=running]'); const result=running?.querySelector(':scope > span:last-child')?.textContent?.trim() || ''; const elapsed=running?.querySelector(':scope > span:nth-child(3)')?.textContent?.trim() || ''; return !!row?.getClientRects().length && /^(▸|💭)/.test(result) && /[0-9]+m [0-9][0-9]s$/.test(elapsed); })()\"\nagent-browser --session \"$AFT_SESSION\" screenshot \"$AFT_WORK_DIR/coverage-children-activity/activity-exact-id.png\"\npython3 \"$AFT_TESTS_DIR/scripts/coverage-children-activity.py\" activity repeat\n",
+            "run": "set -eu\nid=\"$(cat \"$AFT_WORK_DIR/coverage-children-activity/repeat.id\")\"\nagent-browser --session \"$AFT_SESSION\" wait --fn \"(() => { const row=document.querySelector('[data-testid=agent-tray] [data-tray-row=\\\"$id\\\"]'); const running=row?.querySelector('[data-status=running]'); const result=running?.querySelector(':scope > span:last-child')?.textContent?.trim() || ''; const elapsed=running?.querySelector(':scope > span:nth-child(3)')?.textContent?.trim() || ''; return !!row?.getClientRects().length && /^(\u25b8|\ud83d\udcad)/.test(result) && /[0-9]+m [0-9][0-9]s$/.test(elapsed); })()\"\nagent-browser --session \"$AFT_SESSION\" screenshot \"$AFT_WORK_DIR/coverage-children-activity/activity-exact-id.png\"\npython3 \"$AFT_TESTS_DIR/scripts/coverage-children-activity.py\" activity repeat\n",
             "intent": "Match the exact visible child row and its current step to a saved event in that same running turn"
           },
           "coverage": "unresolved",
@@ -20815,9 +21120,9 @@
               "source": {
                 "line": 1087,
                 "end_line": 1087,
-                "expression": "re.match('^(▸|💭)', captured['result']) and re.fullmatch('\\\\d+m \\\\d{2}s', captured['elapsed'])",
+                "expression": "re.match('^(\u25b8|\ud83d\udcad)', captured['result']) and re.fullmatch('\\\\d+m \\\\d{2}s', captured['elapsed'])",
                 "message": null,
-                "source": "assert re.match(r\"^(▸|💭)\", captured[\"result\"]) and re.fullmatch(r\"\\d+m \\d{2}s\", captured[\"elapsed\"])",
+                "source": "assert re.match(r\"^(\u25b8|\ud83d\udcad)\", captured[\"result\"]) and re.fullmatch(r\"\\d+m \\d{2}s\", captured[\"elapsed\"])",
                 "function": "reactivation_checkpoint_ok",
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
@@ -20826,8 +21131,8 @@
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
-                "required": "re.match('^(▸|💭)', captured['result']) and re.fullmatch('\\\\d+m \\\\d{2}s', captured['elapsed'])",
-                "evidence": "assert re.match(r\"^(▸|💭)\", captured[\"result\"]) and re.fullmatch(r\"\\d+m \\d{2}s\", captured[\"elapsed\"])",
+                "required": "re.match('^(\u25b8|\ud83d\udcad)', captured['result']) and re.fullmatch('\\\\d+m \\\\d{2}s', captured['elapsed'])",
+                "evidence": "assert re.match(r\"^(\u25b8|\ud83d\udcad)\", captured[\"result\"]) and re.fullmatch(r\"\\d+m \\d{2}s\", captured[\"elapsed\"])",
                 "sourceHelper": "tests/aft/scripts/coverage-children-activity.py",
                 "sourceLine": 1087,
                 "sourceFunction": "reactivation_checkpoint_ok",
@@ -22586,7 +22891,7 @@
                   "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/20"
                 ],
                 "sourceReason": "Fresh/reconnect fallback diagnostic may be unobserved; exact source only queries saved steps/asserts none and named screenshot when actual observed gate true",
-                "condition": "Actual API stateactive/nonemptyrunningTurn AND exact child DOM ID/running row/result Working…; only then assert no current-turn saved step_prefix. Otherwise record observedfalse without coverage.",
+                "condition": "Actual API stateactive/nonemptyrunningTurn AND exact child DOM ID/running row/result Working\u2026; only then assert no current-turn saved step_prefix. Otherwise record observedfalse without coverage.",
                 "bounds": {
                   "originalCallerMs": 30000,
                   "individualAgentApiRequestMs": 15000
@@ -25574,7 +25879,7 @@
             "sourceLines": {
               "start": 444,
               "end": 454,
-              "text": "    shot = browser_json(\"\"\"JSON.stringify((() => {\n      const markers=Array.from(document.querySelectorAll('[data-testid=started-marker]'));\n      const links=markers.flatMap(m=>Array.from(m.querySelectorAll('a[href]')));\n      const ids=links.map(a=>decodeURIComponent(a.getAttribute('href')?.split('/').pop()||''));\n      const names=links.map(a=>a.lastChild?.textContent?.trim()||'');\n      const colors=links.map(a=>a.querySelector('[data-agent-color]')?.getAttribute('data-agent-color')||'');\n      const toolCount=markers.reduce((n,m)=>n+Number(/^([0-9]+) tool calls?$/.exec(m.querySelector('button[aria-expanded]')?.textContent?.trim().replace(/›/g,'').trim()||'')?.[1]||0),0);\n      return {markerCount:markers.length,ids,names,colors,toolCount,\n        rawCode:markers.some(m=>/\\\\{\\\\s*[\"'](?:name|brief|agent_id)[\"']\\\\s*:|tools\\\\.loom\\\\.agent_create\\\\s*\\\\(/.test(m.textContent||'')),\n        expanded:markers.map(m=>m.querySelector('button[aria-expanded]')?.getAttribute('aria-expanded')||'')};\n    })())\"\"\")"
+              "text": "    shot = browser_json(\"\"\"JSON.stringify((() => {\n      const markers=Array.from(document.querySelectorAll('[data-testid=started-marker]'));\n      const links=markers.flatMap(m=>Array.from(m.querySelectorAll('a[href]')));\n      const ids=links.map(a=>decodeURIComponent(a.getAttribute('href')?.split('/').pop()||''));\n      const names=links.map(a=>a.lastChild?.textContent?.trim()||'');\n      const colors=links.map(a=>a.querySelector('[data-agent-color]')?.getAttribute('data-agent-color')||'');\n      const toolCount=markers.reduce((n,m)=>n+Number(/^([0-9]+) tool calls?$/.exec(m.querySelector('button[aria-expanded]')?.textContent?.trim().replace(/\u203a/g,'').trim()||'')?.[1]||0),0);\n      return {markerCount:markers.length,ids,names,colors,toolCount,\n        rawCode:markers.some(m=>/\\\\{\\\\s*[\"'](?:name|brief|agent_id)[\"']\\\\s*:|tools\\\\.loom\\\\.agent_create\\\\s*\\\\(/.test(m.textContent||'')),\n        expanded:markers.map(m=>m.querySelector('button[aria-expanded]')?.getAttribute('aria-expanded')||'')};\n    })())\"\"\")"
             },
             "callerOldStepIds": [
               "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/15",
@@ -25584,7 +25889,7 @@
             "destination": [],
             "gap": {
               "kind": "reachable-source-observation-or-selection-outside-frozen-predicate-extraction",
-              "required": "All actual Started markers/links:decoded last href part,lastChild trimmed name,actual color; tool-call count regex after removing ›/trim;rawCode includes quoted name/brief/agent_id JSON OR tools.loom.agent_create(. Preserve all markers/links and measured expansion attrs.",
+              "required": "All actual Started markers/links:decoded last href part,lastChild trimmed name,actual color; tool-call count regex after removing \u203a/trim;rawCode includes quoted name/brief/agent_id JSON OR tools.loom.agent_create(. Preserve all markers/links and measured expansion attrs.",
               "canonicalAttempt": "Canonicalc71 CaptureSchema supports actual DOM text/attributes/rect/computed-style/focused observations and typed actions; exact closed composition/selection/source-data parsing not authored for this group. No provider scenario assertion or missing primitive inferred.",
               "missingObservation": "Actual selected DOM/geometry/styles/actor effects +same source/saved context and exact pure source projection must be bound and compared in YAML; no expected facts or generic eval fallback."
             }
@@ -25723,7 +26028,7 @@
             "sourceLines": {
               "start": 543,
               "end": 556,
-              "text": "    shot = browser_json(\"\"\"JSON.stringify((() => {\n      const id=%s;\n      const row=document.querySelector('[data-testid=agent-tray] li[data-tray-row=\"'+id+'\"]');\n      return {id:row?.dataset.trayRow||'',running:!!row?.querySelector('[data-status=running]'),\n        result:row?.querySelector('[data-status=running] > span:last-child')?.textContent?.trim()||''};\n    })())\"\"\" % json.dumps(child[\"agent_id\"]))\n    observed = (live[\"state\"] == \"active\" and bool(live[\"running_turn_id\"]) and\n                shot[\"id\"] == child[\"agent_id\"] and shot[\"running\"] and shot[\"result\"] == \"Working…\")\n    if observed:\n        current_steps = [e for e in events(child[\"agent_id\"]) if e.get(\"turn_id\") == live[\"running_turn_id\"] and step_prefix(e)]\n        assert not current_steps, \"Working fallback shown despite a saved current-turn step\"\n        browser(\"screenshot\", str(OUT / f\"working-{stage}-{child_label}.png\"))\n    save(f\"working-{stage}-{child_label}\", {\"observed\": observed, \"api_state\": live[\"state\"],\n                                               \"turn_id\": live[\"running_turn_id\"], \"ui\": shot})"
+              "text": "    shot = browser_json(\"\"\"JSON.stringify((() => {\n      const id=%s;\n      const row=document.querySelector('[data-testid=agent-tray] li[data-tray-row=\"'+id+'\"]');\n      return {id:row?.dataset.trayRow||'',running:!!row?.querySelector('[data-status=running]'),\n        result:row?.querySelector('[data-status=running] > span:last-child')?.textContent?.trim()||''};\n    })())\"\"\" % json.dumps(child[\"agent_id\"]))\n    observed = (live[\"state\"] == \"active\" and bool(live[\"running_turn_id\"]) and\n                shot[\"id\"] == child[\"agent_id\"] and shot[\"running\"] and shot[\"result\"] == \"Working\u2026\")\n    if observed:\n        current_steps = [e for e in events(child[\"agent_id\"]) if e.get(\"turn_id\") == live[\"running_turn_id\"] and step_prefix(e)]\n        assert not current_steps, \"Working fallback shown despite a saved current-turn step\"\n        browser(\"screenshot\", str(OUT / f\"working-{stage}-{child_label}.png\"))\n    save(f\"working-{stage}-{child_label}\", {\"observed\": observed, \"api_state\": live[\"state\"],\n                                               \"turn_id\": live[\"running_turn_id\"], \"ui\": shot})"
             },
             "callerOldStepIds": [
               "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/16",
@@ -25733,7 +26038,7 @@
             "destination": [],
             "gap": {
               "kind": "reachable-source-observation-or-selection-outside-frozen-predicate-extraction",
-              "required": "APIactive/nonempty runningturn,exact DOM childid/running/result Working… define observed;whenfalse no event-step assertion and no working screenshot,only honest diagnostic;whentrue fresh same-turn saved step_prefix set mustempty,working-fresh-repeat.png orworking-reconnect-repeat.png.",
+              "required": "APIactive/nonempty runningturn,exact DOM childid/running/result Working\u2026 define observed;whenfalse no event-step assertion and no working screenshot,only honest diagnostic;whentrue fresh same-turn saved step_prefix set mustempty,working-fresh-repeat.png orworking-reconnect-repeat.png.",
               "canonicalAttempt": "Canonicalc71 CaptureSchema supports actual DOM text/attributes/rect/computed-style/focused observations and typed actions; exact closed composition/selection/source-data parsing not authored for this group. No provider scenario assertion or missing primitive inferred.",
               "missingObservation": "Actual selected DOM/geometry/styles/actor effects +same source/saved context and exact pure source projection must be bound and compared in YAML; no expected facts or generic eval fallback."
             }
@@ -25745,7 +26050,7 @@
             "sourceLines": {
               "start": 302,
               "end": 348,
-              "text": "def js_truncate(value, limit):\n    \"\"\"Match the tray's UTF-16 slice and ellipsis limit.\"\"\"\n    units = value.encode(\"utf-16-le\", \"surrogatepass\")\n    return value if len(units) // 2 <= limit else \\\n        units[:(limit - 1) * 2].decode(\"utf-16-le\", \"surrogatepass\") + \"…\"\n\n\ndef reasoning_first_line(text):\n    \"\"\"Mirror AgentChat timelineRows.firstLine for the saved reasoning title.\"\"\"\n    line = re.sub(r\"^#{1,6}\\s+\", \"\", text.strip().split(\"\\n\", 1)[0])\n    while True:\n        plain = re.sub(r\"(\\*\\*|__|\\*|_|`)(.+?)\\1\", r\"\\2\", line)\n        if plain == line:\n            break\n        line = plain\n    return js_truncate(line.strip(), 120)\n\n\ndef step_prefix(event):\n    payload = event[\"payload\"]\n    if event[\"kind\"] != \"item.completed\":\n        return None\n    if payload.get(\"itemKind\") == \"reasoning\":\n        line = reasoning_first_line(payload.get(\"text\") or \"\")\n        if not line:\n            return None\n        return js_truncate(f\"💭 Thinking · {line}\", 60)\n    if payload.get(\"itemKind\") != \"tool\":\n        return None\n    name = (payload.get(\"tool\") or {}).get(\"name\", \"\").strip()\n    short = name.split(\"/\")[-1]\n    if re.search(r\"(?:^|[^a-z])execute$\", name, re.I):\n        action = \"Ran code\"\n    elif re.fullmatch(r\"read|view|cat|read_?file|notebook_?read|image_?view\", short, re.I):\n        action = \"Read file\"\n    elif re.fullmatch(r\"edit|write|multi_?edit|patch|apply_?patch|str_?replace\\w*|notebook_?edit|create_?file\", short, re.I):\n        action = \"Changed file\"\n    elif re.fullmatch(r\"bash|shell|command|exec(_?command)?|terminal|run\\w*\", short, re.I):\n        action = \"Ran command\"\n    elif re.fullmatch(r\"grep|glob|find|ls|list|codesearch|search_?code|rg\", short, re.I):\n        action = \"Searched code\"\n    elif re.fullmatch(r\"web_?search|web_?fetch|fetch|browse\", short, re.I):\n        action = \"Searched the web\"\n    else:\n        action = name[:1].upper() + name[1:] if name else \"Tool call\"\n    label = f\"▸ {action}\"\n    return f\"{label[:59]}…\" if len(label) > 60 else label"
+              "text": "def js_truncate(value, limit):\n    \"\"\"Match the tray's UTF-16 slice and ellipsis limit.\"\"\"\n    units = value.encode(\"utf-16-le\", \"surrogatepass\")\n    return value if len(units) // 2 <= limit else \\\n        units[:(limit - 1) * 2].decode(\"utf-16-le\", \"surrogatepass\") + \"\u2026\"\n\n\ndef reasoning_first_line(text):\n    \"\"\"Mirror AgentChat timelineRows.firstLine for the saved reasoning title.\"\"\"\n    line = re.sub(r\"^#{1,6}\\s+\", \"\", text.strip().split(\"\\n\", 1)[0])\n    while True:\n        plain = re.sub(r\"(\\*\\*|__|\\*|_|`)(.+?)\\1\", r\"\\2\", line)\n        if plain == line:\n            break\n        line = plain\n    return js_truncate(line.strip(), 120)\n\n\ndef step_prefix(event):\n    payload = event[\"payload\"]\n    if event[\"kind\"] != \"item.completed\":\n        return None\n    if payload.get(\"itemKind\") == \"reasoning\":\n        line = reasoning_first_line(payload.get(\"text\") or \"\")\n        if not line:\n            return None\n        return js_truncate(f\"\ud83d\udcad Thinking \u00b7 {line}\", 60)\n    if payload.get(\"itemKind\") != \"tool\":\n        return None\n    name = (payload.get(\"tool\") or {}).get(\"name\", \"\").strip()\n    short = name.split(\"/\")[-1]\n    if re.search(r\"(?:^|[^a-z])execute$\", name, re.I):\n        action = \"Ran code\"\n    elif re.fullmatch(r\"read|view|cat|read_?file|notebook_?read|image_?view\", short, re.I):\n        action = \"Read file\"\n    elif re.fullmatch(r\"edit|write|multi_?edit|patch|apply_?patch|str_?replace\\w*|notebook_?edit|create_?file\", short, re.I):\n        action = \"Changed file\"\n    elif re.fullmatch(r\"bash|shell|command|exec(_?command)?|terminal|run\\w*\", short, re.I):\n        action = \"Ran command\"\n    elif re.fullmatch(r\"grep|glob|find|ls|list|codesearch|search_?code|rg\", short, re.I):\n        action = \"Searched code\"\n    elif re.fullmatch(r\"web_?search|web_?fetch|fetch|browse\", short, re.I):\n        action = \"Searched the web\"\n    else:\n        action = name[:1].upper() + name[1:] if name else \"Tool call\"\n    label = f\"\u25b8 {action}\"\n    return f\"{label[:59]}\u2026\" if len(label) > 60 else label"
             },
             "callerOldStepIds": [
               "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/16",
@@ -25790,7 +26095,7 @@
             "sourceLines": {
               "start": 361,
               "end": 371,
-              "text": "def visible_step(child_id, prefix):\n    script = \"\"\"(() => {\n      const id = %s, prefix = %s;\n      const row = Array.from(document.querySelectorAll('[data-testid=agent-tray] [data-tray-row]'))\n        .find(x => x.dataset.trayRow === id);\n      const line = row?.querySelector('[data-status=running] > span:last-child')?.textContent?.trim() || '';\n      return !!row?.getClientRects().length && line.startsWith(prefix) &&\n        (line.length === prefix.length || line.slice(prefix.length).startsWith(' · '));\n    })()\"\"\" % (json.dumps(child_id), json.dumps(prefix))\n    output = subprocess.check_output([\"agent-browser\", \"--session\", os.environ[\"AFT_SESSION\"], \"eval\", script], text=True)\n    return bool(re.search(r\"\\btrue\\s*$\", output))"
+              "text": "def visible_step(child_id, prefix):\n    script = \"\"\"(() => {\n      const id = %s, prefix = %s;\n      const row = Array.from(document.querySelectorAll('[data-testid=agent-tray] [data-tray-row]'))\n        .find(x => x.dataset.trayRow === id);\n      const line = row?.querySelector('[data-status=running] > span:last-child')?.textContent?.trim() || '';\n      return !!row?.getClientRects().length && line.startsWith(prefix) &&\n        (line.length === prefix.length || line.slice(prefix.length).startsWith(' \u00b7 '));\n    })()\"\"\" % (json.dumps(child_id), json.dumps(prefix))\n    output = subprocess.check_output([\"agent-browser\", \"--session\", os.environ[\"AFT_SESSION\"], \"eval\", script], text=True)\n    return bool(re.search(r\"\\btrue\\s*$\", output))"
             },
             "callerOldStepIds": [
               "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/26"
@@ -26288,7 +26593,7 @@
             "sourceLines": {
               "start": 921,
               "end": 964,
-              "text": "    geometry = browser_json(\"\"\"JSON.stringify((() => {\n      const id = %s;\n      const tray = document.querySelector('[data-testid=agent-tray]');\n      const header = tray?.querySelector('button[aria-expanded]');\n      const list = tray?.querySelector('ul');\n      const rows = Array.from(list?.querySelectorAll('li[data-tray-row]') || []);\n      const composer = document.querySelector('section[aria-label=\"Agent chat\"] form[data-chat-composer-form]');\n      const nav = document.querySelector('nav[aria-label=\"Primary\"]');\n      if (!tray || !header || !list || !composer || !nav) return {missing:true};\n      const box = el => { const r=el.getBoundingClientRect(); return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}; };\n      const clip = box(list), trayBox = box(tray), composerBox = box(composer), navBox = box(nav);\n      const rowBoxes = rows.map(row => ({id:row.dataset.trayRow, ...box(row)}));\n      const child = rows.find(row => row.dataset.trayRow === id);\n      const childRunning = !!child?.querySelector('[data-status=running]');\n      const childBox = child && box(child);\n      const childWhole = !!childBox && childBox.left >= clip.left-1 && childBox.right <= clip.right+1 &&\n        childBox.top >= clip.top-1 && childBox.bottom <= clip.bottom+1;\n      const hit = el => {\n        if (!el) return {x:null,y:null,hit:false,target:null};\n        const r=el.getBoundingClientRect(), x=(r.left+r.right)/2, y=(r.top+r.bottom)/2;\n        const target=document.elementFromPoint(x,y);\n        return {x,y,hit:!!target && (target===el || el.contains(target)),target:target?.tagName || null};\n      };\n      const headerHit = hit(header), childLinkHit = hit(child?.querySelector('a[href]'));\n      const visible = rowBoxes.filter(row => row.bottom > clip.top && row.top < clip.bottom);\n      const partial = visible.filter(row => row.top < clip.top-1 || row.bottom > clip.bottom+1);\n      const hidden = rowBoxes.filter(row => row.bottom <= clip.top || row.top >= clip.bottom);\n      const moreText = Array.from(tray.querySelectorAll('div[aria-hidden=true]'))\n        .find(x => /↓ [0-9]+ more/.test(x.textContent || ''))?.textContent || '';\n      const moreCount = Number(/([0-9]+) more/.exec(moreText)?.[1] || 0);\n      return {width:innerWidth,height:innerHeight,theme:document.documentElement.dataset.theme,\n        navPosition:getComputedStyle(nav).position,trayOpen:tray.dataset.open==='true',\n        childId:id,headerExpanded:header.getAttribute('aria-expanded')==='true',\n        headerColors:Array.from(header.querySelectorAll('[data-agent-color]')).map(x=>x.dataset.agentColor),\n        rowIds:rowBoxes.map(row=>row.id),rowCount:rows.length,visibleRowCount:visible.length,\n        childWhole,childRunning,headerHit,childLinkHit,\n        partialRows:partial.length,hiddenRows:hidden.length,moreCount,\n        horizontalOverflow:Math.max(document.documentElement.scrollWidth-innerWidth,\n          tray.scrollWidth-tray.clientWidth,list.scrollWidth-list.clientWidth,\n          ...rowBoxes.map(row=>Math.max(clip.left-row.left,row.right-clip.right))),\n        maxControlBottom:Math.max(header.getBoundingClientRect().bottom,...visible.map(row=>row.bottom)),\n        composerTop:composerBox.top,composerBottom:composerBox.bottom,navTop:navBox.top,\n        tray:trayBox,clip,composer:composerBox,nav:navBox,rows:rowBoxes};\n    })())\"\"\" % json.dumps(child_id))"
+              "text": "    geometry = browser_json(\"\"\"JSON.stringify((() => {\n      const id = %s;\n      const tray = document.querySelector('[data-testid=agent-tray]');\n      const header = tray?.querySelector('button[aria-expanded]');\n      const list = tray?.querySelector('ul');\n      const rows = Array.from(list?.querySelectorAll('li[data-tray-row]') || []);\n      const composer = document.querySelector('section[aria-label=\"Agent chat\"] form[data-chat-composer-form]');\n      const nav = document.querySelector('nav[aria-label=\"Primary\"]');\n      if (!tray || !header || !list || !composer || !nav) return {missing:true};\n      const box = el => { const r=el.getBoundingClientRect(); return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}; };\n      const clip = box(list), trayBox = box(tray), composerBox = box(composer), navBox = box(nav);\n      const rowBoxes = rows.map(row => ({id:row.dataset.trayRow, ...box(row)}));\n      const child = rows.find(row => row.dataset.trayRow === id);\n      const childRunning = !!child?.querySelector('[data-status=running]');\n      const childBox = child && box(child);\n      const childWhole = !!childBox && childBox.left >= clip.left-1 && childBox.right <= clip.right+1 &&\n        childBox.top >= clip.top-1 && childBox.bottom <= clip.bottom+1;\n      const hit = el => {\n        if (!el) return {x:null,y:null,hit:false,target:null};\n        const r=el.getBoundingClientRect(), x=(r.left+r.right)/2, y=(r.top+r.bottom)/2;\n        const target=document.elementFromPoint(x,y);\n        return {x,y,hit:!!target && (target===el || el.contains(target)),target:target?.tagName || null};\n      };\n      const headerHit = hit(header), childLinkHit = hit(child?.querySelector('a[href]'));\n      const visible = rowBoxes.filter(row => row.bottom > clip.top && row.top < clip.bottom);\n      const partial = visible.filter(row => row.top < clip.top-1 || row.bottom > clip.bottom+1);\n      const hidden = rowBoxes.filter(row => row.bottom <= clip.top || row.top >= clip.bottom);\n      const moreText = Array.from(tray.querySelectorAll('div[aria-hidden=true]'))\n        .find(x => /\u2193 [0-9]+ more/.test(x.textContent || ''))?.textContent || '';\n      const moreCount = Number(/([0-9]+) more/.exec(moreText)?.[1] || 0);\n      return {width:innerWidth,height:innerHeight,theme:document.documentElement.dataset.theme,\n        navPosition:getComputedStyle(nav).position,trayOpen:tray.dataset.open==='true',\n        childId:id,headerExpanded:header.getAttribute('aria-expanded')==='true',\n        headerColors:Array.from(header.querySelectorAll('[data-agent-color]')).map(x=>x.dataset.agentColor),\n        rowIds:rowBoxes.map(row=>row.id),rowCount:rows.length,visibleRowCount:visible.length,\n        childWhole,childRunning,headerHit,childLinkHit,\n        partialRows:partial.length,hiddenRows:hidden.length,moreCount,\n        horizontalOverflow:Math.max(document.documentElement.scrollWidth-innerWidth,\n          tray.scrollWidth-tray.clientWidth,list.scrollWidth-list.clientWidth,\n          ...rowBoxes.map(row=>Math.max(clip.left-row.left,row.right-clip.right))),\n        maxControlBottom:Math.max(header.getBoundingClientRect().bottom,...visible.map(row=>row.bottom)),\n        composerTop:composerBox.top,composerBottom:composerBox.bottom,navTop:navBox.top,\n        tray:trayBox,clip,composer:composerBox,nav:navBox,rows:rowBoxes};\n    })())\"\"\" % json.dumps(child_id))"
             },
             "callerOldStepIds": [
               "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/27"
@@ -26769,7 +27074,7 @@
             "sourceLines": {
               "start": 1018,
               "end": 1041,
-              "text": "        const result=running?.querySelector(':scope > span:last-child')?.textContent?.trim()||'';\n        const elapsed=running?.querySelector(':scope > span:nth-child(3)')?.textContent?.trim()||'';\n        const group=Array.from(document.querySelectorAll('nav[aria-label=Agents] [role=group]'))\n          .find(x=>x.getAttribute('aria-label')===parentName+' children');\n        const links=Array.from(document.querySelectorAll('nav[aria-label=Agents] a[href]'))\n          .filter(x=>x.getAttribute('href')===childRoute);\n        const link=links[0];\n        const avatar=link?.querySelector('[data-agent-color][data-dot]');\n        const nested=!!group && !!link && group.contains(link);\n        if(rows.filter(r=>r.dataset.trayRow===id).length!==1 || !row?.getClientRects().length ||\n           !row.textContent?.includes(name) || chip!=='attempt 2' || !/^(▸|💭)/.test(result) ||\n           !/^\\\\d+m \\\\d{2}s$/.test(elapsed) || links.length!==1 || !nested ||\n           !link.getClientRects().length || link.querySelector('[data-testid=agent-list-name]')?.textContent?.trim()!==name ||\n           !link.querySelector('[role=img][aria-label=opencode]') ||\n           !avatar?.dataset.agentColor || avatar.dataset.dot!=='working') return;\n        state.capture={path:location.pathname,rowId:row.dataset.trayRow,rowVisible:true,running:true,\n          attemptChip:chip,result,elapsed,childName:name,linkId:id,nested,\n          exactLinkCount:links.length,logo:true,dot:'working',color:avatar.dataset.agentColor,capturedAt:Date.now()};\n        state.observer.disconnect();\n      };\n      state.observer=new MutationObserver(sample);\n      window.__aftChildReactivation=state;\n      state.observer.observe(document.body,{subtree:true,childList:true,attributes:true,characterData:true});\n      sample();"
+              "text": "        const result=running?.querySelector(':scope > span:last-child')?.textContent?.trim()||'';\n        const elapsed=running?.querySelector(':scope > span:nth-child(3)')?.textContent?.trim()||'';\n        const group=Array.from(document.querySelectorAll('nav[aria-label=Agents] [role=group]'))\n          .find(x=>x.getAttribute('aria-label')===parentName+' children');\n        const links=Array.from(document.querySelectorAll('nav[aria-label=Agents] a[href]'))\n          .filter(x=>x.getAttribute('href')===childRoute);\n        const link=links[0];\n        const avatar=link?.querySelector('[data-agent-color][data-dot]');\n        const nested=!!group && !!link && group.contains(link);\n        if(rows.filter(r=>r.dataset.trayRow===id).length!==1 || !row?.getClientRects().length ||\n           !row.textContent?.includes(name) || chip!=='attempt 2' || !/^(\u25b8|\ud83d\udcad)/.test(result) ||\n           !/^\\\\d+m \\\\d{2}s$/.test(elapsed) || links.length!==1 || !nested ||\n           !link.getClientRects().length || link.querySelector('[data-testid=agent-list-name]')?.textContent?.trim()!==name ||\n           !link.querySelector('[role=img][aria-label=opencode]') ||\n           !avatar?.dataset.agentColor || avatar.dataset.dot!=='working') return;\n        state.capture={path:location.pathname,rowId:row.dataset.trayRow,rowVisible:true,running:true,\n          attemptChip:chip,result,elapsed,childName:name,linkId:id,nested,\n          exactLinkCount:links.length,logo:true,dot:'working',color:avatar.dataset.agentColor,capturedAt:Date.now()};\n        state.observer.disconnect();\n      };\n      state.observer=new MutationObserver(sample);\n      window.__aftChildReactivation=state;\n      state.observer.observe(document.body,{subtree:true,childList:true,attributes:true,characterData:true});\n      sample();"
             },
             "callerOldStepIds": [
               "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/36",
@@ -26833,7 +27138,7 @@
             "sourceLines": {
               "start": 1092,
               "end": 1100,
-              "text": "def reactivation_event(history, child_id, after_seq, result):\n    started = [e for e in history if e[\"agent_id\"] == child_id and e[\"kind\"] == \"turn.started\" and e[\"seq\"] > after_seq]\n    assert len(started) == 1 and started[0].get(\"turn_id\"), \"exact second-attempt turn did not start after the pre-Send baseline\"\n    turn = started[0][\"turn_id\"]\n    steps = [e for e in history if e[\"agent_id\"] == child_id and e.get(\"turn_id\") == turn and\n             e[\"seq\"] > started[0][\"seq\"] and step_prefix(e)]\n    matches = [e for e in steps if result == step_prefix(e) or result.startswith(step_prefix(e) + \" · \")]\n    assert matches, \"captured attempt-two step lacks an exact saved current-turn tool or reasoning event\"\n    return matches[0]"
+              "text": "def reactivation_event(history, child_id, after_seq, result):\n    started = [e for e in history if e[\"agent_id\"] == child_id and e[\"kind\"] == \"turn.started\" and e[\"seq\"] > after_seq]\n    assert len(started) == 1 and started[0].get(\"turn_id\"), \"exact second-attempt turn did not start after the pre-Send baseline\"\n    turn = started[0][\"turn_id\"]\n    steps = [e for e in history if e[\"agent_id\"] == child_id and e.get(\"turn_id\") == turn and\n             e[\"seq\"] > started[0][\"seq\"] and step_prefix(e)]\n    matches = [e for e in steps if result == step_prefix(e) or result.startswith(step_prefix(e) + \" \u00b7 \")]\n    assert matches, \"captured attempt-two step lacks an exact saved current-turn tool or reasoning event\"\n    return matches[0]"
             },
             "callerOldStepIds": [
               "campaign:tests/aft/live-agent-coverage-suites/children-activity.test.yaml#tests/0/steps/40"
@@ -35839,9 +36144,9 @@
               "source": {
                 "line": 1761,
                 "end_line": 1764,
-                "expression": "'first bold item' in rich_result['terminal'] and '<img src=x onerror=\"window.pwned=1\">' in rich_result['terminal'] and ('😀.' in rich_result['terminal'])",
+                "expression": "'first bold item' in rich_result['terminal'] and '<img src=x onerror=\"window.pwned=1\">' in rich_result['terminal'] and ('\ud83d\ude00.' in rich_result['terminal'])",
                 "message": "'the real GFM/list/raw-HTML/emoji component projection changed'",
-                "source": "assert \"first bold item\" in rich_result[\"terminal\"] and \\\n        '<img src=x onerror=\"window.pwned=1\">' in rich_result[\"terminal\"] and \\\n        \"😀.\" in rich_result[\"terminal\"], \\\n        \"the real GFM/list/raw-HTML/emoji component projection changed\"",
+                "source": "assert \"first bold item\" in rich_result[\"terminal\"] and \\\n        '<img src=x onerror=\"window.pwned=1\">' in rich_result[\"terminal\"] and \\\n        \"\ud83d\ude00.\" in rich_result[\"terminal\"], \\\n        \"the real GFM/list/raw-HTML/emoji component projection changed\"",
                 "function": "self_test_markdown_projection",
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
@@ -35850,7 +36155,7 @@
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
-                "required": "'first bold item' in rich_result['terminal'] and '<img src=x onerror=\"window.pwned=1\">' in rich_result['terminal'] and ('😀.' in rich_result['terminal'])",
+                "required": "'first bold item' in rich_result['terminal'] and '<img src=x onerror=\"window.pwned=1\">' in rich_result['terminal'] and ('\ud83d\ude00.' in rich_result['terminal'])",
                 "evidence": "'the real GFM/list/raw-HTML/emoji component projection changed'",
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 1761,
@@ -36879,9 +37184,9 @@
               "source": {
                 "line": 2581,
                 "end_line": 2581,
-                "expression": "js_utf16_length('A😀') == 3 and assert_motion_capture(emoji)[2] == -40",
+                "expression": "js_utf16_length('A\ud83d\ude00') == 3 and assert_motion_capture(emoji)[2] == -40",
                 "message": null,
-                "source": "assert js_utf16_length(\"A😀\") == 3 and assert_motion_capture(emoji)[2] == -40",
+                "source": "assert js_utf16_length(\"A\ud83d\ude00\") == 3 and assert_motion_capture(emoji)[2] == -40",
                 "function": "self_test_motion_assert",
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
@@ -36890,8 +37195,8 @@
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
-                "required": "js_utf16_length('A😀') == 3 and assert_motion_capture(emoji)[2] == -40",
-                "evidence": "assert js_utf16_length(\"A😀\") == 3 and assert_motion_capture(emoji)[2] == -40",
+                "required": "js_utf16_length('A\ud83d\ude00') == 3 and assert_motion_capture(emoji)[2] == -40",
+                "evidence": "assert js_utf16_length(\"A\ud83d\ude00\") == 3 and assert_motion_capture(emoji)[2] == -40",
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 2581,
                 "sourceFunction": "self_test_motion_assert",
@@ -38456,9 +38761,9 @@
               "source": {
                 "line": 3161,
                 "end_line": 3161,
-                "expression": "reasoning_preview('x' * 121) == 'x' * 119 + '…'",
+                "expression": "reasoning_preview('x' * 121) == 'x' * 119 + '\u2026'",
                 "message": null,
-                "source": "assert reasoning_preview(\"x\" * 121) == \"x\" * 119 + \"…\"",
+                "source": "assert reasoning_preview(\"x\" * 121) == \"x\" * 119 + \"\u2026\"",
                 "function": "self_test_reasoning",
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
@@ -38467,8 +38772,8 @@
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
-                "required": "reasoning_preview('x' * 121) == 'x' * 119 + '…'",
-                "evidence": "assert reasoning_preview(\"x\" * 121) == \"x\" * 119 + \"…\"",
+                "required": "reasoning_preview('x' * 121) == 'x' * 119 + '\u2026'",
+                "evidence": "assert reasoning_preview(\"x\" * 121) == \"x\" * 119 + \"\u2026\"",
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 3161,
                 "sourceFunction": "self_test_reasoning",
@@ -39255,9 +39560,9 @@
               "source": {
                 "line": 4061,
                 "end_line": 4062,
-                "expression": "isinstance(observed, str) and 'অপৰাহ্ন ১২.৫৯' in observed",
+                "expression": "isinstance(observed, str) and '\u0985\u09aa\u09f0\u09be\u09b9\u09cd\u09a8 \u09e7\u09e8.\u09eb\u09ef' in observed",
                 "message": "'BLOCKED: documented long time did not render on the owned Chat row'",
-                "source": "assert isinstance(observed, str) and \"অপৰাহ্ন ১২.৫৯\" in observed, \\\n        \"BLOCKED: documented long time did not render on the owned Chat row\"",
+                "source": "assert isinstance(observed, str) and \"\u0985\u09aa\u09f0\u09be\u09b9\u09cd\u09a8 \u09e7\u09e8.\u09eb\u09ef\" in observed, \\\n        \"BLOCKED: documented long time did not render on the owned Chat row\"",
                 "function": "require_locale_time",
                 "destination": "YAML expectation unless fixture admission invariant or deterministic oracle test; never hidden scenario pass/fail",
                 "owner": "2946fb22-0cc6-4d87-a997-14a5dc69ebda"
@@ -39266,7 +39571,7 @@
               "coverage": "unresolved",
               "gap": {
                 "kind": "authoring-not-yet-translated",
-                "required": "isinstance(observed, str) and 'অপৰাহ্ন ১২.৫৯' in observed",
+                "required": "isinstance(observed, str) and '\u0985\u09aa\u09f0\u09be\u09b9\u09cd\u09a8 \u09e7\u09e8.\u09eb\u09ef' in observed",
                 "evidence": "'BLOCKED: documented long time did not render on the owned Chat row'",
                 "sourceHelper": "tests/aft/scripts/coverage-chat-visual.py",
                 "sourceLine": 4061,
@@ -51200,7 +51505,7 @@
             "sourceLines": {
               "start": 2932,
               "end": 2954,
-              "text": "def reasoning_preview(text):\n    # WorkRows uses timelineRows.firstLine: strip, first line, plain-text marks, 120-character cap.\n    line = re.sub(r\"^#{1,6}\\s+\", \"\", text.strip().split(\"\\n\")[0])\n    while True:\n        plain = re.sub(r\"(\\*\\*|__|\\*|_|`)(.+?)\\1\", r\"\\2\", line)\n        if plain == line:\n            break\n        line = plain\n    line = line.strip()\n    return line if len(line) <= 120 else line[:119] + \"…\"\n\n\nREASONING_DOM = r\"\"\"(() => {\n  const rect=x=>{if(!x)return null;const r=x.getBoundingClientRect();\n    return {x:r.x,y:r.y,width:r.width,height:r.height};};\n  return [...document.querySelectorAll('[data-testid=chat-transcript] [data-testid=reasoning]')]\n  .map(x => { const toggle=x.querySelector('[role=button]'), row=x.firstElementChild;\n    return {heading:x.querySelector('[class*=heading]')?.textContent||'',\n      preview:x.querySelector('[class*=preview]')?.textContent||'',\n      expanded:toggle?.getAttribute('aria-expanded')??null,\n      status:x.dataset.status, body:x.querySelector('pre')?.textContent??null,\n      geometry:{row:rect(row),parent:rect(x),chevron:rect(row?.querySelector('[class*=chevron]')),\n        tabIndex:toggle?.tabIndex??null}}; });})()\"\"\""
+              "text": "def reasoning_preview(text):\n    # WorkRows uses timelineRows.firstLine: strip, first line, plain-text marks, 120-character cap.\n    line = re.sub(r\"^#{1,6}\\s+\", \"\", text.strip().split(\"\\n\")[0])\n    while True:\n        plain = re.sub(r\"(\\*\\*|__|\\*|_|`)(.+?)\\1\", r\"\\2\", line)\n        if plain == line:\n            break\n        line = plain\n    line = line.strip()\n    return line if len(line) <= 120 else line[:119] + \"\u2026\"\n\n\nREASONING_DOM = r\"\"\"(() => {\n  const rect=x=>{if(!x)return null;const r=x.getBoundingClientRect();\n    return {x:r.x,y:r.y,width:r.width,height:r.height};};\n  return [...document.querySelectorAll('[data-testid=chat-transcript] [data-testid=reasoning]')]\n  .map(x => { const toggle=x.querySelector('[role=button]'), row=x.firstElementChild;\n    return {heading:x.querySelector('[class*=heading]')?.textContent||'',\n      preview:x.querySelector('[class*=preview]')?.textContent||'',\n      expanded:toggle?.getAttribute('aria-expanded')??null,\n      status:x.dataset.status, body:x.querySelector('pre')?.textContent??null,\n      geometry:{row:rect(row),parent:rect(x),chevron:rect(row?.querySelector('[class*=chevron]')),\n        tabIndex:toggle?.tabIndex??null}}; });})()\"\"\""
             },
             "callerOldStepIds": [
               "campaign:tests/aft/live-agent-coverage-suites/chat-visual.test.yaml#tests/0/steps/22",
