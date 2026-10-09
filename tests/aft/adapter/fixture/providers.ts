@@ -4,10 +4,8 @@ import { z } from 'zod';
 import type { CapabilityContext, CapabilityProvider, CapabilityRegistry, ImplementationPin } from '@tysonthomas9/aft/capabilities';
 import { ArtifactRefSchema, type EvidenceClass } from '@tysonthomas9/aft/types';
 import { defineOperation } from '../operation.js';
-import { FixtureWorkersId,FixtureWorkersInput,FixtureWorkersOutput,FixtureWorkersEffects,authorizeFixtureWorkers } from '../fixture-workers.js';
-import { putFixture, getFixture, getFixtureAuthority, releaseFixture, fixturesKey, type OwnedFixture, type OwnedAgent } from '../ownership.js';
+import { putFixture, getFixture, releaseFixture, fixturesKey, type OwnedFixture, type OwnedAgent } from '../ownership.js';
 import { createNativeHostAccess } from '../native-host.js';
-import { getFixtureOperationAuthority } from '../authority.js';
 import { createSyntheticProbe } from '../synthetic-probe.js';
 import { ContainerRootIdentity, containerFilesystemObserver, containerGitObserver, containerGitLifecycleObserver, type ContainerObservationRead } from '../container-observations.js';
 import { AgentRow, AgentHistory, NativeRef, ServiceRegistration, HttpResponse, Id, Digest, ObservationError, requireFact,
@@ -54,6 +52,7 @@ export interface FixtureProviderOptions {
     evidenceStore: EvidenceStore;
     rendererTarget?: OwnedFixture['rendererTarget'];
     operationAuthority?: OwnedFixture['operationAuthority'];
+    observeWorkers?: OwnedFixture['observeWorkers'];
     ownedWorkspaces?: OwnedFixture['ownedWorkspaces'];
     readWorkspaceLegacyAgent?: OwnedFixture['readWorkspaceLegacyAgent'];
     fixtureRunId?:string;
@@ -137,20 +136,6 @@ export function createFixtureProviders(options: FixtureProviderOptions): Capabil
         requireFact(state, 'ownership-mismatch', 'Fixture lifecycle is missing');
         const value = await checked(() => state.manager.observe(input.leaseId, fixture.runId));
         return { value, evidenceClass: fixture.evidenceClass, identity: { fixtureLeaseId: fixture.leaseId, workspaceId: fixture.workspaceId } };
-      },
-    }),
-    defineOperation({ ...common, id: FixtureWorkersId, inputSchema: FixtureWorkersInput, outputSchema: FixtureWorkersOutput,
-      effects: [...FixtureWorkersEffects], retry: 'never', cleanup: 'none',
-      async run(input,context){
-        const {fixture,grant}=await authorizeFixtureWorkers(context,input);
-        const driver=privateFixtureDriver(fixture);
-        requireFact(driver instanceof HostFixtureDriver,'unsupported-capability','Registered worker observation requires an owned Host driver');
-        const value=await checked(()=>driver.observeWorkers(context.signal));
-        requireFact(getFixtureAuthority(context,input.leaseId)===fixture&&
-          getFixtureOperationAuthority(fixture,FixtureWorkersId,FixtureWorkersEffects)===grant,
-          'ownership-mismatch','Worker fixture authority changed during observation');
-        requireFact(value.fixtureLeaseId===fixture.leaseId,'identity-mismatch','Worker observation has a different fixture');
-        return {value,evidenceClass:grant.evidenceClass,identity:{fixtureLeaseId:fixture.leaseId,workspaceId:fixture.workspaceId}};
       },
     }),
     defineOperation({ ...common, id: 'loom.fixture.release', inputSchema: LeaseInput, outputSchema: ReleaseOutput,
@@ -260,7 +245,7 @@ export function productionFixtureOptions(implementation: ImplementationPin, impl
       const route=driver.executionRouting,operationAuthority=driver.createOperationAuthority(owner);
       const rendererTarget=await bindRenderer(isCompose?compose.loom:host.loom,acquired.lease.id,await driver.rendererRuntimeTarget(context.signal),path.join(runtimeRoot,'evidence'),roots);
       const evidenceStore=await createEvidenceStore(path.join(runtimeRoot,'evidence'));
-      const workspaceBinding=isCompose?{}:{ownedWorkspaces:await driver.ownedWorkspaceRoster(owner,evidenceStore,context.signal),
+      const workspaceBinding=isCompose?{}:{observeWorkers:(signal:AbortSignal)=>checked(()=>driver.observeWorkers(signal)),ownedWorkspaces:await driver.ownedWorkspaceRoster(owner,evidenceStore,context.signal),
         readWorkspaceLegacyAgent:(workspaceId:string,name:string,signal:AbortSignal)=>driver.readWorkspaceLegacyAgent(owner,workspaceId,name,signal)};
       return { ...await driver.runtimeIdentity(context.signal),evidenceClass: route.evidenceClass, roots, secrets: isCompose ? driver.fixtureSecrets : [], rendererTarget, operationAuthority,
         evidenceStore,...workspaceBinding,
