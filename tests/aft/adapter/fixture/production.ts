@@ -125,6 +125,7 @@ export class ComposeFixtureDriver implements FixtureDriver {
   private readonly stamps = new Map<string, { dev: number; ino: number }>();
   private readonly locks = new Map<string, string>();
   private objects: ObjectRecord[] = [];
+  private retryRestartAttestation?: (signal:AbortSignal)=>Promise<void>;
   private operationActive=false;
   private readonly restartAttempts=new Set<string>();
   private async withContainerOperation<T>(operation:()=>Promise<T>):Promise<T>{
@@ -497,7 +498,7 @@ export class ComposeFixtureDriver implements FixtureDriver {
   async restartOwnedServe(expectedContainerId:string,expectedGeneration:string,signal:AbortSignal){
     signal.throwIfAborted();check(this.profile==='agents-real-opencode','unsupported-capability');
     return this.withContainerOperation(async()=>{
-      check(this.plan,'identity-mismatch');
+      check(this.plan&&!this.retryRestartAttestation,'identity-mismatch');
       await verifyManifest(this.config.loom.source,this.plan!.loomRevision.sourceManifestSha256);
       await verifyManifest(this.config.loom.build,this.plan!.loomRevision.buildManifestSha256);
       const before=await this.ownedContainer(signal,expectedGeneration);
@@ -515,19 +516,24 @@ export class ComposeFixtureDriver implements FixtureDriver {
         scope:'loom-local-plus-OpenCode',before:{containerId:before.id,initPid:before.pid,startedAt:before.startedAt,generation:before.generation},
         additionalRestrictions:{dispatchTimeoutMs:60000,maximumReadinessBodyBytes:4*1024*1024},
         processListing:{value:redact(beforeTop,this.fixtureSecrets),redaction:redactionFacts(beforeTop,this.fixtureSecrets)}});
-      const adopt=async(abort:AbortSignal,expectedTarget?:ObjectRecord)=>{
-        const validate=(records:ObjectRecord[],expected?:ObjectRecord)=>{
+      let candidate:ObjectRecord|undefined;
+      const adopt=async(abort:AbortSignal,expectedTarget?:ObjectRecord,allowedTargets?:readonly ObjectRecord[])=>{
+        const validate=(records:ObjectRecord[],expected?:ObjectRecord,allowed?:readonly ObjectRecord[])=>{
           check(records.length===retained.length,'identity-mismatch');
           const targets=records.filter(record=>record.kind==='container'&&record.service==='loom-local');check(targets.length===1,'identity-mismatch');
           const target=targets[0]!;check(typeof target.startedAt==='string'&&target.startedAt.length>0&&
             target.namespaceSha256===before.namespaceSha256&&before.namespaceSha256,'identity-mismatch');
-          if(expected)check(target.id===expected.id&&target.generation===expected.generation&&target.pid===expected.pid,'identity-mismatch');
+          const matches=(expected:ObjectRecord)=>target.id===expected.id&&target.generation===expected.generation&&target.pid===expected.pid;
+          if(allowed)check(allowed.some(matches),'identity-mismatch');else if(expected)check(matches(expected),'identity-mismatch');
           const neighbors=retained.filter(record=>record.kind!=='container'||record.id!==before.id);
           check(neighbors.every(previous=>records.some(record=>record.kind===previous.kind&&record.id===previous.id&&
             record.service===previous.service&&record.generation===previous.generation&&record.pid===previous.pid)),'identity-mismatch');
           return target;
         };
-        abort.throwIfAborted();const first=await this.inventory(abort);abort.throwIfAborted();const target=validate(first,expectedTarget);
+        abort.throwIfAborted();const first=await this.inventory(abort);abort.throwIfAborted();const target=validate(first,expectedTarget??(allowedTargets?undefined:candidate),allowedTargets);
+        // Capture an immutable attempted identity BEFORE marker reads can yield.
+        // This restricts retries; it does not grant resource ownership yet.
+        candidate??=Object.freeze({...target});
         await requireRuntime(target,abort);
         const records=await this.inventory(abort);abort.throwIfAborted();validate(records,target);
         // Only this fixed dispatch can enroll one successor. Its actual image,
@@ -583,11 +589,23 @@ export class ComposeFixtureDriver implements FixtureDriver {
         // owned container. Refresh only that recorded identity for cleanup;
         // never retry the mutation or replace the resource roster wholesale.
         let cleanupIdentityRetained=false;
-        try{after=await adopt(AbortSignal.timeout(15000),after);cleanupIdentityRetained=true;}catch{/* retain prior known authority */}
+        const cleanupTargets=[{...before},...(after||candidate?[{...(after??candidate)!}]:[])];
+        const retry=async(abort:AbortSignal)=>{after=await adopt(abort,undefined,cleanupTargets);};
+        this.retryRestartAttestation=retry;
+        try{await retry(AbortSignal.timeout(15000));cleanupIdentityRetained=true;this.retryRestartAttestation=undefined;}
+        catch{/* retain the SAME attempted identity for an owned cleanup retry */}
         const receipt=await this.artifact('failure',{operation:'compose-restart-uncertain',intent,cleanupIdentityRetained,readinessAttempts,
+          ...(candidate?{attestationCandidate:{containerId:candidate.id,initPid:candidate.pid,startedAt:candidate.startedAt,generation:candidate.generation}}:{}),
           ...(after?{after:{containerId:after.id,initPid:after.pid,startedAt:after.startedAt,generation:after.generation}}:{})});
         throw new FixtureError('observation-failed',receipt);
       }
+    });
+  }
+  async prepareCleanup(signal:AbortSignal){
+    signal.throwIfAborted();
+    await this.withContainerOperation(async()=>{
+      const retry=this.retryRestartAttestation;
+      if(retry){await retry(signal);check(this.retryRestartAttestation===retry,'identity-mismatch');this.retryRestartAttestation=undefined;}
     });
   }
   async inspect(resource: Resource): Promise<Inventory> {

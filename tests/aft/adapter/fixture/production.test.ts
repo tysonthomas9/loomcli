@@ -55,15 +55,15 @@ async function setup(profile = 'agents-real-opencode',fixtureRunId?:string,usePr
     const service=override.services[cloud?'loom-serve':'loom-local'];return JSON.stringify({runId:change==='wrong-run-id'?'foreign-run':service.environment.RUN_ID,leaseId:change==='wrong-run-lease'?'foreign-lease':service.environment.AFT_FIXTURE_LEASE_ID});
   }return a.at(-1)?.includes('controlled-codex-preflight') ? JSON.stringify({ready:true,cleaned:change!=='probe-leak',complete:change!=='probe-incomplete'}) : JSON.stringify({sourceRepo:'/work/source-repos/aft-repo'});}
   if(a.includes('ps')) return up?services.flatMap(s=>{const replacement=restarted&&['new-id','double-target'].includes(restartMode)&&s==='loom-local';
-    return replacement&&restartMode==='double-target'?[`container-${s}`,`container-${s}-replacement`]:[`container-${s}${replacement?'-replacement':''}`];}).join('\n'):'';
+    return replacement&&restartMode==='double-target'?[`container-${s}`,`container-${s}-replacement`]:[`container-${s}${replacement?(change==='target-only-id'?'-replacement-later':'-replacement'):''}`];}).join('\n'):'';
   if(a.includes('ls')) return up?(a.includes('volume')?'volume-owned':'network-owned'):'';
   if(a.includes('inspect')) {
-   const id=a.at(-1)!,container=id.startsWith('container-'),service=id.replace('container-','').replace(/-replacement$/,'');
+   const id=a.at(-1)!,container=id.startsWith('container-'),service=id.replace('container-','').replace(/-replacement(?:-later)?$/,'');
    const labels={'com.docker.compose.project':project,'io.loom.aft.lease':change==='foreign'?'foreign':'opaque-fixture','com.docker.compose.service':service};
    const mappings:Record<string,number>=cloud?{'loom-serve':0,'fleet-db':1,'stub-upstream':2}:{'fleet-db':0,'loom-local':1,'ui-local':2};const index=mappings[service] ?? 0;
    const target=restarted&&service==='loom-local';
    const exited=change==='target-exit'&&service==='loom-local';
-   return JSON.stringify([container?{Id:id,Image:change==='wrong-image'?'sha256:'+'e'.repeat(64):image,Config:{Labels:labels},State:{StartedAt:change==='stale'?'new':target&&restartMode!=='same-start'?'restarted':'generation',Pid:exited?0:target&&restartMode!=='same-pid'||change==='pid-only'&&service==='loom-local'?456:123,Status:service==='fleet-auth-seed'||exited?'exited':'running',ExitCode:0,Health:{Status:change==='unhealthy'?'unhealthy':'healthy'}},Mounts:[{Destination:'/work',Type:change==='hostbind'?'bind':'volume',Name:change==='foreign-volume'?'foreign':'volume-owned',RW:true},{Destination:'/home/node/.codex',Type:'bind',Source:auth,RW:change==='writable-auth'},{Destination:'/opt/aft',Type:'bind',Source:change==='foreign-adapter'?'/foreign':config.adapter.build.root,RW:false},{Destination:'/opt/webui',Type:'bind',Source:frontend,RW:false},{Destination:'/srv',Type:'bind',Source:frontend,RW:false}],NetworkSettings:{Networks:{owned:{NetworkID:change==='foreign-network'?'network-foreign':'network-owned'}},Ports:{'8080/tcp':[{HostPort:String(change==='wrong-port'?5999:5000+index)}]}}}:{Id:id,Name:id,Labels:labels,CreatedAt:'created'}]);
+   return JSON.stringify([container?{Id:id,Image:change==='wrong-image'?'sha256:'+'e'.repeat(64):image,Config:{Labels:labels},State:{StartedAt:change==='target-only-stale'&&service==='loom-local'?'later-generation':change==='stale'?'new':target&&restartMode!=='same-start'?'restarted':'generation',Pid:exited?0:target&&restartMode!=='same-pid'||change==='pid-only'&&service==='loom-local'?456:123,Status:service==='fleet-auth-seed'||exited?'exited':'running',ExitCode:0,Health:{Status:change==='unhealthy'?'unhealthy':'healthy'}},Mounts:[{Destination:'/work',Type:change==='hostbind'?'bind':'volume',Name:change==='foreign-volume'?'foreign':'volume-owned',RW:true},{Destination:'/home/node/.codex',Type:'bind',Source:auth,RW:change==='writable-auth'},{Destination:'/opt/aft',Type:'bind',Source:change==='foreign-adapter'?'/foreign':config.adapter.build.root,RW:false},{Destination:'/opt/webui',Type:'bind',Source:frontend,RW:false},{Destination:'/srv',Type:'bind',Source:frontend,RW:false}],NetworkSettings:{Networks:{owned:{NetworkID:change==='foreign-network'?'network-foreign':'network-owned'}},Ports:{'8080/tcp':[{HostPort:String(change==='wrong-port'?5999:5000+index)}]}}}:{Id:id,Name:id,Labels:labels,CreatedAt:'created'}]);
   }return '';
  };
  const files={...fs,statfs:async()=>({type:0,blocks:20*1024**3,bavail:20*1024**3,bfree:20*1024**3,bsize:1,files:1000,ffree:1000})} as unknown as typeof fs;
@@ -219,7 +219,9 @@ for(const failure of ['unchanged','same-pid','same-start','throw-after','read'])
   const bytes=await fs.readFile(receipt,'utf8');assert.equal(bytes.includes('private-restart-token'),false);assert.equal(bytes.includes('private API failure'),false);
   await assert.rejects(r.driver.restartOwnedServe('container-loom-local','container-loom-local:generation',signal));
   assert.equal(r.calls.filter(call=>call.args.includes('restart')).length,1);
-  assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,true);
+  const released=await r.lifecycle.release(a.lease.id,'run');
+  assert.equal(released.released,failure!=='throw-after');
+  if(failure==='throw-after'){assert.equal(r.calls.some(call=>call.args.includes('down')),false);r.restoreOriginalContainer();assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,true);}
  }finally{await r.cleanup();}
 });
 
@@ -263,7 +265,8 @@ test('selected SSE rejects changed source before restart and retains cleanup aft
   r.onRestart(async()=>abort.abort());
   await assert.rejects(r.driver.restartOwnedServe('container-loom-local','container-loom-local:generation',abort.signal));
   assert.equal(r.calls.filter(call=>call.args.includes('restart')).length,1);
-  assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,true);
+  assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,false);assert.equal(r.calls.some(call=>call.args.includes('down')),false);
+  r.restoreOriginalContainer();assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,true);
  }finally{await r.cleanup();}
 });
 
@@ -316,7 +319,8 @@ test('selected SSE dispatch expiration cannot start a readiness window or retry 
   assert.equal(seen.includes(180000),false);assert.equal(seen.includes(3000),false);
   await assert.rejects(r.driver.restartOwnedServe('container-loom-local','container-loom-local:generation',signal));
   assert.equal(r.calls.filter(call=>call.args.includes('restart')).length,1);
-  assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,true);
+  assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,false);assert.equal(r.calls.some(call=>call.args.includes('down')),false);
+  r.restoreOriginalContainer();assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,true);
  }finally{AbortSignal.timeout=original;await r.cleanup();}
 });
 
@@ -416,4 +420,58 @@ test('selected SSE cannot attest a successful restart after source bytes change 
   assert.equal(r.calls.filter(call=>call.args.includes('restart')).length,1);
   assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,true);
  }finally{await r.cleanup();}
+});
+
+test('parent review failed first successor attestation cannot enroll a later target generation for cleanup',async()=>{
+ const r=await setup();try{
+  const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal);r.restartMode('new-id');
+  let changed=false;
+  r.onExec(async request=>{if(!changed&&request.args.includes('container-loom-local-replacement')){changed=true;r.mutate('target-only-stale');}});
+  await assert.rejects(r.driver.restartOwnedServe('container-loom-local','container-loom-local:generation',signal));
+  const result=await r.lifecycle.release(a.lease.id,'run');
+  assert.equal(result.released,false,'later target generation was not the captured successor');
+  assert.equal(r.calls.some(call=>call.args.includes('down')),false);
+ }finally{await r.cleanup();}
+});
+
+test('failed first successor marker cannot enroll a different target ID on cleanup',async()=>{
+ const r=await setup();try{
+  const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal);r.restartMode('new-id');
+  let changed=false;r.onExec(async request=>{if(!changed&&request.args.includes('container-loom-local-replacement')){changed=true;r.mutate('target-only-id');}});
+  await assert.rejects(r.driver.restartOwnedServe('container-loom-local','container-loom-local:generation',signal));
+  const failed=await r.lifecycle.release(a.lease.id,'run');assert.equal(failed.released,false);
+  assert.equal(r.calls.some(call=>call.args.includes('down')),false);
+  assert.equal(r.calls.some(call=>call.args.includes('exec')&&call.args.includes('container-loom-local-replacement-later')),false);
+  r.mutate('');r.onExec(async()=>{});assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,true);
+  assert.equal(r.calls.filter(call=>call.args.includes('restart')).length,1);
+ }finally{await r.cleanup();}
+});
+test('failed successor marker retains only its captured identity for read-only cleanup retries',async()=>{
+ const r=await setup();try{
+  const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal);r.restartMode('new-id');
+  r.onExec(async request=>{if(request.args.includes('container-loom-local-replacement'))throw Error('Bearer private-marker-read');});
+  let receipt='';await assert.rejects(r.driver.restartOwnedServe('container-loom-local','container-loom-local:generation',signal),error=>{
+   assert.ok(error instanceof FixtureError);receipt=error.receipt!.id;return true;
+  });
+  const artifact=await fs.readFile(receipt,'utf8');assert.equal(artifact.includes('private-marker-read'),false);
+  assert.ok(artifact.includes('attestationCandidate'));assert.ok(artifact.includes('container-loom-local-replacement'));
+  assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,false);assert.equal(r.calls.some(call=>call.args.includes('down')),false);
+  r.onExec(async()=>{});assert.equal((await r.lifecycle.release(a.lease.id,'run')).released,true);
+  assert.equal(r.calls.filter(call=>call.args.includes('restart')).length,1);
+ }finally{await r.cleanup();}
+});
+test('pending successor cleanup attestation excludes other container operations until it settles',async()=>{
+ const r=await setup();let enter!:()=>void,leave!:()=>void,pending:ReturnType<FixtureLifecycle['release']>|undefined;
+ try{
+  const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal);r.restartMode('new-id');
+  r.onExec(async request=>{if(request.args.includes('container-loom-local-replacement'))throw Error('unavailable marker');});
+  await assert.rejects(r.driver.restartOwnedServe('container-loom-local','container-loom-local:generation',signal));
+  const entered=new Promise<void>(resolve=>{enter=resolve;}),blocked=new Promise<void>(resolve=>{leave=resolve;});
+  r.onExec(async request=>{if(request.args.includes('container-loom-local-replacement')){enter();await blocked;}});
+  pending=r.lifecycle.release(a.lease.id,'run');await entered;const calls=r.calls.length;
+  await assert.rejects(r.driver.nativeRead({operation:'runtime-identity'},signal));
+  await assert.rejects(r.driver.prepareCleanup(signal));await assert.rejects(r.lifecycle.release(a.lease.id,'run'));
+  assert.equal(r.calls.length,calls);leave();assert.equal((await pending).released,true);
+  assert.equal(r.calls.filter(call=>call.args.includes('restart')).length,1);
+ }finally{leave?.();await pending?.catch(()=>{});await r.cleanup();}
 });
