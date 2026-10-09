@@ -93,14 +93,14 @@ async function setup(profile: string,registeredServices=false,nativeService=fals
   let onHttp:((method:string,relative:string)=>Promise<void>)|undefined;
   let responseOverride:((relative:string)=>unknown)|undefined;
   const requests:{method:string;relative:string}[]=[];
-  const createdWorkspaces=new Map<string,{id:string;repos:{path:string}[]}>();
+  const createdWorkspaces=new Map<string,{id:string;repos:{path:string;name:string;source_repo_id:string;groups:string[]}[]}>();
   const http: Http = async (_origin, method, relative,body) => {
     requests.push({method,relative});await onHttp?.(method,relative);
     if(responseOverride){const overridden=responseOverride(relative);if(overridden!==undefined)return {status:200,body:overridden};}
     if (failHttp) return { status: 503, body: { message: 'Bearer private-http-token' } };
     if(relative==='/__requests')return {status:200,body:{requests:[],queued:0}};
     if(relative==='/__reset')return {status:200,body:{ok:true}};
-    if(method==='POST'&&relative==='/api/workspaces'){const input=body as {name:string;repos:string[]},data={id:input.name.toUpperCase(),repos:input.repos.map(path=>({path}))};createdWorkspaces.set(data.id,data);return {status:201,body:{success:true,data}};}
+    if(method==='POST'&&relative==='/api/workspaces'){const input=body as {name:string;repos:string[]},data={id:input.name.toUpperCase(),repos:input.repos.map(repo=>({path:repo,name:path.basename(repo),source_repo_id:path.basename(repo),groups:[]}))};createdWorkspaces.set(data.id,data);return {status:201,body:{success:true,data}};}
     if (method === 'POST') return { status: 201, body: {} };
     const data=createdWorkspaces.get(relative.split('/').at(-1)!);
     return { status: 200, body: data?{success:true,data}:{} };
@@ -181,7 +181,7 @@ test('host publishes creation receipts for both owned workspaces and enrolls onl
   assert.equal(requireOwnedWorkspace(fixture,'E2E-WS-2',undefined,'legacy-agent-name').workspaceId,'E2E-WS-2');
   assert.throws(()=>requireOwnedWorkspace(fixture,'foreign',undefined,'legacy-agent-name'));
   assert.throws(()=>requireOwnedWorkspace(fixture,'E2E-WS','nova','legacy-agent-name'));
-  r.overrideResponse(relative=>relative==='/api/workspaces/E2E-WS/agents'?{success:true,total:1,data:[{workspace_key:'E2E-WS',name:'nova',parent:'',created_at:'2026-10-09T00:00:00Z',updated_at:'2026-10-09T00:01:00Z'}]}:undefined);
+  r.overrideResponse(relative=>relative==='/api/workspaces/E2E-WS/agents'?{success:true,total:1,data:[{workspace_key:'E2E-WS',name:'nova',parent:'',repos:[],repo_groups:[],created_at:'2026-10-09T00:00:00Z',updated_at:'2026-10-09T00:01:00Z'}]}:undefined);
   await enrollOwnedLegacyAgent(fixture,'E2E-WS','nova',signal,store);
   assert.equal(requireOwnedWorkspace(fixture,'E2E-WS','nova','legacy-agent-name').workspaceId,'E2E-WS');
   const enrolled=fixture.ownedWorkspaces!.find(value=>value.workspaceId==='E2E-WS')!;
@@ -204,6 +204,10 @@ test('canonical registry production binding retains both actual host workspaces 
   assert.equal((acquired.data as {fixtureRunId:string}).fixtureRunId,'1700000000');
   assert.notEqual((acquired.data as {fixtureRunId:string}).fixtureRunId,context.runId);
   const fixture=await getFixture(context,leaseId);assert.equal(fixture.ownedWorkspaces!.length,2);
+  await r.driver.createOwnedWorkspaceFixture('legacy-e2e-repo','E2E-WS-AGENT','e2e-ws-agent',context.signal);
+  assert.equal(fixture.ownedWorkspaces!.length,3);
+  const created=requireOwnedWorkspace(fixture,'E2E-WS-AGENT',undefined,'legacy-agent-name');
+  assert.equal(created.repoName,'agent-repo');assert.equal(created.sourceRepoId,'agent-repo');assert.equal(path.basename(created.repo),'agent-repo');
   assert.equal(requireOwnedWorkspace(fixture,'E2E-WS-2',undefined,'legacy-agent-name').workspaceId,'E2E-WS-2');
   const before=r.requests.length;await assert.rejects(fixture.readWorkspaceLegacyAgent!('foreign','nova',context.signal));assert.equal(r.requests.length,before);
   assert.equal((await registry.invoke({id:'loom.fixture.release',version:1,input:{}},{leaseId},context)).availability,'observed');
@@ -254,7 +258,7 @@ test('legacy worktree reads use actual product resolution and exact source Git i
  const r=await setup('legacy-deterministic',true);try{
   const signal=new AbortController().signal,a=await r.lifecycle.acquire(r.request,signal),owner={leaseId:a.lease.id,runId:'test-run',suiteId:'suite',scope:'case' as const,caseId:'case',profile:r.plan.profile};
   await r.driver.ownedWorkspaceRoster(owner,await createEvidenceStore(path.join(r.driver.runtimeRoot,'evidence')),signal);
-  r.overrideResponse(relative=>relative==='/api/workspaces/E2E-WS/agents'?{success:true,total:1,data:[{workspace_key:'E2E-WS',name:'nova',created_at:'2026-10-09T00:00:00Z',updated_at:'2026-10-09T00:01:00Z'}]}:undefined);
+  r.overrideResponse(relative=>relative==='/api/workspaces/E2E-WS/agents'?{success:true,total:1,data:[{workspace_key:'E2E-WS',name:'nova',repos:[],repo_groups:[],created_at:'2026-10-09T00:00:00Z',updated_at:'2026-10-09T00:01:00Z'}]}:undefined);
   const worktree=path.join(r.driver.runtimeRoot,'runtime','actual-product-worktree');await fs.mkdir(worktree);
   r.commonDir(worktree,path.join(r.driver.workspaceRoot,'.git'));
   const status={ok:true,workspace:{key:'E2E-WS'},agents:[{name:'nova',worktree_path:worktree,worktree_ready:true}]};r.cliOutput(status);
