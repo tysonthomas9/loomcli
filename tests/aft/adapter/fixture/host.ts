@@ -9,6 +9,7 @@ import { initializeCodex, type CodexProtocolProbe } from './codex-probe.js';
 import { prepareRenderer, type PreparedRenderer } from './renderer.js';
 import { fixtureRouting, fixtureOperationAuthority } from './routing.js';
 import type { FixtureAuthorityOwner } from '../authority.js';
+import { StartupBaselines, type BaselineTarget } from './baseline.js';
 
 const check = (condition: unknown, code: FixtureError['code'] = 'ownership-mismatch') => { if (!condition) throw new FixtureError(code); };
 const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
@@ -46,6 +47,9 @@ export class HostFixtureDriver implements FixtureDriver {
   private plan?: FixturePlan;
   private renderer?: PreparedRenderer;
   private readonly config: HostConfig;
+  private readonly baselines=new StartupBaselines({generation:async(target,signal)=>{
+    const handle=this.handles.get(target);check(handle?.state()==='running');await this.inspectOwnedProcess(target,handle!.generation,signal);return handle!.generation;
+  },request:(target,method,relative,signal)=>this.requestOwnedHttp(target,method,relative,null,signal)});
   constructor(config: HostConfig, private readonly processes: HostProcesses = nodeProcesses,
     private readonly files: typeof fs = fs, private readonly http: Http = readHttp,
     private readonly uuid: () => string = randomUUID, private readonly reserve: () => Promise<PortReservation> = reservePort,
@@ -57,6 +61,8 @@ export class HostFixtureDriver implements FixtureDriver {
   get cliRegistration() { return { binary: this.config.loomBinary, cwd: this.workspaceRoot, env: this.env() }; }
   get executionRouting() { check(this.plan); return fixtureRouting(this.plan!); }
   createOperationAuthority(owner:FixtureAuthorityOwner) {check(this.plan);return fixtureOperationAuthority(owner,this.plan!);}
+  freshFixtureBaseline(target:BaselineTarget,signal:AbortSignal){return this.baselines.freshFixtureBaseline(target,signal);}
+  resetFixtureBaseline(target:BaselineTarget,generation:string,signal:AbortSignal){return this.baselines.resetFixtureBaseline(target,generation,signal);}
   async rendererRuntimeTarget(signal:AbortSignal) {
     const target=this.handles.get('frontend');check(target?.state()==='running'&&this.renderer,'identity-mismatch');
     await this.inspectOwnedProcess('frontend',target!.generation,signal);
@@ -137,7 +143,7 @@ export class HostFixtureDriver implements FixtureDriver {
       LOOM_CONFIG_DIR: configRoot, LOOM_DISABLE_H2C: '1', LOOM_ISSUE_BACKEND: 'fleetdb', LOOM_FLEET_DB_ACTOR: 'loom-e2e',
       FLEET_DB_BIN: c.fleetBinary, FLEET_RATE_LIMIT_ENABLED: 'false', FLEET_REDIS_POOL_SIZE: '200', FLEET_REDIS_MIN_IDLE_CONNS: '10',
       LOOM_SDK_ROOT: path.join(c.loom.source.root, 'sdk'), LOOM_LEAD_CONTROLLED: '1',
-      LOOM_AGENT_MODEL: this.plan!.model, LOOM_OPENCODE_MODEL: this.plan!.model,
+      ...(this.executionRouting.modelSelection.kind==='exact-model'?{LOOM_AGENT_MODEL:this.executionRouting.modelSelection.model,LOOM_OPENCODE_MODEL:this.executionRouting.modelSelection.model}:{}),
       LOOM_FRONTEND_DIR: this.renderer!.buildRoot,
       LOOM_MAX_BUDGET_USD: c.maxBudgetUsd, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '/usr/bin/false', SSH_ASKPASS: '/usr/bin/false',
       GIT_CONFIG_COUNT: '3', GIT_CONFIG_KEY_0: 'credential.helper', GIT_CONFIG_VALUE_0: '',
@@ -251,6 +257,7 @@ export class HostFixtureDriver implements FixtureDriver {
     this.handles.set(id, handle); this.commands.set(id, { command, readiness });
     check(handle.generation === generation, 'identity-mismatch');
     await handle.ready(signal); check(handle.pid > 0 && handle.state() === 'running', 'observation-failed');
+    if(id==='fake-model'||id==='fake-github')await this.baselines.captureSuccessfulStart(id,generation,signal);
   }
   async provision(_plan: FixturePlan, record: (resource: Resource) => void, signal: AbortSignal) {
     this.record = record;
