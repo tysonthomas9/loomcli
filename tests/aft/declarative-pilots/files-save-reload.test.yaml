@@ -650,6 +650,51 @@ tests:
       - api:
           method: GET
           path: /
+          as: prepareBaselineIdentity
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+            - ref:
+                binding: apiOrigin
+            - literal: /api/workspaces/${AFT_WS}/v1/agents/
+            - ref:
+                binding: leadId
+        intent: Record the original README version and prepare an exact expected edit from its read-only content
+      - assert:
+          all:
+          - op: eq
+            args:
+            - ref:
+                binding: prepareBaselineIdentity
+                pointer: /body/agent_id
+            - ref:
+                binding: leadId
+          - op: eq
+            args:
+            - ref:
+                binding: prepareBaselineIdentity
+                pointer: /body/workspace_id
+            - literal: ${AFT_WS}
+          - op: eq
+            args:
+            - ref:
+                binding: prepareBaselineIdentity
+                pointer: /body/repo
+            - ref:
+                binding: repo
+          - op: eq
+            args:
+            - ref:
+                binding: prepareBaselineIdentity
+                pointer: /body/harness
+            - literal: ${AFT_REAL_BACKEND}
+        intent: Record the original README version and prepare an exact expected edit from its read-only content
+      - api:
+          method: GET
+          path: /
           as: baseline
           status: 200
           deadlineMs: 15000
@@ -666,54 +711,119 @@ tests:
         intent: Record the original README version and prepare an exact expected edit from its read-only content
       - assert:
           all:
-            - op: eq
-              args:
-                - ref:
-                    binding: baseline
-                    pointer: /body/path
-                - literal: README.md
-            - op: eq
-              args:
-                - ref:
-                    binding: baseline
-                    pointer: /body/binary
-                - literal: false
-            - op: eq
-              args:
-                - ref:
-                    binding: baseline
-                    pointer: /body/truncated
-                - literal: false
-            - op: ne
-              args:
-                - ref:
-                    binding: baseline
-                    pointer: /body/content
-                - literal: ""
-            - op: matches
-              args:
-                - ref:
-                    binding: baseline
-                    pointer: /body/content
-                - literal: |-
+          - op: eq
+            args:
+            - ref:
+                binding: baseline
+                pointer: /body/path
+            - literal: README.md
+          - op: eq
+            args:
+            - ref:
+                binding: baseline
+                pointer: /body/binary
+            - literal: false
+          - op: eq
+            args:
+            - ref:
+                binding: baseline
+                pointer: /body/truncated
+            - literal: false
+          - op: ne
+            args:
+            - ref:
+                binding: baseline
+                pointer: /body/version
+            - literal: ''
+        intent: Record the original README version and prepare an exact expected edit from its read-only content
+      - api:
+          method: GET
+          path: /
+          as: prepareContentIdentity
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+            - ref:
+                binding: apiOrigin
+            - literal: /api/workspaces/${AFT_WS}/v1/agents/
+            - ref:
+                binding: leadId
+        intent: Record the original README version and prepare an exact expected edit from its read-only content
+      - assert:
+          all:
+          - op: eq
+            args:
+            - ref:
+                binding: prepareContentIdentity
+                pointer: /body/agent_id
+            - ref:
+                binding: leadId
+          - op: eq
+            args:
+            - ref:
+                binding: prepareContentIdentity
+                pointer: /body/workspace_id
+            - literal: ${AFT_WS}
+          - op: eq
+            args:
+            - ref:
+                binding: prepareContentIdentity
+                pointer: /body/repo
+            - ref:
+                binding: repo
+          - op: eq
+            args:
+            - ref:
+                binding: prepareContentIdentity
+                pointer: /body/harness
+            - literal: ${AFT_REAL_BACKEND}
+        intent: Record the original README version and prepare an exact expected edit from its read-only content
+      - api:
+          method: GET
+          path: /
+          as: editorContent
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+            - ref:
+                binding: filesOrigin
+            - literal: /api/workspaces/${AFT_WS}/files?scope=agent&target=
+            - ref:
+                binding: leadId
+            - literal: '&repo=source-repo&path=README.md'
+        intent: Record the original README version and prepare an exact expected edit from its read-only content
+      - assert:
+          all:
+          - op: ne
+            args:
+            - ref:
+                binding: editorContent
+                pointer: /body/content
+            - literal: ''
+          - op: matches
+            args:
+            - ref:
+                binding: editorContent
+                pointer: /body/content
+            - literal: '
 
-                    $
-            - op: ne
-              args:
-                - ref:
-                    binding: baseline
-                    pointer: /body/version
-                - literal: ""
+                $'
         intent: Record the original README version and prepare an exact expected edit from its read-only content
       - bind:
           as: expectedEdit
           value:
             op: concat
             args:
-              - ref:
-                  binding: baseline
-                  pointer: /body/content
-              - literal: COV_FILES_${RUN_ID}_EDITOR
+            - ref:
+                binding: editorContent
+                pointer: /body/content
+            - literal: COV_FILES_${RUN_ID}_EDITOR
         intent: Record the original README version and prepare an exact expected edit from its read-only content
       - screenshot: files-save-reload-s17
         intent: Record the original README version and prepare an exact expected edit from its read-only content
@@ -763,6 +873,51 @@ tests:
           source: url
           view: pathname
           as: leadRoutefiles3
+        intent: Compare every visible editor line with the exact expected bytes before Save
+      - api:
+          method: GET
+          path: /
+          as: editorVisibleIdentity
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+            - ref:
+                binding: apiOrigin
+            - literal: /api/workspaces/${AFT_WS}/v1/agents/
+            - ref:
+                binding: leadId
+        intent: Compare every visible editor line with the exact expected bytes before Save
+      - assert:
+          all:
+          - op: eq
+            args:
+            - ref:
+                binding: editorVisibleIdentity
+                pointer: /body/agent_id
+            - ref:
+                binding: leadId
+          - op: eq
+            args:
+            - ref:
+                binding: editorVisibleIdentity
+                pointer: /body/workspace_id
+            - literal: ${AFT_WS}
+          - op: eq
+            args:
+            - ref:
+                binding: editorVisibleIdentity
+                pointer: /body/repo
+            - ref:
+                binding: repo
+          - op: eq
+            args:
+            - ref:
+                binding: editorVisibleIdentity
+                pointer: /body/harness
+            - literal: ${AFT_REAL_BACKEND}
         intent: Compare every visible editor line with the exact expected bytes before Save
       - assert:
           op: eq
@@ -934,6 +1089,51 @@ tests:
       - api:
           method: GET
           path: /
+          as: savedContentIdentity
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+            - ref:
+                binding: apiOrigin
+            - literal: /api/workspaces/${AFT_WS}/v1/agents/
+            - ref:
+                binding: leadId
+        intent: Verify exact saved content, changed strong version and one scoped checkout change
+      - assert:
+          all:
+          - op: eq
+            args:
+            - ref:
+                binding: savedContentIdentity
+                pointer: /body/agent_id
+            - ref:
+                binding: leadId
+          - op: eq
+            args:
+            - ref:
+                binding: savedContentIdentity
+                pointer: /body/workspace_id
+            - literal: ${AFT_WS}
+          - op: eq
+            args:
+            - ref:
+                binding: savedContentIdentity
+                pointer: /body/repo
+            - ref:
+                binding: repo
+          - op: eq
+            args:
+            - ref:
+                binding: savedContentIdentity
+                pointer: /body/harness
+            - literal: ${AFT_REAL_BACKEND}
+        intent: Verify exact saved content, changed strong version and one scoped checkout change
+      - api:
+          method: GET
+          path: /
           as: fileSaved
           status: 200
           deadlineMs: 15000
@@ -1008,6 +1208,51 @@ tests:
       - api:
           method: GET
           path: /
+          as: savedStatIdentity
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+            - ref:
+                binding: apiOrigin
+            - literal: /api/workspaces/${AFT_WS}/v1/agents/
+            - ref:
+                binding: leadId
+        intent: Verify exact saved content, changed strong version and one scoped checkout change
+      - assert:
+          all:
+          - op: eq
+            args:
+            - ref:
+                binding: savedStatIdentity
+                pointer: /body/agent_id
+            - ref:
+                binding: leadId
+          - op: eq
+            args:
+            - ref:
+                binding: savedStatIdentity
+                pointer: /body/workspace_id
+            - literal: ${AFT_WS}
+          - op: eq
+            args:
+            - ref:
+                binding: savedStatIdentity
+                pointer: /body/repo
+            - ref:
+                binding: repo
+          - op: eq
+            args:
+            - ref:
+                binding: savedStatIdentity
+                pointer: /body/harness
+            - literal: ${AFT_REAL_BACKEND}
+        intent: Verify exact saved content, changed strong version and one scoped checkout change
+      - api:
+          method: GET
+          path: /
           as: statSaved
           status: 200
           deadlineMs: 15000
@@ -1038,6 +1283,51 @@ tests:
                 - ref:
                     binding: fileSaved
                     pointer: /body/version
+        intent: Verify exact saved content, changed strong version and one scoped checkout change
+      - api:
+          method: GET
+          path: /
+          as: savedStatusIdentity
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+            - ref:
+                binding: apiOrigin
+            - literal: /api/workspaces/${AFT_WS}/v1/agents/
+            - ref:
+                binding: leadId
+        intent: Verify exact saved content, changed strong version and one scoped checkout change
+      - assert:
+          all:
+          - op: eq
+            args:
+            - ref:
+                binding: savedStatusIdentity
+                pointer: /body/agent_id
+            - ref:
+                binding: leadId
+          - op: eq
+            args:
+            - ref:
+                binding: savedStatusIdentity
+                pointer: /body/workspace_id
+            - literal: ${AFT_WS}
+          - op: eq
+            args:
+            - ref:
+                binding: savedStatusIdentity
+                pointer: /body/repo
+            - ref:
+                binding: repo
+          - op: eq
+            args:
+            - ref:
+                binding: savedStatusIdentity
+                pointer: /body/harness
+            - literal: ${AFT_REAL_BACKEND}
         intent: Verify exact saved content, changed strong version and one scoped checkout change
       - api:
           method: GET
@@ -1086,6 +1376,51 @@ tests:
               - ref:
                   binding: filesOrigin
               - literal: /api/workspaces/${AFT_WS}/files/checkouts
+        intent: Verify exact saved content, changed strong version and one scoped checkout change
+      - api:
+          method: GET
+          path: /
+          as: savedCheckoutIdentity
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+            - ref:
+                binding: apiOrigin
+            - literal: /api/workspaces/${AFT_WS}/v1/agents/
+            - ref:
+                binding: leadId
+        intent: Verify exact saved content, changed strong version and one scoped checkout change
+      - assert:
+          all:
+          - op: eq
+            args:
+            - ref:
+                binding: savedCheckoutIdentity
+                pointer: /body/agent_id
+            - ref:
+                binding: leadId
+          - op: eq
+            args:
+            - ref:
+                binding: savedCheckoutIdentity
+                pointer: /body/workspace_id
+            - literal: ${AFT_WS}
+          - op: eq
+            args:
+            - ref:
+                binding: savedCheckoutIdentity
+                pointer: /body/repo
+            - ref:
+                binding: repo
+          - op: eq
+            args:
+            - ref:
+                binding: savedCheckoutIdentity
+                pointer: /body/harness
+            - literal: ${AFT_REAL_BACKEND}
         intent: Verify exact saved content, changed strong version and one scoped checkout change
       - bind:
           as: checkoutMatchSaved
@@ -1190,6 +1525,51 @@ tests:
           view: pathname
           as: leadRoutefiles5
         intent: Confirm reloaded Files still addresses the saved Lead ID
+      - api:
+          method: GET
+          path: /
+          as: reloadedFilesRouteIdentity
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+            - ref:
+                binding: apiOrigin
+            - literal: /api/workspaces/${AFT_WS}/v1/agents/
+            - ref:
+                binding: leadId
+        intent: Confirm reloaded Files still addresses the saved Lead ID
+      - assert:
+          all:
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedFilesRouteIdentity
+                pointer: /body/agent_id
+            - ref:
+                binding: leadId
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedFilesRouteIdentity
+                pointer: /body/workspace_id
+            - literal: ${AFT_WS}
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedFilesRouteIdentity
+                pointer: /body/repo
+            - ref:
+                binding: repo
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedFilesRouteIdentity
+                pointer: /body/harness
+            - literal: ${AFT_REAL_BACKEND}
+        intent: Confirm reloaded Files still addresses the saved Lead ID
       - assert:
           op: eq
           args:
@@ -1215,6 +1595,51 @@ tests:
         intent: Confirm reloaded Files still addresses the saved Lead ID
       - screenshot: files-save-reload-s31
         intent: Confirm reloaded Files still addresses the saved Lead ID
+      - api:
+          method: GET
+          path: /
+          as: reloadedContentIdentity
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+            - ref:
+                binding: apiOrigin
+            - literal: /api/workspaces/${AFT_WS}/v1/agents/
+            - ref:
+                binding: leadId
+        intent: Read the same saved content and strong version immediately after reload
+      - assert:
+          all:
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedContentIdentity
+                pointer: /body/agent_id
+            - ref:
+                binding: leadId
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedContentIdentity
+                pointer: /body/workspace_id
+            - literal: ${AFT_WS}
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedContentIdentity
+                pointer: /body/repo
+            - ref:
+                binding: repo
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedContentIdentity
+                pointer: /body/harness
+            - literal: ${AFT_REAL_BACKEND}
+        intent: Read the same saved content and strong version immediately after reload
       - api:
           method: GET
           path: /
@@ -1292,6 +1717,51 @@ tests:
       - api:
           method: GET
           path: /
+          as: reloadedStatIdentity
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+            - ref:
+                binding: apiOrigin
+            - literal: /api/workspaces/${AFT_WS}/v1/agents/
+            - ref:
+                binding: leadId
+        intent: Read the same saved content and strong version immediately after reload
+      - assert:
+          all:
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedStatIdentity
+                pointer: /body/agent_id
+            - ref:
+                binding: leadId
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedStatIdentity
+                pointer: /body/workspace_id
+            - literal: ${AFT_WS}
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedStatIdentity
+                pointer: /body/repo
+            - ref:
+                binding: repo
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedStatIdentity
+                pointer: /body/harness
+            - literal: ${AFT_REAL_BACKEND}
+        intent: Read the same saved content and strong version immediately after reload
+      - api:
+          method: GET
+          path: /
           as: statReloaded
           status: 200
           deadlineMs: 15000
@@ -1322,6 +1792,51 @@ tests:
                 - ref:
                     binding: fileReloaded
                     pointer: /body/version
+        intent: Read the same saved content and strong version immediately after reload
+      - api:
+          method: GET
+          path: /
+          as: reloadedStatusIdentity
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+            - ref:
+                binding: apiOrigin
+            - literal: /api/workspaces/${AFT_WS}/v1/agents/
+            - ref:
+                binding: leadId
+        intent: Read the same saved content and strong version immediately after reload
+      - assert:
+          all:
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedStatusIdentity
+                pointer: /body/agent_id
+            - ref:
+                binding: leadId
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedStatusIdentity
+                pointer: /body/workspace_id
+            - literal: ${AFT_WS}
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedStatusIdentity
+                pointer: /body/repo
+            - ref:
+                binding: repo
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedStatusIdentity
+                pointer: /body/harness
+            - literal: ${AFT_REAL_BACKEND}
         intent: Read the same saved content and strong version immediately after reload
       - api:
           method: GET
@@ -1370,6 +1885,51 @@ tests:
               - ref:
                   binding: filesOrigin
               - literal: /api/workspaces/${AFT_WS}/files/checkouts
+        intent: Read the same saved content and strong version immediately after reload
+      - api:
+          method: GET
+          path: /
+          as: reloadedCheckoutIdentity
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+            - ref:
+                binding: apiOrigin
+            - literal: /api/workspaces/${AFT_WS}/v1/agents/
+            - ref:
+                binding: leadId
+        intent: Read the same saved content and strong version immediately after reload
+      - assert:
+          all:
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedCheckoutIdentity
+                pointer: /body/agent_id
+            - ref:
+                binding: leadId
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedCheckoutIdentity
+                pointer: /body/workspace_id
+            - literal: ${AFT_WS}
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedCheckoutIdentity
+                pointer: /body/repo
+            - ref:
+                binding: repo
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedCheckoutIdentity
+                pointer: /body/harness
+            - literal: ${AFT_REAL_BACKEND}
         intent: Read the same saved content and strong version immediately after reload
       - bind:
           as: checkoutMatchReloaded
@@ -1423,6 +1983,51 @@ tests:
           source: url
           view: pathname
           as: leadRoutefiles6
+        intent: Choose the unique Files lens inside this Lead's active Agent panel
+      - api:
+          method: GET
+          path: /
+          as: filesLensIdentity
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+            - ref:
+                binding: apiOrigin
+            - literal: /api/workspaces/${AFT_WS}/v1/agents/
+            - ref:
+                binding: leadId
+        intent: Choose the unique Files lens inside this Lead's active Agent panel
+      - assert:
+          all:
+          - op: eq
+            args:
+            - ref:
+                binding: filesLensIdentity
+                pointer: /body/agent_id
+            - ref:
+                binding: leadId
+          - op: eq
+            args:
+            - ref:
+                binding: filesLensIdentity
+                pointer: /body/workspace_id
+            - literal: ${AFT_WS}
+          - op: eq
+            args:
+            - ref:
+                binding: filesLensIdentity
+                pointer: /body/repo
+            - ref:
+                binding: repo
+          - op: eq
+            args:
+            - ref:
+                binding: filesLensIdentity
+                pointer: /body/harness
+            - literal: ${AFT_REAL_BACKEND}
         intent: Choose the unique Files lens inside this Lead's active Agent panel
       - assert:
           op: eq
@@ -1772,6 +2377,51 @@ tests:
           view: pathname
           as: leadRoutegit8
         intent: Confirm reloaded Git still addresses the saved Lead ID
+      - api:
+          method: GET
+          path: /
+          as: reloadedGitRouteIdentity
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+            - ref:
+                binding: apiOrigin
+            - literal: /api/workspaces/${AFT_WS}/v1/agents/
+            - ref:
+                binding: leadId
+        intent: Confirm reloaded Git still addresses the saved Lead ID
+      - assert:
+          all:
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedGitRouteIdentity
+                pointer: /body/agent_id
+            - ref:
+                binding: leadId
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedGitRouteIdentity
+                pointer: /body/workspace_id
+            - literal: ${AFT_WS}
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedGitRouteIdentity
+                pointer: /body/repo
+            - ref:
+                binding: repo
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedGitRouteIdentity
+                pointer: /body/harness
+            - literal: ${AFT_REAL_BACKEND}
+        intent: Confirm reloaded Git still addresses the saved Lead ID
       - assert:
           op: eq
           args:
@@ -1905,6 +2555,51 @@ tests:
           view: pathname
           as: leadRouteinfo11
         intent: Confirm reloaded Info still addresses the saved Lead ID
+      - api:
+          method: GET
+          path: /
+          as: reloadedInfoRouteIdentity
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+            - ref:
+                binding: apiOrigin
+            - literal: /api/workspaces/${AFT_WS}/v1/agents/
+            - ref:
+                binding: leadId
+        intent: Confirm reloaded Info still addresses the saved Lead ID
+      - assert:
+          all:
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedInfoRouteIdentity
+                pointer: /body/agent_id
+            - ref:
+                binding: leadId
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedInfoRouteIdentity
+                pointer: /body/workspace_id
+            - literal: ${AFT_WS}
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedInfoRouteIdentity
+                pointer: /body/repo
+            - ref:
+                binding: repo
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedInfoRouteIdentity
+                pointer: /body/harness
+            - literal: ${AFT_REAL_BACKEND}
+        intent: Confirm reloaded Info still addresses the saved Lead ID
       - assert:
           op: eq
           args:
@@ -1991,6 +2686,51 @@ tests:
           view: pathname
           as: leadRoutechat13
         intent: Confirm reloaded Chat still addresses the saved Lead ID
+      - api:
+          method: GET
+          path: /
+          as: reloadedChatRouteIdentity
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+            - ref:
+                binding: apiOrigin
+            - literal: /api/workspaces/${AFT_WS}/v1/agents/
+            - ref:
+                binding: leadId
+        intent: Confirm reloaded Chat still addresses the saved Lead ID
+      - assert:
+          all:
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedChatRouteIdentity
+                pointer: /body/agent_id
+            - ref:
+                binding: leadId
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedChatRouteIdentity
+                pointer: /body/workspace_id
+            - literal: ${AFT_WS}
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedChatRouteIdentity
+                pointer: /body/repo
+            - ref:
+                binding: repo
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedChatRouteIdentity
+                pointer: /body/harness
+            - literal: ${AFT_REAL_BACKEND}
+        intent: Confirm reloaded Chat still addresses the saved Lead ID
       - assert:
           op: eq
           args:
@@ -2076,6 +2816,51 @@ tests:
           source: url
           view: pathname
           as: leadRoutediff15
+        intent: Confirm reloaded Diff still addresses the saved Lead ID
+      - api:
+          method: GET
+          path: /
+          as: reloadedDiffRouteIdentity
+          status: 200
+          deadlineMs: 15000
+        resolve:
+          /api/path:
+            op: concat
+            args:
+            - ref:
+                binding: apiOrigin
+            - literal: /api/workspaces/${AFT_WS}/v1/agents/
+            - ref:
+                binding: leadId
+        intent: Confirm reloaded Diff still addresses the saved Lead ID
+      - assert:
+          all:
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedDiffRouteIdentity
+                pointer: /body/agent_id
+            - ref:
+                binding: leadId
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedDiffRouteIdentity
+                pointer: /body/workspace_id
+            - literal: ${AFT_WS}
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedDiffRouteIdentity
+                pointer: /body/repo
+            - ref:
+                binding: repo
+          - op: eq
+            args:
+            - ref:
+                binding: reloadedDiffRouteIdentity
+                pointer: /body/harness
+            - literal: ${AFT_REAL_BACKEND}
         intent: Confirm reloaded Diff still addresses the saved Lead ID
       - assert:
           op: eq

@@ -68,7 +68,7 @@
       ],
       "id": "files-save-reload",
       "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-      "sha256": "4d47e8162b22c89f034cc99c9b5c9d15da47c48c5a6149c73bd83b5f56ab652c",
+      "sha256": "6efc325334c7ddc7ce4b9e71200633ddf7cb1bd543eab84298af15cbfb3eae70",
       "skipped": true,
       "oldSteps": [
         {
@@ -1165,7 +1165,7 @@
                 "steps",
                 65
               ],
-              "line": 667
+              "line": 666
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -1175,7 +1175,67 @@
                 "steps",
                 66
               ],
-              "line": 708
+              "line": 695
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                67
+              ],
+              "line": 712
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                68
+              ],
+              "line": 739
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                69
+              ],
+              "line": 755
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                70
+              ],
+              "line": 784
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                71
+              ],
+              "line": 801
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                72
+              ],
+              "line": 818
             }
           ],
           "checkpoint": {
@@ -1184,9 +1244,9 @@
               "tests",
               0,
               "steps",
-              67
+              73
             ],
-            "line": 718
+            "line": 828
           }
         },
         {
@@ -1219,9 +1279,9 @@
                 "tests",
                 0,
                 "steps",
-                68
+                74
               ],
-              "line": 720
+              "line": 830
             }
           ],
           "checkpoint": {
@@ -1230,9 +1290,9 @@
               "tests",
               0,
               "steps",
-              69
+              75
             ],
-            "line": 723
+            "line": 833
           }
         },
         {
@@ -1265,9 +1325,9 @@
                 "tests",
                 0,
                 "steps",
-                70
+                76
               ],
-              "line": 725
+              "line": 835
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -1275,9 +1335,9 @@
                 "tests",
                 0,
                 "steps",
-                71
+                77
               ],
-              "line": 742
+              "line": 852
             }
           ],
           "checkpoint": {
@@ -1286,9 +1346,9 @@
               "tests",
               0,
               "steps",
-              72
+              78
             ],
-            "line": 751
+            "line": 861
           }
         },
         {
@@ -1319,9 +1379,9 @@
                 "tests",
                 0,
                 "steps",
-                73
+                79
               ],
-              "line": 753
+              "line": 863
             }
           ],
           "checkpoint": {
@@ -1330,9 +1390,9 @@
               "tests",
               0,
               "steps",
-              74
+              80
             ],
-            "line": 760
+            "line": 870
           }
         },
         {
@@ -1368,69 +1428,9 @@
                 "tests",
                 0,
                 "steps",
-                75
-              ],
-              "line": 762
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                76
-              ],
-              "line": 767
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                77
-              ],
-              "line": 778
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                78
-              ],
-              "line": 783
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                79
-              ],
-              "line": 790
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                80
-              ],
-              "line": 801
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
                 81
               ],
-              "line": 808
+              "line": 872
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -1440,7 +1440,87 @@
                 "steps",
                 82
               ],
-              "line": 821
+              "line": 877
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                83
+              ],
+              "line": 893
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                84
+              ],
+              "line": 922
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                85
+              ],
+              "line": 933
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                86
+              ],
+              "line": 938
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                87
+              ],
+              "line": 945
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                88
+              ],
+              "line": 956
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                89
+              ],
+              "line": 963
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                90
+              ],
+              "line": 976
             }
           ],
           "checkpoint": {
@@ -1449,9 +1529,9 @@
               "tests",
               0,
               "steps",
-              83
+              91
             ],
-            "line": 832
+            "line": 987
           },
           "fourBodyCorrection": {
             "status": "authored-awaiting-canonical-package-validation",
@@ -1489,9 +1569,9 @@
                 "tests",
                 0,
                 "steps",
-                84
+                92
               ],
-              "line": 834
+              "line": 989
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -1499,9 +1579,9 @@
                 "tests",
                 0,
                 "steps",
-                85
+                93
               ],
-              "line": 851
+              "line": 1006
             }
           ],
           "checkpoint": {
@@ -1510,9 +1590,9 @@
               "tests",
               0,
               "steps",
-              86
+              94
             ],
-            "line": 859
+            "line": 1014
           }
         },
         {
@@ -1543,9 +1623,9 @@
                 "tests",
                 0,
                 "steps",
-                87
+                95
               ],
-              "line": 861
+              "line": 1016
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -1553,9 +1633,9 @@
                 "tests",
                 0,
                 "steps",
-                88
+                96
               ],
-              "line": 866
+              "line": 1021
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -1563,9 +1643,9 @@
                 "tests",
                 0,
                 "steps",
-                89
+                97
               ],
-              "line": 877
+              "line": 1032
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -1573,9 +1653,9 @@
                 "tests",
                 0,
                 "steps",
-                90
+                98
               ],
-              "line": 882
+              "line": 1037
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -1583,9 +1663,9 @@
                 "tests",
                 0,
                 "steps",
-                91
+                99
               ],
-              "line": 889
+              "line": 1044
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -1593,9 +1673,9 @@
                 "tests",
                 0,
                 "steps",
-                92
+                100
               ],
-              "line": 898
+              "line": 1053
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -1603,9 +1683,9 @@
                 "tests",
                 0,
                 "steps",
-                93
+                101
               ],
-              "line": 906
+              "line": 1061
             }
           ],
           "checkpoint": {
@@ -1614,9 +1694,9 @@
               "tests",
               0,
               "steps",
-              94
+              102
             ],
-            "line": 913
+            "line": 1068
           }
         },
         {
@@ -1649,9 +1729,9 @@
                 "tests",
                 0,
                 "steps",
-                95
+                103
               ],
-              "line": 915
+              "line": 1070
             }
           ],
           "checkpoint": {
@@ -1660,9 +1740,9 @@
               "tests",
               0,
               "steps",
-              96
+              104
             ],
-            "line": 932
+            "line": 1087
           }
         },
         {
@@ -1698,89 +1778,169 @@
                 "tests",
                 0,
                 "steps",
-                97
-              ],
-              "line": 934
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                98
-              ],
-              "line": 951
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                99
-              ],
-              "line": 1008
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                100
-              ],
-              "line": 1025
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                101
-              ],
-              "line": 1042
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                102
-              ],
-              "line": 1059
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                103
-              ],
-              "line": 1076
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
-                104
-              ],
-              "line": 1090
-            },
-            {
-              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-              "path": [
-                "tests",
-                0,
-                "steps",
                 105
               ],
-              "line": 1110
+              "line": 1089
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                106
+              ],
+              "line": 1105
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                107
+              ],
+              "line": 1134
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                108
+              ],
+              "line": 1151
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                109
+              ],
+              "line": 1208
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                110
+              ],
+              "line": 1224
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                111
+              ],
+              "line": 1253
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                112
+              ],
+              "line": 1270
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                113
+              ],
+              "line": 1287
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                114
+              ],
+              "line": 1303
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                115
+              ],
+              "line": 1332
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                116
+              ],
+              "line": 1349
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                117
+              ],
+              "line": 1366
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                118
+              ],
+              "line": 1380
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                119
+              ],
+              "line": 1396
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                120
+              ],
+              "line": 1425
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                121
+              ],
+              "line": 1445
             }
           ],
           "checkpoint": {
@@ -1789,9 +1949,9 @@
               "tests",
               0,
               "steps",
-              106
+              122
             ],
-            "line": 1126
+            "line": 1461
           },
           "fourBodyCorrection": {
             "status": "authored-awaiting-canonical-package-validation",
@@ -1829,9 +1989,9 @@
                 "tests",
                 0,
                 "steps",
-                107
+                123
               ],
-              "line": 1128
+              "line": 1463
             }
           ],
           "checkpoint": {
@@ -1840,9 +2000,9 @@
               "tests",
               0,
               "steps",
-              108
+              124
             ],
-            "line": 1131
+            "line": 1466
           }
         },
         {
@@ -1875,9 +2035,9 @@
                 "tests",
                 0,
                 "steps",
-                109
+                125
               ],
-              "line": 1133
+              "line": 1468
             }
           ],
           "checkpoint": {
@@ -1886,9 +2046,9 @@
               "tests",
               0,
               "steps",
-              110
+              126
             ],
-            "line": 1150
+            "line": 1485
           }
         },
         {
@@ -1921,9 +2081,9 @@
                 "tests",
                 0,
                 "steps",
-                111
+                127
               ],
-              "line": 1152
+              "line": 1487
             }
           ],
           "checkpoint": {
@@ -1932,9 +2092,9 @@
               "tests",
               0,
               "steps",
-              112
+              128
             ],
-            "line": 1155
+            "line": 1490
           }
         },
         {
@@ -1972,9 +2132,9 @@
                 "tests",
                 0,
                 "steps",
-                113
+                129
               ],
-              "line": 1157
+              "line": 1492
             }
           ],
           "checkpoint": {
@@ -1983,9 +2143,9 @@
               "tests",
               0,
               "steps",
-              114
+              130
             ],
-            "line": 1182
+            "line": 1517
           },
           "fourBodyCorrection": {
             "status": "authored-awaiting-canonical-package-validation",
@@ -2021,9 +2181,9 @@
                 "tests",
                 0,
                 "steps",
-                115
+                131
               ],
-              "line": 1184
+              "line": 1519
             }
           ],
           "checkpoint": {
@@ -2032,9 +2192,9 @@
               "tests",
               0,
               "steps",
-              116
+              132
             ],
-            "line": 1186
+            "line": 1521
           }
         },
         {
@@ -2065,9 +2225,9 @@
                 "tests",
                 0,
                 "steps",
-                117
+                133
               ],
-              "line": 1188
+              "line": 1523
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2075,9 +2235,9 @@
                 "tests",
                 0,
                 "steps",
-                118
+                134
               ],
-              "line": 1193
+              "line": 1528
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2085,9 +2245,9 @@
                 "tests",
                 0,
                 "steps",
-                119
+                135
               ],
-              "line": 1204
+              "line": 1544
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2095,9 +2255,29 @@
                 "tests",
                 0,
                 "steps",
-                120
+                136
               ],
-              "line": 1209
+              "line": 1573
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                137
+              ],
+              "line": 1584
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                138
+              ],
+              "line": 1589
             }
           ],
           "checkpoint": {
@@ -2106,9 +2286,9 @@
               "tests",
               0,
               "steps",
-              121
+              139
             ],
-            "line": 1216
+            "line": 1596
           }
         },
         {
@@ -2144,9 +2324,9 @@
                 "tests",
                 0,
                 "steps",
-                122
+                140
               ],
-              "line": 1218
+              "line": 1598
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2154,9 +2334,9 @@
                 "tests",
                 0,
                 "steps",
-                123
+                141
               ],
-              "line": 1235
+              "line": 1614
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2164,9 +2344,9 @@
                 "tests",
                 0,
                 "steps",
-                124
+                142
               ],
-              "line": 1292
+              "line": 1643
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2174,9 +2354,9 @@
                 "tests",
                 0,
                 "steps",
-                125
+                143
               ],
-              "line": 1309
+              "line": 1660
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2184,9 +2364,9 @@
                 "tests",
                 0,
                 "steps",
-                126
+                144
               ],
-              "line": 1326
+              "line": 1717
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2194,9 +2374,9 @@
                 "tests",
                 0,
                 "steps",
-                127
+                145
               ],
-              "line": 1343
+              "line": 1733
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2204,9 +2384,9 @@
                 "tests",
                 0,
                 "steps",
-                128
+                146
               ],
-              "line": 1360
+              "line": 1762
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2214,9 +2394,9 @@
                 "tests",
                 0,
                 "steps",
-                129
+                147
               ],
-              "line": 1374
+              "line": 1779
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2224,9 +2404,9 @@
                 "tests",
                 0,
                 "steps",
-                130
+                148
               ],
-              "line": 1394
+              "line": 1796
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2234,9 +2414,89 @@
                 "tests",
                 0,
                 "steps",
-                131
+                149
               ],
-              "line": 1410
+              "line": 1812
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                150
+              ],
+              "line": 1841
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                151
+              ],
+              "line": 1858
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                152
+              ],
+              "line": 1875
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                153
+              ],
+              "line": 1889
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                154
+              ],
+              "line": 1905
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                155
+              ],
+              "line": 1934
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                156
+              ],
+              "line": 1954
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                157
+              ],
+              "line": 1970
             }
           ],
           "checkpoint": {
@@ -2245,9 +2505,9 @@
               "tests",
               0,
               "steps",
-              132
+              158
             ],
-            "line": 1420
+            "line": 1980
           },
           "fourBodyCorrection": {
             "status": "authored-awaiting-canonical-package-validation",
@@ -2283,9 +2543,9 @@
                 "tests",
                 0,
                 "steps",
-                133
+                159
               ],
-              "line": 1422
+              "line": 1982
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2293,9 +2553,9 @@
                 "tests",
                 0,
                 "steps",
-                134
+                160
               ],
-              "line": 1427
+              "line": 1987
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2303,9 +2563,9 @@
                 "tests",
                 0,
                 "steps",
-                135
+                161
               ],
-              "line": 1438
+              "line": 2003
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2313,9 +2573,9 @@
                 "tests",
                 0,
                 "steps",
-                136
+                162
               ],
-              "line": 1443
+              "line": 2032
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2323,9 +2583,9 @@
                 "tests",
                 0,
                 "steps",
-                137
+                163
               ],
-              "line": 1450
+              "line": 2043
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2333,9 +2593,9 @@
                 "tests",
                 0,
                 "steps",
-                138
+                164
               ],
-              "line": 1455
+              "line": 2048
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2343,9 +2603,9 @@
                 "tests",
                 0,
                 "steps",
-                139
+                165
               ],
-              "line": 1460
+              "line": 2055
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2353,9 +2613,9 @@
                 "tests",
                 0,
                 "steps",
-                140
+                166
               ],
-              "line": 1469
+              "line": 2060
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2363,9 +2623,29 @@
                 "tests",
                 0,
                 "steps",
-                141
+                167
               ],
-              "line": 1484
+              "line": 2065
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                168
+              ],
+              "line": 2074
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                169
+              ],
+              "line": 2089
             }
           ],
           "checkpoint": {
@@ -2374,9 +2654,9 @@
               "tests",
               0,
               "steps",
-              142
+              170
             ],
-            "line": 1487
+            "line": 2092
           }
         },
         {
@@ -2409,9 +2689,9 @@
                 "tests",
                 0,
                 "steps",
-                143
+                171
               ],
-              "line": 1489
+              "line": 2094
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2419,9 +2699,9 @@
                 "tests",
                 0,
                 "steps",
-                144
+                172
               ],
-              "line": 1510
+              "line": 2115
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2429,9 +2709,9 @@
                 "tests",
                 0,
                 "steps",
-                145
+                173
               ],
-              "line": 1517
+              "line": 2122
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2439,9 +2719,9 @@
                 "tests",
                 0,
                 "steps",
-                146
+                174
               ],
-              "line": 1524
+              "line": 2129
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2449,9 +2729,9 @@
                 "tests",
                 0,
                 "steps",
-                147
+                175
               ],
-              "line": 1534
+              "line": 2139
             }
           ],
           "checkpoint": {
@@ -2460,9 +2740,9 @@
               "tests",
               0,
               "steps",
-              148
+              176
             ],
-            "line": 1561
+            "line": 2166
           }
         },
         {
@@ -2493,9 +2773,9 @@
                 "tests",
                 0,
                 "steps",
-                149
+                177
               ],
-              "line": 1563
+              "line": 2168
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2503,9 +2783,9 @@
                 "tests",
                 0,
                 "steps",
-                150
+                178
               ],
-              "line": 1570
+              "line": 2175
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2513,9 +2793,9 @@
                 "tests",
                 0,
                 "steps",
-                151
+                179
               ],
-              "line": 1577
+              "line": 2182
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2523,9 +2803,9 @@
                 "tests",
                 0,
                 "steps",
-                152
+                180
               ],
-              "line": 1587
+              "line": 2192
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2533,9 +2813,9 @@
                 "tests",
                 0,
                 "steps",
-                153
+                181
               ],
-              "line": 1614
+              "line": 2219
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2543,9 +2823,9 @@
                 "tests",
                 0,
                 "steps",
-                154
+                182
               ],
-              "line": 1617
+              "line": 2222
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2553,9 +2833,9 @@
                 "tests",
                 0,
                 "steps",
-                155
+                183
               ],
-              "line": 1622
+              "line": 2227
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2563,9 +2843,9 @@
                 "tests",
                 0,
                 "steps",
-                156
+                184
               ],
-              "line": 1624
+              "line": 2229
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2573,9 +2853,9 @@
                 "tests",
                 0,
                 "steps",
-                157
+                185
               ],
-              "line": 1631
+              "line": 2236
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2583,9 +2863,9 @@
                 "tests",
                 0,
                 "steps",
-                158
+                186
               ],
-              "line": 1638
+              "line": 2243
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2593,9 +2873,9 @@
                 "tests",
                 0,
                 "steps",
-                159
+                187
               ],
-              "line": 1648
+              "line": 2253
             }
           ],
           "checkpoint": {
@@ -2604,9 +2884,9 @@
               "tests",
               0,
               "steps",
-              160
+              188
             ],
-            "line": 1668
+            "line": 2273
           }
         },
         {
@@ -2639,9 +2919,9 @@
                 "tests",
                 0,
                 "steps",
-                161
+                189
               ],
-              "line": 1670
+              "line": 2275
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2649,9 +2929,9 @@
                 "tests",
                 0,
                 "steps",
-                162
+                190
               ],
-              "line": 1675
+              "line": 2280
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2659,9 +2939,9 @@
                 "tests",
                 0,
                 "steps",
-                163
+                191
               ],
-              "line": 1686
+              "line": 2291
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2669,9 +2949,9 @@
                 "tests",
                 0,
                 "steps",
-                164
+                192
               ],
-              "line": 1691
+              "line": 2296
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2679,9 +2959,9 @@
                 "tests",
                 0,
                 "steps",
-                165
+                193
               ],
-              "line": 1698
+              "line": 2303
             }
           ],
           "checkpoint": {
@@ -2690,9 +2970,9 @@
               "tests",
               0,
               "steps",
-              166
+              194
             ],
-            "line": 1715
+            "line": 2320
           }
         },
         {
@@ -2725,9 +3005,9 @@
                 "tests",
                 0,
                 "steps",
-                167
+                195
               ],
-              "line": 1717
+              "line": 2322
             }
           ],
           "checkpoint": {
@@ -2736,9 +3016,9 @@
               "tests",
               0,
               "steps",
-              168
+              196
             ],
-            "line": 1720
+            "line": 2325
           }
         },
         {
@@ -2771,9 +3051,9 @@
                 "tests",
                 0,
                 "steps",
-                169
+                197
               ],
-              "line": 1722
+              "line": 2327
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2781,9 +3061,9 @@
                 "tests",
                 0,
                 "steps",
-                170
+                198
               ],
-              "line": 1739
+              "line": 2344
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2791,9 +3071,9 @@
                 "tests",
                 0,
                 "steps",
-                171
+                199
               ],
-              "line": 1746
+              "line": 2351
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2801,9 +3081,9 @@
                 "tests",
                 0,
                 "steps",
-                172
+                200
               ],
-              "line": 1757
+              "line": 2362
             }
           ],
           "checkpoint": {
@@ -2812,9 +3092,9 @@
               "tests",
               0,
               "steps",
-              173
+              201
             ],
-            "line": 1764
+            "line": 2369
           }
         },
         {
@@ -2845,9 +3125,9 @@
                 "tests",
                 0,
                 "steps",
-                174
+                202
               ],
-              "line": 1766
+              "line": 2371
             }
           ],
           "checkpoint": {
@@ -2856,9 +3136,9 @@
               "tests",
               0,
               "steps",
-              175
+              203
             ],
-            "line": 1768
+            "line": 2373
           }
         },
         {
@@ -2889,9 +3169,9 @@
                 "tests",
                 0,
                 "steps",
-                176
+                204
               ],
-              "line": 1770
+              "line": 2375
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2899,9 +3179,9 @@
                 "tests",
                 0,
                 "steps",
-                177
+                205
               ],
-              "line": 1775
+              "line": 2380
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2909,9 +3189,9 @@
                 "tests",
                 0,
                 "steps",
-                178
+                206
               ],
-              "line": 1786
+              "line": 2396
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2919,9 +3199,29 @@
                 "tests",
                 0,
                 "steps",
-                179
+                207
               ],
-              "line": 1791
+              "line": 2425
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                208
+              ],
+              "line": 2436
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                209
+              ],
+              "line": 2441
             }
           ],
           "checkpoint": {
@@ -2930,9 +3230,9 @@
               "tests",
               0,
               "steps",
-              180
+              210
             ],
-            "line": 1798
+            "line": 2448
           }
         },
         {
@@ -2965,9 +3265,9 @@
                 "tests",
                 0,
                 "steps",
-                181
+                211
               ],
-              "line": 1800
+              "line": 2450
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2975,9 +3275,9 @@
                 "tests",
                 0,
                 "steps",
-                182
+                212
               ],
-              "line": 1805
+              "line": 2455
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2985,9 +3285,9 @@
                 "tests",
                 0,
                 "steps",
-                183
+                213
               ],
-              "line": 1816
+              "line": 2466
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -2995,9 +3295,9 @@
                 "tests",
                 0,
                 "steps",
-                184
+                214
               ],
-              "line": 1821
+              "line": 2471
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -3005,9 +3305,9 @@
                 "tests",
                 0,
                 "steps",
-                185
+                215
               ],
-              "line": 1828
+              "line": 2478
             }
           ],
           "checkpoint": {
@@ -3016,9 +3316,9 @@
               "tests",
               0,
               "steps",
-              186
+              216
             ],
-            "line": 1845
+            "line": 2495
           }
         },
         {
@@ -3051,9 +3351,9 @@
                 "tests",
                 0,
                 "steps",
-                187
+                217
               ],
-              "line": 1847
+              "line": 2497
             }
           ],
           "checkpoint": {
@@ -3062,9 +3362,9 @@
               "tests",
               0,
               "steps",
-              188
+              218
             ],
-            "line": 1850
+            "line": 2500
           }
         },
         {
@@ -3097,9 +3397,9 @@
                 "tests",
                 0,
                 "steps",
-                189
+                219
               ],
-              "line": 1852
+              "line": 2502
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -3107,9 +3407,9 @@
                 "tests",
                 0,
                 "steps",
-                190
+                220
               ],
-              "line": 1857
+              "line": 2507
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -3117,9 +3417,9 @@
                 "tests",
                 0,
                 "steps",
-                191
+                221
               ],
-              "line": 1868
+              "line": 2518
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -3127,9 +3427,9 @@
                 "tests",
                 0,
                 "steps",
-                192
+                222
               ],
-              "line": 1873
+              "line": 2523
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -3137,9 +3437,9 @@
                 "tests",
                 0,
                 "steps",
-                193
+                223
               ],
-              "line": 1880
+              "line": 2530
             }
           ],
           "checkpoint": {
@@ -3148,9 +3448,9 @@
               "tests",
               0,
               "steps",
-              194
+              224
             ],
-            "line": 1897
+            "line": 2547
           }
         },
         {
@@ -3181,9 +3481,9 @@
                 "tests",
                 0,
                 "steps",
-                195
+                225
               ],
-              "line": 1899
+              "line": 2549
             }
           ],
           "checkpoint": {
@@ -3192,9 +3492,9 @@
               "tests",
               0,
               "steps",
-              196
+              226
             ],
-            "line": 1901
+            "line": 2551
           }
         },
         {
@@ -3225,9 +3525,9 @@
                 "tests",
                 0,
                 "steps",
-                197
+                227
               ],
-              "line": 1903
+              "line": 2553
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -3235,9 +3535,9 @@
                 "tests",
                 0,
                 "steps",
-                198
+                228
               ],
-              "line": 1908
+              "line": 2558
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -3245,9 +3545,9 @@
                 "tests",
                 0,
                 "steps",
-                199
+                229
               ],
-              "line": 1919
+              "line": 2574
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -3255,9 +3555,29 @@
                 "tests",
                 0,
                 "steps",
-                200
+                230
               ],
-              "line": 1924
+              "line": 2603
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                231
+              ],
+              "line": 2614
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                232
+              ],
+              "line": 2619
             }
           ],
           "checkpoint": {
@@ -3266,9 +3586,9 @@
               "tests",
               0,
               "steps",
-              201
+              233
             ],
-            "line": 1931
+            "line": 2626
           }
         },
         {
@@ -3301,9 +3621,9 @@
                 "tests",
                 0,
                 "steps",
-                202
+                234
               ],
-              "line": 1933
+              "line": 2628
             }
           ],
           "checkpoint": {
@@ -3312,9 +3632,9 @@
               "tests",
               0,
               "steps",
-              203
+              235
             ],
-            "line": 1936
+            "line": 2631
           }
         },
         {
@@ -3347,9 +3667,9 @@
                 "tests",
                 0,
                 "steps",
-                204
+                236
               ],
-              "line": 1938
+              "line": 2633
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -3357,9 +3677,9 @@
                 "tests",
                 0,
                 "steps",
-                205
+                237
               ],
-              "line": 1943
+              "line": 2638
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -3367,9 +3687,9 @@
                 "tests",
                 0,
                 "steps",
-                206
+                238
               ],
-              "line": 1954
+              "line": 2649
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -3377,9 +3697,9 @@
                 "tests",
                 0,
                 "steps",
-                207
+                239
               ],
-              "line": 1959
+              "line": 2654
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -3387,9 +3707,9 @@
                 "tests",
                 0,
                 "steps",
-                208
+                240
               ],
-              "line": 1966
+              "line": 2661
             }
           ],
           "checkpoint": {
@@ -3398,9 +3718,9 @@
               "tests",
               0,
               "steps",
-              209
+              241
             ],
-            "line": 1983
+            "line": 2678
           }
         },
         {
@@ -3431,9 +3751,9 @@
                 "tests",
                 0,
                 "steps",
-                210
+                242
               ],
-              "line": 1985
+              "line": 2680
             }
           ],
           "checkpoint": {
@@ -3442,9 +3762,9 @@
               "tests",
               0,
               "steps",
-              211
+              243
             ],
-            "line": 1987
+            "line": 2682
           }
         },
         {
@@ -3475,9 +3795,9 @@
                 "tests",
                 0,
                 "steps",
-                212
+                244
               ],
-              "line": 1989
+              "line": 2684
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -3485,9 +3805,9 @@
                 "tests",
                 0,
                 "steps",
-                213
+                245
               ],
-              "line": 1994
+              "line": 2689
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -3495,9 +3815,9 @@
                 "tests",
                 0,
                 "steps",
-                214
+                246
               ],
-              "line": 2005
+              "line": 2705
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -3505,9 +3825,29 @@
                 "tests",
                 0,
                 "steps",
-                215
+                247
               ],
-              "line": 2010
+              "line": 2734
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                248
+              ],
+              "line": 2745
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                249
+              ],
+              "line": 2750
             }
           ],
           "checkpoint": {
@@ -3516,9 +3856,9 @@
               "tests",
               0,
               "steps",
-              216
+              250
             ],
-            "line": 2017
+            "line": 2757
           }
         },
         {
@@ -3551,9 +3891,9 @@
                 "tests",
                 0,
                 "steps",
-                217
+                251
               ],
-              "line": 2019
+              "line": 2759
             }
           ],
           "checkpoint": {
@@ -3562,9 +3902,9 @@
               "tests",
               0,
               "steps",
-              218
+              252
             ],
-            "line": 2022
+            "line": 2762
           }
         },
         {
@@ -3597,9 +3937,9 @@
                 "tests",
                 0,
                 "steps",
-                219
+                253
               ],
-              "line": 2024
+              "line": 2764
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -3607,9 +3947,9 @@
                 "tests",
                 0,
                 "steps",
-                220
+                254
               ],
-              "line": 2029
+              "line": 2769
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -3617,9 +3957,9 @@
                 "tests",
                 0,
                 "steps",
-                221
+                255
               ],
-              "line": 2040
+              "line": 2780
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -3627,9 +3967,9 @@
                 "tests",
                 0,
                 "steps",
-                222
+                256
               ],
-              "line": 2045
+              "line": 2785
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -3637,9 +3977,9 @@
                 "tests",
                 0,
                 "steps",
-                223
+                257
               ],
-              "line": 2052
+              "line": 2792
             }
           ],
           "checkpoint": {
@@ -3648,9 +3988,9 @@
               "tests",
               0,
               "steps",
-              224
+              258
             ],
-            "line": 2069
+            "line": 2809
           }
         },
         {
@@ -3681,9 +4021,9 @@
                 "tests",
                 0,
                 "steps",
-                225
+                259
               ],
-              "line": 2071
+              "line": 2811
             }
           ],
           "checkpoint": {
@@ -3692,9 +4032,9 @@
               "tests",
               0,
               "steps",
-              226
+              260
             ],
-            "line": 2073
+            "line": 2813
           }
         },
         {
@@ -3725,9 +4065,9 @@
                 "tests",
                 0,
                 "steps",
-                227
+                261
               ],
-              "line": 2075
+              "line": 2815
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -3735,9 +4075,9 @@
                 "tests",
                 0,
                 "steps",
-                228
+                262
               ],
-              "line": 2080
+              "line": 2820
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -3745,9 +4085,9 @@
                 "tests",
                 0,
                 "steps",
-                229
+                263
               ],
-              "line": 2091
+              "line": 2836
             },
             {
               "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
@@ -3755,9 +4095,29 @@
                 "tests",
                 0,
                 "steps",
-                230
+                264
               ],
-              "line": 2096
+              "line": 2865
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                265
+              ],
+              "line": 2876
+            },
+            {
+              "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+              "path": [
+                "tests",
+                0,
+                "steps",
+                266
+              ],
+              "line": 2881
             }
           ],
           "checkpoint": {
@@ -3766,9 +4126,9 @@
               "tests",
               0,
               "steps",
-              231
+              267
             ],
-            "line": 2103
+            "line": 2888
           }
         }
       ],
@@ -8347,6 +8707,738 @@
         "deterministicPublicChecks": "20production transport controls +3 exactfinalcap runFiles expected outcomes matched",
         "runtime": "unrun/skipped",
         "failurePath": "archive unobserved; coordinator-approved owned Compose release deviation"
+      },
+      "freshPublicReadCorrection": {
+        "sourceCommit": "56bb2fcd1d7c1eae8a192cdeed012ddcce7351d8",
+        "helperSha256": "a8b86238ea03769f9fbeef13777d3bde01d6b804d21e6c508db39431a38e96bf",
+        "priorRawSha256": "4d47e8162b22c89f034cc99c9b5c9d15da47c48c5a6149c73bd83b5f56ab652c",
+        "newRawSha256": "6efc325334c7ddc7ce4b9e71200633ddf7cb1bd543eab84298af15cbfb3eae70",
+        "sourceHelperInvocations": 11,
+        "existingClaimIdentityRead": 1,
+        "newIdentityReads": 17,
+        "identityReadsOnSelectedOneAgentCheckoutPath": 18,
+        "newIndependentContentReads": 1,
+        "totalAuthoredSteps": 269,
+        "reads": [
+          {
+            "binding": "prepareBaselineIdentity",
+            "oldStep": 16,
+            "caller": "prepare_editor/baseline/scoped",
+            "helperLine": 301,
+            "identityLines": [
+              63,
+              70
+            ],
+            "priorAuthoredIndex": 64,
+            "deadlineMs": 15000,
+            "fourEqualities": [
+              "agent_id",
+              "workspace_id",
+              "repo",
+              "harness"
+            ],
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  64
+                ],
+                "line": 650
+              },
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  65
+                ],
+                "line": 666
+              }
+            ]
+          },
+          {
+            "binding": "prepareContentIdentity",
+            "oldStep": 16,
+            "caller": "prepare_editor/second scoped content read",
+            "helperLine": 303,
+            "identityLines": [
+              63,
+              70
+            ],
+            "priorAuthoredIndex": 66,
+            "deadlineMs": 15000,
+            "fourEqualities": [
+              "agent_id",
+              "workspace_id",
+              "repo",
+              "harness"
+            ],
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  68
+                ],
+                "line": 739
+              },
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  69
+                ],
+                "line": 755
+              }
+            ]
+          },
+          {
+            "binding": "editorVisibleIdentity",
+            "oldStep": 20,
+            "caller": "editor_visible/route",
+            "helperLine": 309,
+            "identityLines": [
+              63,
+              70
+            ],
+            "priorAuthoredIndex": 76,
+            "deadlineMs": 15000,
+            "fourEqualities": [
+              "agent_id",
+              "workspace_id",
+              "repo",
+              "harness"
+            ],
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  82
+                ],
+                "line": 877
+              },
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  83
+                ],
+                "line": 893
+              }
+            ]
+          },
+          {
+            "binding": "savedContentIdentity",
+            "oldStep": 24,
+            "caller": "file_state/scoped files",
+            "helperLine": 273,
+            "identityLines": [
+              63,
+              70
+            ],
+            "priorAuthoredIndex": 97,
+            "deadlineMs": 15000,
+            "fourEqualities": [
+              "agent_id",
+              "workspace_id",
+              "repo",
+              "harness"
+            ],
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  105
+                ],
+                "line": 1089
+              },
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  106
+                ],
+                "line": 1105
+              }
+            ]
+          },
+          {
+            "binding": "savedStatIdentity",
+            "oldStep": 24,
+            "caller": "file_state/scoped files/stat",
+            "helperLine": 275,
+            "identityLines": [
+              63,
+              70
+            ],
+            "priorAuthoredIndex": 99,
+            "deadlineMs": 15000,
+            "fourEqualities": [
+              "agent_id",
+              "workspace_id",
+              "repo",
+              "harness"
+            ],
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  109
+                ],
+                "line": 1208
+              },
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  110
+                ],
+                "line": 1224
+              }
+            ]
+          },
+          {
+            "binding": "savedStatusIdentity",
+            "oldStep": 24,
+            "caller": "file_state/scoped files/git-status",
+            "helperLine": 279,
+            "identityLines": [
+              63,
+              70
+            ],
+            "priorAuthoredIndex": 101,
+            "deadlineMs": 15000,
+            "fourEqualities": [
+              "agent_id",
+              "workspace_id",
+              "repo",
+              "harness"
+            ],
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  113
+                ],
+                "line": 1287
+              },
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  114
+                ],
+                "line": 1303
+              }
+            ]
+          },
+          {
+            "binding": "savedCheckoutIdentity",
+            "oldStep": 24,
+            "caller": "file_state/checkouts agent-row identity",
+            "helperLine": 283,
+            "identityLines": [
+              63,
+              70
+            ],
+            "priorAuthoredIndex": 104,
+            "deadlineMs": 15000,
+            "fourEqualities": [
+              "agent_id",
+              "workspace_id",
+              "repo",
+              "harness"
+            ],
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  118
+                ],
+                "line": 1380
+              },
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  119
+                ],
+                "line": 1396
+              }
+            ]
+          },
+          {
+            "binding": "reloadedFilesRouteIdentity",
+            "oldStep": 30,
+            "caller": "route files",
+            "helperLine": 198,
+            "identityLines": [
+              63,
+              70
+            ],
+            "priorAuthoredIndex": 118,
+            "deadlineMs": 15000,
+            "fourEqualities": [
+              "agent_id",
+              "workspace_id",
+              "repo",
+              "harness"
+            ],
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  134
+                ],
+                "line": 1528
+              },
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  135
+                ],
+                "line": 1544
+              }
+            ]
+          },
+          {
+            "binding": "reloadedContentIdentity",
+            "oldStep": 31,
+            "caller": "file_state/scoped files",
+            "helperLine": 273,
+            "identityLines": [
+              63,
+              70
+            ],
+            "priorAuthoredIndex": 122,
+            "deadlineMs": 15000,
+            "fourEqualities": [
+              "agent_id",
+              "workspace_id",
+              "repo",
+              "harness"
+            ],
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  140
+                ],
+                "line": 1598
+              },
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  141
+                ],
+                "line": 1614
+              }
+            ]
+          },
+          {
+            "binding": "reloadedStatIdentity",
+            "oldStep": 31,
+            "caller": "file_state/scoped files/stat",
+            "helperLine": 275,
+            "identityLines": [
+              63,
+              70
+            ],
+            "priorAuthoredIndex": 124,
+            "deadlineMs": 15000,
+            "fourEqualities": [
+              "agent_id",
+              "workspace_id",
+              "repo",
+              "harness"
+            ],
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  144
+                ],
+                "line": 1717
+              },
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  145
+                ],
+                "line": 1733
+              }
+            ]
+          },
+          {
+            "binding": "reloadedStatusIdentity",
+            "oldStep": 31,
+            "caller": "file_state/scoped files/git-status",
+            "helperLine": 279,
+            "identityLines": [
+              63,
+              70
+            ],
+            "priorAuthoredIndex": 126,
+            "deadlineMs": 15000,
+            "fourEqualities": [
+              "agent_id",
+              "workspace_id",
+              "repo",
+              "harness"
+            ],
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  148
+                ],
+                "line": 1796
+              },
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  149
+                ],
+                "line": 1812
+              }
+            ]
+          },
+          {
+            "binding": "reloadedCheckoutIdentity",
+            "oldStep": 31,
+            "caller": "file_state/checkouts agent-row identity",
+            "helperLine": 283,
+            "identityLines": [
+              63,
+              70
+            ],
+            "priorAuthoredIndex": 129,
+            "deadlineMs": 15000,
+            "fourEqualities": [
+              "agent_id",
+              "workspace_id",
+              "repo",
+              "harness"
+            ],
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  153
+                ],
+                "line": 1889
+              },
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  154
+                ],
+                "line": 1905
+              }
+            ]
+          },
+          {
+            "binding": "filesLensIdentity",
+            "oldStep": 32,
+            "caller": "select_files_lens/route",
+            "helperLine": 212,
+            "identityLines": [
+              63,
+              70
+            ],
+            "priorAuthoredIndex": 134,
+            "deadlineMs": 15000,
+            "fourEqualities": [
+              "agent_id",
+              "workspace_id",
+              "repo",
+              "harness"
+            ],
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  160
+                ],
+                "line": 1987
+              },
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  161
+                ],
+                "line": 2003
+              }
+            ]
+          },
+          {
+            "binding": "reloadedGitRouteIdentity",
+            "oldStep": 39,
+            "caller": "route git",
+            "helperLine": 198,
+            "identityLines": [
+              63,
+              70
+            ],
+            "priorAuthoredIndex": 177,
+            "deadlineMs": 15000,
+            "fourEqualities": [
+              "agent_id",
+              "workspace_id",
+              "repo",
+              "harness"
+            ],
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  205
+                ],
+                "line": 2380
+              },
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  206
+                ],
+                "line": 2396
+              }
+            ]
+          },
+          {
+            "binding": "reloadedInfoRouteIdentity",
+            "oldStep": 44,
+            "caller": "route info",
+            "helperLine": 198,
+            "identityLines": [
+              63,
+              70
+            ],
+            "priorAuthoredIndex": 198,
+            "deadlineMs": 15000,
+            "fourEqualities": [
+              "agent_id",
+              "workspace_id",
+              "repo",
+              "harness"
+            ],
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  228
+                ],
+                "line": 2558
+              },
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  229
+                ],
+                "line": 2574
+              }
+            ]
+          },
+          {
+            "binding": "reloadedChatRouteIdentity",
+            "oldStep": 48,
+            "caller": "route chat",
+            "helperLine": 198,
+            "identityLines": [
+              63,
+              70
+            ],
+            "priorAuthoredIndex": 213,
+            "deadlineMs": 15000,
+            "fourEqualities": [
+              "agent_id",
+              "workspace_id",
+              "repo",
+              "harness"
+            ],
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  245
+                ],
+                "line": 2689
+              },
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  246
+                ],
+                "line": 2705
+              }
+            ]
+          },
+          {
+            "binding": "reloadedDiffRouteIdentity",
+            "oldStep": 52,
+            "caller": "route diff",
+            "helperLine": 198,
+            "identityLines": [
+              63,
+              70
+            ],
+            "priorAuthoredIndex": 228,
+            "deadlineMs": 15000,
+            "fourEqualities": [
+              "agent_id",
+              "workspace_id",
+              "repo",
+              "harness"
+            ],
+            "destination": [
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  262
+                ],
+                "line": 2820
+              },
+              {
+                "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+                "path": [
+                  "tests",
+                  0,
+                  "steps",
+                  263
+                ],
+                "line": 2836
+              }
+            ]
+          }
+        ],
+        "checkoutBranch": "Source list comprehension rereads identity per kind=agent row. Authored one fresh read per returned checkout lookup preserves selected one-agent-row branch; zero/multiple agent-kind rows require paired-run finding, never inferred full branch equivalence. No stronger all-checkout-count assertion added.",
+        "filesLens": "Original click unconditional; exact unique control/true|false assertion and click already authored; conditional gap removed.",
+        "claimDestination": [
+          {
+            "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              22
+            ],
+            "line": 260
+          },
+          {
+            "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              23
+            ],
+            "line": 276
+          }
+        ],
+        "sourceCheckoutIdentityCountFormula": "16 fixed reads + count(kind=agent in saved checkouts) + count(kind=agent in reloaded checkouts)",
+        "prepareContentReadDestination": [
+          {
+            "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
+            "path": [
+              "tests",
+              0,
+              "steps",
+              70
+            ],
+            "line": 784
+          }
+        ],
+        "authoringStatus": "canonical full raw ADMITTED; focused deterministic polarity controls PASS; original actor/runtime unrun"
       }
     },
     {

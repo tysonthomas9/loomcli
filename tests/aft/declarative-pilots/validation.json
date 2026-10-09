@@ -887,7 +887,7 @@
       },
       {
         "file": "tests/aft/declarative-pilots/files-save-reload.test.yaml",
-        "sha256": "4d47e8162b22c89f034cc99c9b5c9d15da47c48c5a6149c73bd83b5f56ab652c"
+        "sha256": "6efc325334c7ddc7ce4b9e71200633ddf7cb1bd543eab84298af15cbfb3eae70"
       },
       {
         "file": "tests/aft/declarative-pilots/predicate-mappings.json",
@@ -895,7 +895,7 @@
       },
       {
         "file": "tests/aft/declarative-pilots/preservation.json",
-        "sha256": "4d3e1b8660625b790a8439da4e60190f30a9126e67e0817514358f39dda44a2a"
+        "sha256": "123ec94c5ac59e890dc01d77b7e1fe78a382cc162d8b0e8008ac0c9d0192747c"
       },
       {
         "file": "tests/aft/declarative-pilots/sse-cursor.test.yaml",
@@ -932,7 +932,14 @@
       "f377PilotChecksObtained": true,
       "f377Note": "Historical c71/f377 source-shaped timeout profile retained separately. New parent-approved584 source-built isolated f377 raw admission completes all5 unchanged files with no effects/runtime. No maintained root pin or preservation claim.",
       "maintainedEngine": "ca73f637d46fa618e2a67f987b89698e914f21cd",
-      "gf1CurrentRawStatus": "Current4d47 GF1 all233 ADMITTED on exactcoherent1e+corrected6a;20callbackcontrols+3runFiles outcomes matched. Skiptrue/source-map helper gaps/runtime unverified; global engine session-close failure unwaived."
+      "gf1CurrentRawStatus": {
+        "rawSha256": "6efc325334c7ddc7ce4b9e71200633ddf7cb1bd543eab84298af15cbfb3eae70",
+        "status": "ADMITTED all269 authored raw steps;7focused deterministic public read controls PASS; runtime unrun",
+        "rawAdmissionPath": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-fresh-public-reads-20261009/raw-admission.json",
+        "freshCorrectionReceiptSha256": "630b3f3043bad616f5450af19ca89fe65d3ab8e7df75c4f1c688cdb27b680513",
+        "preservationAcceptance": false,
+        "maintainedSkip": true
+      }
     },
     "sourceMapping": {
       "originalSteps": 207,
@@ -5921,5 +5928,153 @@
     ],
     "receiptPath": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/final-validation-receipt.json",
     "receiptSha256": "36030491bed2b54bf4e4013b33a48130828d11965cf04602839ec5e3f45d3a35"
+  },
+  "gf1FreshPublicReadCorrection": {
+    "receiptPath": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-fresh-public-reads-20261009/receipt.json",
+    "receiptSha256": "630b3f3043bad616f5450af19ca89fe65d3ab8e7df75c4f1c688cdb27b680513",
+    "receipt": {
+      "at": "2026-10-09T22:14:07.749119+00:00",
+      "purpose": "Parent scoped missing public identity GET and distinct prepare_editor response correction; no engine/adapter/new mechanism or runtime",
+      "parentHead": "66dbf8c4a52585d26e31d9055d0f3be3a31db0c3",
+      "rawSha256": "6efc325334c7ddc7ce4b9e71200633ddf7cb1bd543eab84298af15cbfb3eae70",
+      "rawBeforeSha256": "4d47e8162b22c89f034cc99c9b5c9d15da47c48c5a6149c73bd83b5f56ab652c",
+      "rawSteps": 269,
+      "helperInvocations": 11,
+      "freshIdentityReadsAdded": 17,
+      "distinctSecondContentReadAdded": 1,
+      "sourceCheckoutIdentityCountFormula": "16 fixed + saved kind=agent checkout rows + reloaded kind=agent checkout rows",
+      "selectedOneAgentRowBranchIdentityReads": 18,
+      "conditionalMultiplicityStatus": "Other row counts are labeled paired findings; no full runtime branch proof or new dynamic looping claimed",
+      "rawAdmission": {
+        "purpose": "Approved coherent1e callback + isolated corrected6a final4d raw admission only; no source/runtime parity",
+        "engineHead": "6a82d623ae5074332e2187ff4db81e2f31628eb3",
+        "adapterSource": "1e43197e47e1005561769226a52c1bcd3ed72050",
+        "actualAdapterRoot": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/tests/aft/adapter",
+        "engineModuleRoot": "/private/tmp/loom-aft-pilot-validation-16e28787/gf1-final-coherent-_l4ulp0j/tests/aft/adapter/node_modules/@tysonthomas9/aft/dist",
+        "canonicalModuleResolutionVerified": true,
+        "selectionSha256": "271133f0d687705b020893029079325836ba029971881b76ed32079a08784059",
+        "envFileSha256": "a65990e557ceed39509ecdfed46701496a019ceab84b42a14f4ff95de0365638",
+        "envSha256": "88883ae132673ce6274b7cb4a9896d6367ef51d236e4eec203b6a83f879e764c",
+        "pinSha256": "94e560e598315f403adfcab95d7ad9706bc5489d3ea309c688fbb262e108a7d1",
+        "manifestFiles": 2441,
+        "uniqueManifestBytes": 9838940,
+        "providers": 28,
+        "rawFile": "/private/tmp/loom-aft-pilots-16e28787/tests/aft/declarative-pilots/files-save-reload.test.yaml",
+        "rawSha256": "6efc325334c7ddc7ce4b9e71200633ddf7cb1bd543eab84298af15cbfb3eae70",
+        "rawBytes": 94994,
+        "verifyCalls": 279,
+        "verifyReads": 2441,
+        "verifyBytes": 9838940,
+        "verifyMs": 1178.3874949999927,
+        "elapsedMs": 1382.7632919999996,
+        "effects": 0,
+        "runtimeStarted": 0,
+        "status": "ADMITTED canonical unchanged raw suite",
+        "guardMs": 60000,
+        "loadedSuites": 1,
+        "cases": [
+          {
+            "name": "GF1 UI editor Save updates this Agent API checkout and survives every tab reload",
+            "skipped": true,
+            "declaredSteps": 269
+          }
+        ],
+        "rawUnchangedAfter": true
+      },
+      "focusedPublicControls": [
+        {
+          "scenario": "different-responses",
+          "actual": "passed",
+          "expected": "passed",
+          "identityReads": 2,
+          "contentReads": 2
+        },
+        {
+          "scenario": "bad-agent_id",
+          "actual": "failed",
+          "expected": "failed",
+          "identityReads": 1,
+          "contentReads": 0
+        },
+        {
+          "scenario": "bad-workspace_id",
+          "actual": "failed",
+          "expected": "failed",
+          "identityReads": 1,
+          "contentReads": 0
+        },
+        {
+          "scenario": "bad-repo",
+          "actual": "failed",
+          "expected": "failed",
+          "identityReads": 1,
+          "contentReads": 0
+        },
+        {
+          "scenario": "bad-harness",
+          "actual": "failed",
+          "expected": "failed",
+          "identityReads": 1,
+          "contentReads": 0
+        },
+        {
+          "scenario": "bad-second-identity",
+          "actual": "failed",
+          "expected": "failed",
+          "identityReads": 2,
+          "contentReads": 1
+        },
+        {
+          "scenario": "second-content-no-newline",
+          "actual": "failed",
+          "expected": "failed",
+          "identityReads": 2,
+          "contentReads": 2
+        }
+      ],
+      "focusedControlsResult": "7/7 expected outcomes PASS; actual public runFiles with injected HTTP fetch and DOM-denying named browser CLI double; no product/browser/provider/adapter runtime proof",
+      "prior23Controls": "Retained/reused unchanged final36030491 receipt, not rerun or credited as new whole269 UI body execution",
+      "preserved": "original53 screenshot names and setup/teardown/exports/finalarchive equal; other4raw byte-identical; all maintained skiptrue",
+      "engineHead": "6a82d623ae5074332e2187ff4db81e2f31628eb3",
+      "coherentAdapterHead": "1e43197e47e1005561769226a52c1bcd3ed72050",
+      "canonicalPackageByteEvidence": "Retained final36030491 same116 emitted149 package match; no source or engine overlays",
+      "runOnlySha256": "b263e9d8638197ed216db81aaf5dac3f3818633f91b5b518a8bcc13832455e6c",
+      "runOnlyDiff": "only one skiptrue->false line; no runtime",
+      "supersedesRunOnlyPreparation": "b728b598/old4d47 preparatory candidate now stale; planned distinct RUN_IDs and sequential actual named-session/cleanup checks still applicable after preflight",
+      "knownUnwaivedFailure": "Package global session-close failure; actual future named close and cleanupErrors required, no close --all",
+      "effects": 0,
+      "runtimeStarted": 0,
+      "originalCampaignChanged": false,
+      "artifacts": {
+        "author.py": "82853cb5a08b02c8008f4e81e54541ff96738b18ab827cd249a404ed0808f8aa",
+        "authored-prepare-steps.json": "e77e565b3978c2cfcaf0b878e479e9ec57f862fa5b18cf45ff95ea9424882ffe",
+        "bad-agent_id-result.json": "76fabbb0e10bcd984c9448cade27ab9fbb7222adfed031e0d2a5b46d02b521e2",
+        "bad-agent_id.test.yaml": "cc58b8dd4b2deac13677ca47c68ab6914d73ee652fe7e1844b2b23684f5aae0c",
+        "bad-harness-result.json": "3f669f0ac6212e590c414e54f5c7e870ea47968bb37d2a5e381bc048a9e6f976",
+        "bad-harness.test.yaml": "580f677afea04ee0b966a729dc6f8d0b2269d45b1f90a448199efd304bafdd48",
+        "bad-repo-result.json": "d9eda12594085e9869128bb4cb1263cd24840ab4aa31684ffa740e4475f2f59e",
+        "bad-repo.test.yaml": "d758ad84db180cd5b94c1f60bdfec1ff806a64c66bf7c31fd099f6bb3fe93919",
+        "bad-second-identity-result.json": "6086ae7b81dee5f98ba6e9c4a8ef2c68313789a5846414eda6374a37ff324f0f",
+        "bad-second-identity.test.yaml": "de406e03404be27d2872fdbc4c2a097a9524fed32809ff947810b31d18299963",
+        "bad-workspace_id-result.json": "68b6fdee9207de5e838877b00adbba76f75d1e57607f2d71f68b637899370449",
+        "bad-workspace_id.test.yaml": "50d060a8397290ccf6d2321812231729e31149dd4946847c4a3d8be2fc0730da",
+        "compact-map.txt": "6cb51c6d1ec266e0d87131d043f50125d6f442de748b936909b75cd4e7c7d54f",
+        "controls-receipt.json": "871557da5e783c2866a9e50f617ecf9fa5dffb3e1ee892e28446c7b33334180e",
+        "different-responses-result.json": "d15921f7a0a69c3e3211fc2805d1dd5cc04cf4f899eead5bbd3b839bbe6c32e0",
+        "different-responses.test.yaml": "a0e838f24de52175797c6589013341e062fced3f2f6cbfdf51d4109630b66d69",
+        "files-save-reload.run-only.test.yaml": "b263e9d8638197ed216db81aaf5dac3f3818633f91b5b518a8bcc13832455e6c",
+        "finalize.py": "183f475c65261a42a92c151b55dcc3b92b8e4b4dc189513352240868d80874d1",
+        "finish-map.py": "ed86d4b74faa6adffeb199724f13dbc688cf1112e173cf283c9dd801bccab44a",
+        "fresh-read-map.json": "114efe2f449eea27be8a17b6d8a7c874ba4e05c0a4f83c7fb9b879bdffe662e6",
+        "prepare-controls.py": "d5f32c1b38074f0bbe167170627382d2b2ab79d63d2010b95f0627f265fa70e4",
+        "public-controls.log": "20569ebe80d048aa035b34f252afb57a951457d3ce829fa38a6491fcb361f46d",
+        "public-controls.mjs": "64057a07fe62e9e6222936eb3530ebe1a90d95d352ea851477d78d02eac1bfa4",
+        "raw-admission.json": "e31602b9e03be57d8fd7fb532d8f56b19de841206151f6a7b84b55a7e8b2e8e0",
+        "raw-admission.log": "f9b737b8bf227f099298688814fadf68a9c0534373150b30b8315a34a647959e",
+        "run-only.diff": "c77983f77cbddb47ea1d941bfc3358bb9c7ab9e0491dd3364a453e33c1b7d1e1",
+        "second-content-no-newline-result.json": "3ad9928f7a9eb708caa0fad2a2ba294e483728b2833258fcf075aa05fb6e7db0",
+        "second-content-no-newline.test.yaml": "4af562f0134c258ffad76e290f3aee08608c3966328d2723093a38ea5fafd9c3"
+      }
+    }
   }
 }
