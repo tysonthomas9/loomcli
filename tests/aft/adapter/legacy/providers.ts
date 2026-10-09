@@ -1,11 +1,15 @@
 import { z } from 'zod';
 import type { CapabilityContext, CapabilityProvider, ImplementationPin } from '@tysonthomas9/aft/capabilities';
-import type { EvidenceClass, CapabilityEffect } from '@tysonthomas9/aft/types';
-import { getFixtureOperationAuthority, type LoomAuthorizedOperation } from '../authority.js';
+import type { EvidenceClass } from '@tysonthomas9/aft/types';
+import { getFixtureOperationAuthority } from '../authority.js';
 import { RedactionFacts, redactionFacts } from '../redaction.js';
 import { defineOperation } from '../operation.js';
 import { getFixture, disposeFixtures, type OwnedFixture } from '../ownership.js';
 import { Id, Json, HttpResponse, ObservationError } from '../protocol.js';
+import { requireOwnedWorkspace, enrollOwnedLegacyAgent } from '../workspaces.js';
+import { getFixtureEvidenceStore } from '../evidence.js';
+import { LegacyOperationEffects, legacyTaskEffects, type LegacyProviderOptions } from './effects.js';
+export { LegacyOperationEffects, legacyTaskEffects, type LegacyProviderOptions } from './effects.js';
 import { createLegacyOperations, LegacyError, LegacyEvidenceClasses, RuntimeInput, RoleInput, UsageInput, TaskInput, SeedInput, ConfigureInput,
   type LegacyAccess, type Invocation } from './operations.js';
 
@@ -20,11 +24,6 @@ export const TaskOutput = z.object({ ownedProcessId: Id, generation: Id, exitCod
 export const SeedOutput = z.object({ commit: z.string().regex(/^[a-f0-9]{40}$/), receipt: Receipt, redaction: RedactionFacts }).strict();
 export const ConfigureOutput = z.object({ previous: Json, response: HttpResponse.nullable(), receipt: Receipt, redaction: RedactionFacts }).strict();
 
-export const LegacyOperationEffects: Record<LoomAuthorizedOperation, readonly CapabilityEffect[]> = {
-  'loom.cli.role': ['read-api'], 'loom.cli.usage': ['read-api'], 'loom.cli.task': ['start-owned-process'],
-  'loom.runtime.stimulate': ['stop-owned-process'],
-  'loom.fixture.seedWorktree': ['write-fixture'], 'loom.fixture.configure': ['write-fixture'],
-};
 const operationIds = { role: 'loom.cli.role', usage: 'loom.cli.usage', task: 'loom.cli.task', stimulate: 'loom.runtime.stimulate',
   seedWorktree: 'loom.fixture.seedWorktree', configure: 'loom.fixture.configure' } as const;
 const preflightBackends: Readonly<Record<string, string>> = {
@@ -37,7 +36,9 @@ const preflightBackends: Readonly<Record<string, string>> = {
 // can be supplied by YAML. Root registration remains with the adapter owner.
 export type LegacyAccessFactory = (context: CapabilityContext, fixture: OwnedFixture) => LegacyAccess;
 export function createLegacyProviders(implementation: ImplementationPin, implementationSha256: string,
-  accessFactory: LegacyAccessFactory): CapabilityProvider[] {
+  accessFactory: LegacyAccessFactory, options: LegacyProviderOptions = { taskExecution: 'deterministic' }): CapabilityProvider[] {
+  const taskExecution = z.enum(['deterministic', 'live-provider']).parse(options.taskExecution);
+  const taskEffects = legacyTaskEffects({ taskExecution });
   // This is an operation-state cache keyed by the canonical private fixture,
   // not a second ownership registry. Suite/case access always goes through getFixture.
   const stores = new WeakMap<OwnedFixture, { operations: ReturnType<typeof createLegacyOperations>; sequence: number }>();
@@ -45,21 +46,32 @@ export function createLegacyProviders(implementation: ImplementationPin, impleme
   async function invoke<K extends keyof ReturnType<typeof createLegacyOperations>>(method: K, input: unknown,
     context: CapabilityContext, leaseId: string, workspaceId?: string) {
     const fixture = await getFixture(context, leaseId);
-    if (workspaceId !== undefined && workspaceId !== fixture.workspaceId) throw new ObservationError('ownership-mismatch', 'Legacy workspace differs from canonical fixture');
     const operation = operationIds[method];
     let grant = getFixtureOperationAuthority(fixture, operation, LegacyOperationEffects[operation]);
     if (method === 'stimulate' && RuntimeInput.parse(input).operation === 'serve-restart')
-      grant = getFixtureOperationAuthority(fixture, operation, ['stop-owned-process','restart-owned-service']);
+      grant = getFixtureOperationAuthority(fixture, operation, [...LegacyOperationEffects[operation], 'restart-owned-service']);
     if (!z.enum(LegacyEvidenceClasses).safeParse(grant.evidenceClass).success)
       throw new ObservationError('source-mismatch', 'Legacy operation evidence is unsupported');
     if (method === 'task') {
       const task = TaskInput.parse(input);
+      if (grant.evidenceClass !== taskExecution)
+        throw new ObservationError('source-mismatch', 'Task route differs from trusted composition descriptor');
+      grant = getFixtureOperationAuthority(fixture, operation, taskEffects);
       const preflightBackend = preflightBackends[fixture.profile];
       if (preflightBackend && (task.backend !== preflightBackend || grant.evidenceClass !== 'live-provider'))
         throw new ObservationError('unsupported-capability', 'Task backend or external execution authority differs from preflight');
       if (fixture.profile === 'legacy-deterministic' && grant.evidenceClass !== 'deterministic')
         throw new ObservationError('source-mismatch', 'Stub task execution cannot be labeled as a provider run');
       if (grant.evidenceClass === 'live-provider') grant = getFixtureOperationAuthority(fixture, operation, ['start-owned-process', 'external-provider']);
+    }
+    if (workspaceId !== undefined) {
+      requireOwnedWorkspace(fixture, workspaceId, undefined, 'legacy-agent-name');
+      const actor = method === 'usage' ? UsageInput.parse(input).agent.agentId : method === 'task' ? TaskInput.parse(input).agentName :
+        method === 'seedWorktree' ? SeedInput.parse(input).agentName : undefined;
+      if (actor !== undefined) {
+        await enrollOwnedLegacyAgent(fixture, workspaceId, actor, context.signal, getFixtureEvidenceStore(context, leaseId));
+        requireOwnedWorkspace(fixture, workspaceId, actor, 'legacy-agent-name');
+      }
     }
     let store = stores.get(fixture);
     if (!store) { store = { operations: createLegacyOperations(accessFactory(context, fixture), op =>
@@ -69,7 +81,7 @@ export function createLegacyProviders(implementation: ImplementationPin, impleme
       const value = await store.operations[method](input, call);
       if (value.receipt.evidence !== grant.evidenceClass) throw new ObservationError('source-mismatch', 'Legacy evidence changed during observation');
       return { value: { ...value, redaction: redactionFacts(Json.parse(value), fixture.secrets) }, evidenceClass: grant.evidenceClass,
-        identity: { fixtureLeaseId: fixture.leaseId, workspaceId: fixture.workspaceId }, secrets: fixture.secrets };
+        identity: { fixtureLeaseId: fixture.leaseId, workspaceId: workspaceId ?? fixture.workspaceId }, secrets: fixture.secrets };
     } catch (error) {
       if (!(error instanceof LegacyError)) throw error;
       const code: ObservationError['code'] = error.code === 'source-mismatch' ? 'source-mismatch' : error.code === 'ownership-mismatch' ? 'ownership-mismatch' :
@@ -79,20 +91,20 @@ export function createLegacyProviders(implementation: ImplementationPin, impleme
   }
   return [
     defineOperation({ ...common, id: 'loom.cli.role', inputSchema: RoleInput, outputSchema: RoleOutput,
-      effects: ['read-api'], cleanup: 'none', async run(input, context) { return invoke('role', input, context, input.leaseId, input.workspaceId) as Promise<{ value: z.infer<typeof RoleOutput>; evidenceClass: EvidenceClass }>; } }),
+      effects: [...LegacyOperationEffects['loom.cli.role']], cleanup: 'release-lease', dispose: disposeFixtures, async run(input, context) { return invoke('role', input, context, input.leaseId, input.workspaceId) as Promise<{ value: z.infer<typeof RoleOutput>; evidenceClass: EvidenceClass }>; } }),
     defineOperation({ ...common, id: 'loom.cli.usage', inputSchema: UsageInput, outputSchema: UsageOutput,
-      effects: ['read-api'], cleanup: 'none', async run(input, context) { return invoke('usage', input, context, input.agent.fixtureLeaseId, input.agent.workspaceId) as Promise<{ value: z.infer<typeof UsageOutput>; evidenceClass: EvidenceClass }>; } }),
+      effects: [...LegacyOperationEffects['loom.cli.usage']], cleanup: 'release-lease', dispose: disposeFixtures, async run(input, context) { return invoke('usage', input, context, input.agent.fixtureLeaseId, input.agent.workspaceId) as Promise<{ value: z.infer<typeof UsageOutput>; evidenceClass: EvidenceClass }>; } }),
     defineOperation({ ...common, id: 'loom.cli.task', inputSchema: TaskInput, outputSchema: TaskOutput,
-      effects: ['start-owned-process', 'external-provider'], cleanup: 'release-lease', dispose: disposeFixtures,
+      effects: [...taskEffects], cleanup: 'release-lease', dispose: disposeFixtures,
       async run(input, context) { return invoke('task', input, context, input.leaseId, input.workspaceId) as Promise<{ value: z.infer<typeof TaskOutput>; evidenceClass: EvidenceClass }>; } }),
     defineOperation({ ...common, id: 'loom.runtime.stimulate', inputSchema: RuntimeInput, outputSchema: RuntimeOutput,
-      effects: ['stop-owned-process', 'restart-owned-service'], cleanup: 'none',
+      effects: [...LegacyOperationEffects['loom.runtime.stimulate'], 'restart-owned-service'], cleanup: 'release-lease', dispose: disposeFixtures,
       async run(input, context) { return invoke('stimulate', input, context, input.leaseId) as Promise<{ value: z.infer<typeof RuntimeOutput>; evidenceClass: EvidenceClass }>; } }),
     defineOperation({ ...common, evidenceClasses: ['deterministic'], id: 'loom.fixture.seedWorktree', inputSchema: SeedInput, outputSchema: SeedOutput,
-      effects: ['write-fixture'], cleanup: 'none',
+      effects: [...LegacyOperationEffects['loom.fixture.seedWorktree']], cleanup: 'release-lease', dispose: disposeFixtures,
       async run(input, context) { return invoke('seedWorktree', input, context, input.leaseId, input.workspaceId) as Promise<{ value: z.infer<typeof SeedOutput>; evidenceClass: EvidenceClass }>; } }),
     defineOperation({ ...common, id: 'loom.fixture.configure', inputSchema: ConfigureInput, outputSchema: ConfigureOutput,
-      effects: ['write-fixture'], cleanup: 'restore-setting', dispose: disposeFixtures,
+      effects: [...LegacyOperationEffects['loom.fixture.configure']], cleanup: 'restore-setting', dispose: disposeFixtures,
       async run(input, context) { return invoke('configure', input, context, input.leaseId, 'workspaceId' in input ? input.workspaceId : undefined) as Promise<{ value: z.infer<typeof ConfigureOutput>; evidenceClass: EvidenceClass }>; } }),
   ];
 }

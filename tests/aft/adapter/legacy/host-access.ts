@@ -9,7 +9,8 @@ import { HttpResponse, Json } from '../protocol.js';
 import { checkedCliPlan } from './cli-plan.js';
 import { LegacyError, LegacyEvidenceClasses, type LegacyAccess, type LegacyLease } from './operations.js';
 import { getFixtureOperationAuthority, type LoomAuthorizedOperation } from '../authority.js';
-import { LegacyOperationEffects } from './providers.js';
+import { LegacyOperationEffects } from './effects.js';
+import { requireOwnedWorkspace } from '../workspaces.js';
 
 const Name = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/);
 // These projections follow ops.WorkspaceData and domain.Agent, not AgentRow.
@@ -75,35 +76,46 @@ export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtur
       if (!operation) return unsupported();
       const evidence = evidenceFor(operation);
       await verify(id, signal);
-      const prefix = `/api/workspaces/${encodeURIComponent(fixture.workspaceId)}`;
-      const workspace = Workspace.parse(await api(prefix, signal)).data;
-      requireOwned(workspace.id === fixture.workspaceId && workspace.path === fixture.repo);
-      const agents = Agents.parse(await api(`${prefix}/agents`, signal));
-      requireOwned(agents.total === agents.data.length && agents.data.every(row => row.workspace_key === fixture.workspaceId) &&
-        new Set(agents.data.map(row => row.name)).size === agents.data.length);
-      const repos = await Promise.all(workspace.repos.map(async row => {
-        requireOwned(row.path.startsWith(driver.runtimeRoot + path.sep) && await realpath(row.path) === row.path);
-        return { workspaceId: fixture.workspaceId, name: row.name, sourcePath: row.path };
-      }));
-      requireOwned(new Set(repos.map(row => row.name)).size === repos.length);
+      const records = fixture.ownedWorkspaces?.filter(row => row.identityKind === 'legacy-agent-name');
+      requireOwned(records?.length);
       const cli = driver.cliRegistration;
-      // role list is the original fixed CLI actor, and this read process is
-      // enrolled by the fixture before launch just like operation processes.
-      const roleResult = await driver.launchOwnedCli(['--workspace', fixture.workspaceId, 'role', 'list', '--json'], {}, '', true, signal);
-      if (!roleResult.completion.complete || roleResult.completion.exitCode !== 0)
-        throw new LegacyError('process-failed', 'Owned role discovery CLI failed');
-      const roles = Roles.parse(JSON.parse(roleResult.completion.stdout));
-      requireOwned(new Set(roles.map(row => row.name)).size === roles.length);
-      // A bounded positive allowlist never supplies an absence/cardinality
-      // observation. Saturated or malformed issue lists fail closed.
-      const issues = Issues.parse(await api(`${prefix}/issues?limit=1000`, signal)).data;
-      requireOwned(new Set(issues.map(row => row.id)).size === issues.length);
+      const metadata = await Promise.all(records!.map(async record => {
+        const owned = requireOwnedWorkspace(fixture, record.workspaceId, undefined, 'legacy-agent-name');
+        requireOwned(owned.repo.startsWith(driver.runtimeRoot + path.sep) && await realpath(owned.repo) === owned.repo);
+        const prefix = `/api/workspaces/${encodeURIComponent(record.workspaceId)}`;
+        const workspace = Workspace.parse(await api(prefix, signal)).data;
+        requireOwned(workspace.id === record.workspaceId && workspace.path === owned.repo);
+        const agents = Agents.parse(await api(`${prefix}/agents`, signal));
+        requireOwned(agents.total === agents.data.length && agents.data.every(row => row.workspace_key === record.workspaceId) &&
+          new Set(agents.data.map(row => row.name)).size === agents.data.length);
+        const repos = await Promise.all(workspace.repos.map(async row => {
+          requireOwned(row.path.startsWith(owned.repo + path.sep) || row.path === owned.repo);
+          requireOwned(await realpath(row.path) === row.path);
+          return { workspaceId: record.workspaceId, name: row.name, sourcePath: row.path };
+        }));
+        requireOwned(new Set(repos.map(row => row.name)).size === repos.length);
+        // This fixed read CLI is enrolled before launch and declared in the
+        // operation effect union. API discovery never grants agent ownership.
+        let roles: z.infer<typeof Roles> = [];
+        if (operation === 'loom.cli.role' || operation === 'loom.cli.task' && evidence === 'live-provider') {
+          const roleResult = await driver.launchOwnedCli(['--workspace', record.workspaceId, 'role', 'list', '--json'], {}, '', true, signal);
+          if (!roleResult.completion.complete || roleResult.completion.exitCode !== 0)
+            throw new LegacyError('process-failed', 'Owned role discovery CLI failed');
+          roles = Roles.parse(JSON.parse(roleResult.completion.stdout));
+          requireOwned(new Set(roles.map(row => row.name)).size === roles.length);
+        }
+        const issues = Issues.parse(await api(`${prefix}/issues?limit=1000`, signal)).data;
+        requireOwned(new Set(issues.map(row => row.id)).size === issues.length);
+        return { agents: agents.data.filter(row => record.agentIds.includes(row.name)).map(row => ({ workspaceId: row.workspace_key,
+          id: row.name, name: row.name, generation: row.updated_at })), repos,
+          roles: roles.map(row => ({ workspaceId: record.workspaceId, name: row.name })),
+          issues: issues.map(row => ({ workspaceId: record.workspaceId, id: row.id })) };
+      }));
       const serve = driver.processesById.get('serve'); requireOwned(serve);
       cached = { id, runId: fixture.runId, active: Date.now() < fixture.expiresAtUtcMs, evidence: fixture.evidenceClass,
-        secrets: fixture.secrets, binary: cli.binary, cwd: cli.cwd, env: cli.env, workspaces: [fixture.workspaceId],
-        agents: agents.data.map(row => ({ workspaceId: row.workspace_key, id: row.name, name: row.name, generation: row.updated_at })),
-        roles: roles.map(row => ({ workspaceId: fixture.workspaceId, name: row.name })),
-        issues: issues.map(row => ({ workspaceId: fixture.workspaceId, id: row.id })), repos,
+        secrets: fixture.secrets, binary: cli.binary, cwd: cli.cwd, env: cli.env, workspaces: records!.map(row => row.workspaceId),
+        agents: metadata.flatMap(row => row.agents), roles: metadata.flatMap(row => row.roles),
+        issues: metadata.flatMap(row => row.issues), repos: metadata.flatMap(row => row.repos),
         processes: [{ id: 'serve', kind: 'serve', generation: serve!.generation, workspaceId: null, agentName: null, sessionName: null }],
         fixtures: fixture.profile === 'legacy-deterministic' ? ['provider-default'] : [] };
       return { ...structuredClone(cached), evidence };
@@ -114,6 +126,10 @@ export function createHostLegacyAccess(fixture: OwnedFixture, driver: HostFixtur
         command.argv[2] === 'role' ? 'loom.cli.role' : command.argv[4] === 'task' ? 'loom.cli.task' : unsupported();
       const evidence = evidenceFor(operation);
       const plan = checkedCliPlan({ ...cached!, evidence }, command);
+      const workspaceId = command.argv[0] === 'usage' ? command.env.LOOM_WORKSPACE_ID! : command.argv[1] === 'seed-worktree' ? command.argv[3]! : command.argv[1]!;
+      const actor = operation === 'loom.cli.task' ? command.argv[5] : operation === 'loom.cli.usage' ? command.argv[4] :
+        operation === 'loom.fixture.seedWorktree' ? command.argv[5] : undefined;
+      requireOwnedWorkspace(fixture, workspaceId, actor, 'legacy-agent-name');
       if (command.argv[4] === 'task' && fixture.profile.startsWith('legacy-real-') &&
         (evidence !== 'live-provider' || command.argv[3] !== fixture.profile.slice('legacy-real-'.length))) return unsupported();
       const result = await driver.launchOwnedCli(plan.argv, plan.envOverrides, plan.stdin, plan.waitForExit, signal);
