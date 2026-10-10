@@ -14,6 +14,8 @@
 #           changes the waiting PR's patch; its restack is clean but not
 #           patch-equivalent, so its approval is dropped and the task asks again
 set -Eeuo pipefail
+source "$AFT_TESTS_DIR/scripts/loomgit-lib.sh"
+open_task() { open_issue "$(cat "$case_dir/task-$1.id")"; }
 
 phase="$1"
 case_name="$2"
@@ -29,18 +31,6 @@ native=false
 [[ "$case_name" == native ]] && native=true
 repos=("approve-merge-$case_name")
 [[ "$case_name" == cross ]] && repos=("approve-merge-cross-api" "approve-merge-cross-app")
-
-loom() {
-  LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" "$@" --workspace "$workspace"
-}
-
-browser() {
-  agent-browser --session "$AFT_SESSION" "$@"
-}
-
-json() {
-  python3 -c "import json,sys; v=json.load(open(sys.argv[1])); $2" "$1" "${@:3}"
-}
 
 if [[ "$phase" == setup ]]; then
   mkdir -p "$case_dir"
@@ -175,17 +165,6 @@ approval_state() {
   json "$case_dir/approval-$1.json" 'd=v.get("data",v); print((d.get("status") or "")+"|"+(d.get("reason") or ""))'
 }
 
-wait_state() { # wait_state <name> <status> [reason substring]
-  local got=""
-  for _ in $(seq 1 40); do
-    got="$(approval_state "$1")"
-    if [[ "${got%%|*}" == "$2" && "${got#*|}" == *"${3:-}"* ]]; then return 0; fi
-    sleep 2
-  done
-  echo "task $1: merge approval '$got', want '$2' with '${3:-}'" >&2
-  return 1
-}
-
 pull_of() { # pull_of <name>: the task's PR number on the fake forge
   local change
   change="$(cat "$case_dir/change-$1.id")"
@@ -229,13 +208,6 @@ merge_puts() { # merge_puts <pr number>: merge-async PUTs the provider received
 
 pr_status() { # pr_status <number> <json fields>
   curl -fsS -X POST "$AFT_FAKE_GH_BASE/__pr_status" -H 'Content-Type: application/json' -d "{\"number\":$1,$2}" >/dev/null
-}
-
-open_task() {
-  browser open "$AFT_BASE_URL/ws/$workspace/kanban" >/dev/null
-  browser wait '[data-testid="board-toolbar"]' >/dev/null
-  browser open "$AFT_BASE_URL/ws/$workspace/issues/$(cat "$case_dir/task-$1.id")" >/dev/null
-  browser wait '[data-testid="revisions-section"]' >/dev/null
 }
 
 # pr_merged_everywhere: every revision of the open task shows its PR as merged

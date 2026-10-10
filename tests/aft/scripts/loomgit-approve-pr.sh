@@ -5,6 +5,8 @@
 # own PR to trunk, a lead approval does too under Lead may approve, and with
 # that policy off the lead's approval is refused.
 set -euo pipefail
+source "$AFT_TESTS_DIR/scripts/loomgit-lib.sh"
+open_task() { open_issue "$(cat "$case_dir/task-$1.id")"; }
 
 phase="$1"
 case_name="$2"
@@ -16,14 +18,6 @@ remote="$case_dir/origin.git"
 slug="owner/approve-pr-$case_name"
 export LOOM_CONNECTOR_GITHUB_BASE_URL="$AFT_FAKE_GH_BASE"
 export GITHUB_TOKEN=aft-fixture-token
-
-loom() {
-  LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace "$workspace" "$@"
-}
-
-browser() {
-  agent-browser --session "$AFT_SESSION" "$@"
-}
 
 json() {
   python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print($2)" "$1"
@@ -137,13 +131,6 @@ wait_pulls() {
   done
   echo "expected $1 PRs, got: $(cat "$case_dir/pulls-$1.json")" >&2
   return 1
-}
-
-open_task() {
-  browser open "$AFT_BASE_URL/ws/$workspace/kanban" >/dev/null
-  browser wait '[data-testid="board-toolbar"]' >/dev/null
-  browser open "$AFT_BASE_URL/ws/$workspace/issues/$(cat "$case_dir/task-$1.id")" >/dev/null
-  browser wait '[data-testid="revisions-section"]' >/dev/null
 }
 
 if [[ "$case_name" == stack ]]; then

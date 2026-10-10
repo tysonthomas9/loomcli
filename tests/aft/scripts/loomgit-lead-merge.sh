@@ -5,6 +5,7 @@
 #   later    Loom backend merges up to B, then a later request merges C
 #   deps     a cross-repo dependency keeps loom/dependencies pending until its predecessor lands
 set -euo pipefail
+source "$AFT_TESTS_DIR/scripts/loomgit-lib.sh"
 
 phase="$1"
 case_name="$2"
@@ -25,14 +26,6 @@ app_repo="lead-$case_name"
 api_repo=""
 repos=("$app_repo")
 if [[ "$case_name" == deps ]]; then app_repo="lead-deps-app"; api_repo="lead-deps-api"; repos=("$api_repo" "$app_repo"); fi
-
-loom() {
-  LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" "$@" --workspace "$workspace"
-}
-
-json() {
-  python3 -c "import json,sys; v=json.load(open(sys.argv[1])); $2" "$1" "${@:3}"
-}
 
 if [[ "$phase" == setup ]]; then
   mkdir -p "$case_dir"

@@ -8,13 +8,10 @@ import json, re, sys, pathlib
 
 S = 'bash "$AFT_TESTS_DIR/scripts/loomgit-matrix.sh"'
 
-# Dependency policy, in one place. Tyson (2026-10-09): a dependent starts when
-# its blocker's agent finishes, on the blocker's unreviewed revision; Approve,
-# Apply and Publish still follow dependency order ("run", being added to #943).
-# "review" is the earlier P1.26 rule (a dependent starts only after its
-# blocker's review is approved). build() is the only place that orders runs and
-# reviews; the driver asserts the same policy (AFT_DEPENDENT_WAITS_FOR).
-DEPENDENT_WAITS_FOR = "run"
+# Dependents (Tyson, 2026-10-09): a dependent starts when its blocker's agent
+# finishes, on the blocker's unreviewed revision; Approve, Apply and Publish
+# still follow dependency order. build() is the one place that orders runs and
+# reviews.
 NEEDS = " [needs #943 dependents run]"
 
 def run(args, intent):
@@ -34,26 +31,19 @@ def task(case, slot, after="-", red=""):
     return run(f"task {case} {slot} {after}{extra}", f"API client creates task {slot}{dep} in its own epic and starts its run; it {what}") + wait_rev(case, slot)
 
 def build(case, specs, reviewed):
-    """Run the tasks in specs [(slot, after|"-", "FAIL"|"")] and review them.
+    """Run the tasks in specs [(slot, after|"-", "FAIL"|"", [writes-slot])] and review them.
 
+    Every task is created up front in one epic and runs before any review;
     reviewed maps a slot to the steps that review it (approve, PR, merge...),
-    always taken in specs order. With "run" every task is created up front in
-    one epic and runs before any review; with "review" each task is created
-    only after the one below it has been reviewed.
+    always taken in specs order.
     """
-    if DEPENDENT_WAITS_FOR == "run":
-        specs = [tuple(x) + ("",) * (4 - len(x)) for x in specs]
-        spec = " ".join(slot + (f":{after}:{red}:{writes}" if writes else (f":{after}" if after != "-" or red else "") + (f":{red}" if red else "")) for slot, after, red, writes in specs)
-        st = run(f"chain {case} {spec}", "API client creates the tasks (" + spec + ") in one epic and starts it once; a dependent runs when its blocker's agent finishes")
-        for slot, *_ in specs:
-            st += wait_rev(case, slot)
-        for slot, *_ in specs:
-            st += reviewed.get(slot, [])
-        return st
-    st = []
-    for slot, after, red, *writes in specs:
-        assert not writes, "a task that rewrites another's file needs DEPENDENT_WAITS_FOR = run (chain)"
-        st += task(case, slot, after, red) + reviewed.get(slot, [])
+    specs = [tuple(x) + ("",) * (4 - len(x)) for x in specs]
+    spec = " ".join(slot + (f":{after}:{red}:{writes}" if writes else (f":{after}" if after != "-" or red else "") + (f":{red}" if red else "")) for slot, after, red, writes in specs)
+    st = run(f"chain {case} {spec}", "API client creates the tasks (" + spec + ") in one epic and starts it once; a dependent runs when its blocker's agent finishes")
+    for slot, *_ in specs:
+        st += wait_rev(case, slot)
+    for slot, *_ in specs:
+        st += reviewed.get(slot, [])
     return st
 
 def open_changes(case, slot):
@@ -100,7 +90,7 @@ def setup(case, no_native=False):
 
 def case(name, intent, steps, needs=None, labels=()):
     if needs is None:
-        needs = DEPENDENT_WAITS_FOR == "run" and any(re.search(r'loomgit-matrix\.sh\\" chain \S+ [^"]*:', l) for l in steps)
+        needs = any(re.search(r'loomgit-matrix\.sh\\" chain \S+ [^"]*:', l) for l in steps)
     for label, why in labels:
         name += f" [needs {label}]"
         intent += f" Expected to fail until {label}: {why}"
@@ -341,7 +331,6 @@ def emit(path, suite, what, tier, cases, body):
     pathlib.Path(path).write_text(text)
 
 def main(root):
-    assert DEPENDENT_WAITS_FOR in ("review", "run")
     root = pathlib.Path(root)
     fake = "Fake-forge tier: runs on every make test-aft (--suite 'loomgit-matrix-*' --no-agent)."
     real = "REAL tier: real GitHub sandbox repo + real codex; only via run-aft.sh --real-github."

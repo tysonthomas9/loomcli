@@ -3,6 +3,7 @@
 # steps. This helper provisions API fixtures, runs the named stub-agent actor,
 # and reads actual product/API/Git/provider outcomes. Never seed Loom's journal.
 set -Eeuo pipefail
+source "$AFT_TESTS_DIR/scripts/loomgit-lib.sh"
 
 phase="${1:?phase}" case_name="${2:?case}" slot="${3:-}"
 case "$case_name" in
@@ -27,13 +28,9 @@ repo="$JOURNEY_REPO" remote="$JOURNEY_REMOTE" forge_repo="$JOURNEY_FORGE_REPO"
 export LOOM_CONNECTOR_GITHUB_BASE_URL="${AFT_FAKE_GH_BASE:?Use the reviewed --suite loomgit-* launcher}"
 export GITHUB_TOKEN=aft-fixture-token
 
-loom() { LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" "$@" --workspace "$workspace"; }
-browser() { agent-browser --session "$AFT_SESSION" "$@"; }
-json() { python3 -c "import json,sys; v=json.load(open(sys.argv[1])); $2" "$1" "${@:3}"; }
 get() { curl -fsS "$api/$1" > "$2"; }
 post() { curl -fsS -X POST "$api/$1" -H 'Content-Type: application/json' --data-binary @- > "$2"; }
 id_of() { json "$1" 'print(v["data"]["id"])'; }
-task_id() { cat "$work/task-$1.id"; }
 newest() {
   get "issues/$(task_id "$1")/revisions?lead=lead" "$work/revisions-$1.json"
   json "$work/revisions-$1.json" 'r=max(v["data"],key=lambda r:r["number"]); print(r["change_id"],r["number"],r["head_sha"])'

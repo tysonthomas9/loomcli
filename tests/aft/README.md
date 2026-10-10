@@ -244,6 +244,19 @@ separate `make test-aft-real` target sets it, and real scenarios live in
 In real mode the harness also unsets `OPENAI_API_KEY`, defaults `AFT_TIMEOUT` to
 `600000`, and fails fast if `codex` or `~/.codex/auth.json` is missing.
 
+### Loomgit shared helpers and the case map (S14)
+
+`scripts/loomgit-lib.sh` holds the primitives every loomgit driver used to copy
+(`loom`, `json`, `browser`, `task_id`, `open_issue`, `wait_state`); drivers
+source it and keep their own assertions. `loomgit-case-map.json` maps every
+loomgit case (fake forge, real-GitHub matrix, live lead assignment) to the spec
+decisions and tasks it proves and to its `AFT-*` tracker task; check it after
+adding, renaming or removing a case:
+
+```bash
+node tests/aft/scripts/check-case-map.mjs
+```
+
 ### Real GitHub tier: Git settings matrix (PX.7)
 
 `loomgit-matrix-walk` (W1–W8: one stacked journey), `loomgit-matrix-settings`
@@ -285,10 +298,8 @@ unreviewed revision; Approve, Apply and Publish still follow dependency order,
 and rejecting the blocker makes the dependent stale with a rebuild offer. So a
 chain's tasks all run first, then get reviewed. `D1`–`D3` in the variants suite
 cover this directly. Cases that need it are named `[needs #943 dependents run]`
-and fail on builds without that change. The policy lives in one place:
-`DEPENDENT_WAITS_FOR` in `scripts/gen-matrix-suites.py` (its `build()` orders
-runs and reviews) and `AFT_DEPENDENT_WAITS_FOR` in `scripts/loomgit-matrix.sh`
-(`run`, or `review` for the earlier P1.26 rule).
+and fail on builds without that change. `build()` in
+`scripts/gen-matrix-suites.py` is the one place that orders runs and reviews.
 
 - Each run creates a NEW private repo `tysonthomas9/loom-aft-git-<yyyymmdd-hhmm>`
   with the operator's `gh` login (needs `repo` and `workflow` scopes), seeds `main`

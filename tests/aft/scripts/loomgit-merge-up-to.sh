@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source "$AFT_TESTS_DIR/scripts/loomgit-lib.sh"
 
 phase="$1"
 backend="$2"
@@ -10,10 +11,6 @@ repo="$case_dir/merge-repo"
 remote="$case_dir/origin.git"
 export LOOM_CONNECTOR_GITHUB_BASE_URL="$AFT_FAKE_GH_BASE"
 export GITHUB_TOKEN=aft-fixture-token
-
-loom() {
-  LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace "$workspace" "$@"
-}
 
 if [[ "$phase" == setup ]]; then
   mkdir -p "$case_dir"

@@ -15,6 +15,8 @@
 # Addressing it uses the product's address API, a real commit in the task copy
 # it returns, and `loom feedback complete`, as the feedback agent does.
 set -Eeuo pipefail
+source "$AFT_TESTS_DIR/scripts/loomgit-lib.sh"
+open_task() { open_issue "$(cat "$case_dir/task-$1.id")"; }
 
 phase="$1"
 case_name="$2"
@@ -28,18 +30,6 @@ remote="$case_dir/$repo_name.git"
 journal="$AFT_LOOM_CONFIG_DIR/loomgit/store.db"
 export LOOM_CONNECTOR_GITHUB_BASE_URL="$AFT_FAKE_GH_BASE"
 export GITHUB_TOKEN=aft-fixture-token
-
-loom() {
-  LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" "$@" --workspace "$workspace"
-}
-
-browser() {
-  agent-browser --session "$AFT_SESSION" "$@"
-}
-
-json() {
-  python3 -c "import json,sys; v=json.load(open(sys.argv[1])); $2" "$1" "${@:3}"
-}
 
 if [[ "$phase" == setup ]]; then
   mkdir -p "$case_dir"
@@ -257,24 +247,6 @@ approval_state() { # approval_state <name>: "status|reason" of Approve and merge
   change="$(cat "$case_dir/change-$1.id")"
   curl -fsS "$api/changes/$change/merge-approval" > "$case_dir/approval-$1.json"
   json "$case_dir/approval-$1.json" 'd=v.get("data",v); print((d.get("status") or "")+"|"+(d.get("reason") or ""))'
-}
-
-wait_state() { # wait_state <name> <status> [reason substring]
-  local got=""
-  for _ in $(seq 1 40); do
-    got="$(approval_state "$1")"
-    if [[ "${got%%|*}" == "$2" && "${got#*|}" == *"${3:-}"* ]]; then return 0; fi
-    sleep 2
-  done
-  echo "task $1: merge approval '$got', want '$2' with '${3:-}'" >&2
-  return 1
-}
-
-open_task() {
-  browser open "$AFT_BASE_URL/ws/$workspace/kanban" >/dev/null
-  browser wait '[data-testid="board-toolbar"]' >/dev/null
-  browser open "$AFT_BASE_URL/ws/$workspace/issues/$(cat "$case_dir/task-$1.id")" >/dev/null
-  browser wait '[data-testid="revisions-section"]' >/dev/null
 }
 
 wait_text() { # wait_text <testid> <text>: the open task shows it

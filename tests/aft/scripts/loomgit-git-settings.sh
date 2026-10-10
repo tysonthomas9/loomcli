@@ -3,6 +3,7 @@
 # merge) reads and writes the server, follows the CLI, keeps the two lead
 # permissions human only, and a mode switch leaves open PRs alone.
 set -euo pipefail
+source "$AFT_TESTS_DIR/scripts/loomgit-lib.sh"
 
 phase="$1"
 case_name="$2"
@@ -13,10 +14,6 @@ repo="$case_dir/settings-repo"
 remote="$case_dir/origin.git"
 export LOOM_CONNECTOR_GITHUB_BASE_URL="$AFT_FAKE_GH_BASE"
 export GITHUB_TOKEN=aft-fixture-token
-
-loom() {
-  LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" --workspace "$workspace" "$@"
-}
 
 # delivery-mode reads its own --workspace flag after the subcommand.
 loom_setting() {
@@ -35,10 +32,6 @@ expect_settings() {
 
 put_settings() {
   curl -sS -o "$case_dir/put.json" -w '%{http_code}' -X PUT "$api/git/settings" -H 'Content-Type: application/json' -d "$1"
-}
-
-browser() {
-  agent-browser --session "$AFT_SESSION" "$@"
 }
 
 open_git_settings() {

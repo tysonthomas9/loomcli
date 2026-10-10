@@ -1,0 +1,1032 @@
+{
+  "schema_version": 1,
+  "purpose": "Every loomgit AFT case (fake forge, real-GitHub matrix, live lead assignment) mapped to the spec decisions/tasks it proves and its AFT-* tracker task. Checked by scripts/check-case-map.mjs; names ignore trailing [needs ...] labels.",
+  "tracker_note": "0e61c575-895f-45c0-a0ca-2dfdb6f7b24e",
+  "tracker_tasks": {
+    "AFT-W": "c462a7ac-5d56-47ba-9023-fa6eecf28168",
+    "AFT-W5": "4069d2f1-ff95-46bc-88a1-275b19331c72",
+    "AFT-W7": "f4e288d4-951e-4c24-8e55-ad563b145025",
+    "AFT-W8": "e5d21e4f-d983-45be-acdd-86ec56ec1812",
+    "AFT-S1": "a323b1c1-cd7a-45bb-aab7-55efdb1041b8",
+    "AFT-S2": "98ac4682-6df3-43cd-b4e9-da621caab923",
+    "AFT-S3": "2488c7f4-abb0-46cc-ae5a-f24fd0c584ba",
+    "AFT-S4": "668d33a3-2ac0-4ce6-bfe8-9a4e21b5c44b",
+    "AFT-S5": "0deed10c-339d-43bd-8d4b-024aff0750b7",
+    "AFT-S6": "f4200e04-21fc-481e-b768-71240414a718",
+    "AFT-S7": "4130fca1-473e-4a5c-a256-3f6453da95a9",
+    "AFT-S8": "2f4d1f8f-4c8e-40bd-8721-cd696920479a",
+    "AFT-S9": "66fa1625-2ddc-468a-9113-7f8b7ac5b249",
+    "AFT-S10": "6f245041-1367-46e9-9877-20b535065a34",
+    "AFT-N1": "614af2b6-6b81-4a11-a044-b7b709f3a5f8",
+    "AFT-N2": "07f2ef07-0451-40e9-b702-9e6bbf7deea2",
+    "AFT-N3": "d10e832e-ae90-4b5c-b9dd-cee71fe17d78",
+    "AFT-R1": "383b926f-fcc5-4183-802b-02fd4eecd453",
+    "AFT-L1": "9e15397b-4be8-4548-933c-9b4d9784322b",
+    "AFT-D1": "27260e42-9128-4ea9-aee7-0d1177a90e77",
+    "AFT-D2": "3cf7b740-e6e1-4142-b3e0-41c37bd6dddb",
+    "AFT-D3": "516ab27b-f04f-4a57-832c-ca06e94e76b9",
+    "AFT-M1": "6393dd54-3f88-4af4-989c-22001a4b0ace",
+    "AFT-A1": "79bd9ca6-b227-43df-8d67-3c422d3d698f",
+    "AFT-G1": "dda34c91-ddda-4f59-8473-a1778306b200",
+    "AFT-G2": "01bf4fde-d525-4085-ba41-5f95e634e329",
+    "AFT-RB1": "7786c8aa-15ba-4288-b733-7d8e43a963fd",
+    "AFT-NS1": "385ca63f-8a05-4fc1-ad42-bc15ef46c871",
+    "AFT-X1": "82bb131f-271d-490a-8277-2a156fe57183",
+    "AFT-AA1": "61ca7dec-f656-45c6-99e6-4b74746f0ca8",
+    "AFT-CF1": "4f8fda92-83d6-44f2-ae8e-ea1ec026f463",
+    "AFT-CF2": "0dd2ec08-e8b5-4955-b152-41130246002c",
+    "AFT-CF3": "8182768a-1441-447f-b41f-938876194e80",
+    "AFT-CF4": "a10dc943-b4dd-4ad3-81e2-a0904ea26faf",
+    "AFT-PR1": "c06c44d3-4c94-4223-9bf4-ab9bdffd5994"
+  },
+  "suites": {
+    "loomgit-matrix-walk": {
+      "W1-W8 stacked PR walk-through": {
+        "requirements": [
+          "D11",
+          "D13",
+          "D29",
+          "D36",
+          "D41",
+          "P2.19",
+          "P2.19b",
+          "P2.19c",
+          "P3.14",
+          "P1.26"
+        ],
+        "tracker": [
+          "AFT-W",
+          "AFT-W5",
+          "AFT-W7",
+          "AFT-W8",
+          "AFT-CF1",
+          "AFT-CF4"
+        ]
+      }
+    },
+    "real-github-matrix-walk": {
+      "W1-W8 stacked PR walk-through": {
+        "requirements": [
+          "D11",
+          "D13",
+          "D29",
+          "D36",
+          "D41",
+          "P2.19",
+          "P2.19b",
+          "P2.19c",
+          "P3.14",
+          "P1.26"
+        ],
+        "tracker": [
+          "AFT-W",
+          "AFT-W5",
+          "AFT-W7",
+          "AFT-W8",
+          "AFT-CF1",
+          "AFT-CF4"
+        ]
+      }
+    },
+    "loomgit-matrix-settings": {
+      "S1 Stacked, lead may approve on, lead may merge off": {
+        "requirements": [
+          "D12",
+          "D13",
+          "D21",
+          "D38",
+          "P2.20",
+          "P3.16"
+        ],
+        "tracker": [
+          "AFT-S1"
+        ]
+      },
+      "S2 Stacked, lead may approve off": {
+        "requirements": [
+          "D12",
+          "P2.20",
+          "P2.19"
+        ],
+        "tracker": [
+          "AFT-S2"
+        ]
+      },
+      "S3 Stacked, lead may approve on, lead may merge when green": {
+        "requirements": [
+          "D12",
+          "P3.12",
+          "P2.19b"
+        ],
+        "tracker": [
+          "AFT-S3"
+        ]
+      },
+      "S4 Stacked, lead may approve off, lead may merge when green": {
+        "requirements": [
+          "P3.12",
+          "P2.20"
+        ],
+        "tracker": [
+          "AFT-S4"
+        ]
+      },
+      "S5 PR per task, lead may approve on, lead may merge off": {
+        "requirements": [
+          "D13",
+          "D12",
+          "P2.19"
+        ],
+        "tracker": [
+          "AFT-S5"
+        ]
+      },
+      "S6 PR per task, lead may approve on, lead may merge when green": {
+        "requirements": [
+          "D13",
+          "P3.12",
+          "P3.15"
+        ],
+        "tracker": [
+          "AFT-S6",
+          "AFT-G1"
+        ]
+      },
+      "S7 PR per task, human does everything": {
+        "requirements": [
+          "D13",
+          "D29",
+          "P2.19",
+          "P3.14"
+        ],
+        "tracker": [
+          "AFT-S7"
+        ]
+      },
+      "S8 PR per task, lead may approve off, lead may merge when green": {
+        "requirements": [
+          "D13",
+          "P3.12",
+          "P3.15"
+        ],
+        "tracker": [
+          "AFT-S8",
+          "AFT-G1"
+        ]
+      },
+      "S9 Switching delivery mode": {
+        "requirements": [
+          "D13",
+          "P2.20"
+        ],
+        "tracker": [
+          "AFT-S9"
+        ]
+      },
+      "S10 Lead permissions are human only": {
+        "requirements": [
+          "D12",
+          "D31",
+          "P2.20"
+        ],
+        "tracker": [
+          "AFT-S10"
+        ]
+      }
+    },
+    "real-github-matrix-settings": {
+      "S1 Stacked, lead may approve on, lead may merge off": {
+        "requirements": [
+          "D12",
+          "D13",
+          "D21",
+          "D38",
+          "P2.20",
+          "P3.16"
+        ],
+        "tracker": [
+          "AFT-S1"
+        ]
+      },
+      "S2 Stacked, lead may approve off": {
+        "requirements": [
+          "D12",
+          "P2.20",
+          "P2.19"
+        ],
+        "tracker": [
+          "AFT-S2"
+        ]
+      },
+      "S3 Stacked, lead may approve on, lead may merge when green": {
+        "requirements": [
+          "D12",
+          "P3.12",
+          "P2.19b"
+        ],
+        "tracker": [
+          "AFT-S3"
+        ]
+      },
+      "S4 Stacked, lead may approve off, lead may merge when green": {
+        "requirements": [
+          "P3.12",
+          "P2.20"
+        ],
+        "tracker": [
+          "AFT-S4"
+        ]
+      },
+      "S5 PR per task, lead may approve on, lead may merge off": {
+        "requirements": [
+          "D13",
+          "D12",
+          "P2.19"
+        ],
+        "tracker": [
+          "AFT-S5"
+        ]
+      },
+      "S6 PR per task, lead may approve on, lead may merge when green": {
+        "requirements": [
+          "D13",
+          "P3.12",
+          "P3.15"
+        ],
+        "tracker": [
+          "AFT-S6",
+          "AFT-G1"
+        ]
+      },
+      "S7 PR per task, human does everything": {
+        "requirements": [
+          "D13",
+          "D29",
+          "P2.19",
+          "P3.14"
+        ],
+        "tracker": [
+          "AFT-S7"
+        ]
+      },
+      "S8 PR per task, lead may approve off, lead may merge when green": {
+        "requirements": [
+          "D13",
+          "P3.12",
+          "P3.15"
+        ],
+        "tracker": [
+          "AFT-S8",
+          "AFT-G1"
+        ]
+      },
+      "S9 Switching delivery mode": {
+        "requirements": [
+          "D13",
+          "P2.20"
+        ],
+        "tracker": [
+          "AFT-S9"
+        ]
+      },
+      "S10 Lead permissions are human only": {
+        "requirements": [
+          "D12",
+          "D31",
+          "P2.20"
+        ],
+        "tracker": [
+          "AFT-S10"
+        ]
+      }
+    },
+    "loomgit-matrix-variants": {
+      "N1 The lead's CLI approve cannot bypass Lead may approve off": {
+        "requirements": [
+          "D42",
+          "D12",
+          "P2.25"
+        ],
+        "tracker": [
+          "AFT-N1",
+          "AFT-A1"
+        ]
+      },
+      "N2 Approve and merge on a red PR, then recovery": {
+        "requirements": [
+          "D29",
+          "D36",
+          "P2.19b",
+          "P3.14"
+        ],
+        "tracker": [
+          "AFT-N2"
+        ]
+      },
+      "N3 The lead's merge request is refused when Lead may merge is off": {
+        "requirements": [
+          "D38",
+          "P3.16"
+        ],
+        "tracker": [
+          "AFT-N3",
+          "AFT-G2"
+        ]
+      },
+      "N4 No native stacks: a clear error, no fallback": {
+        "requirements": [
+          "D41",
+          "D4",
+          "P3.17"
+        ],
+        "tracker": [
+          "AFT-NS1"
+        ],
+        "note": "fake tier only"
+      },
+      "R1 Reject, rerun, approve": {
+        "requirements": [
+          "D29",
+          "P1.26",
+          "P1.28"
+        ],
+        "tracker": [
+          "AFT-R1"
+        ]
+      },
+      "D1 A dependent runs before its blocker is approved": {
+        "requirements": [
+          "dependents-run (Tyson 2026-10-09)",
+          "P1.26",
+          "P3.1"
+        ],
+        "tracker": [
+          "AFT-D1"
+        ]
+      },
+      "D2 Rejecting a blocker makes its dependent stale": {
+        "requirements": [
+          "dependents-run (Tyson 2026-10-09)",
+          "P3.1"
+        ],
+        "tracker": [
+          "AFT-D2"
+        ]
+      },
+      "D3 Approving a dependent before its blocker waits": {
+        "requirements": [
+          "dependents-run (Tyson 2026-10-09)",
+          "D11"
+        ],
+        "tracker": [
+          "AFT-D3"
+        ]
+      },
+      "X1 A rebuild that does not apply cleanly needs approving again": {
+        "requirements": [
+          "D26",
+          "D39",
+          "P2.19c"
+        ],
+        "tracker": [
+          "AFT-CF2",
+          "AFT-CF4"
+        ]
+      },
+      "X2 Cancelling merge after by hand": {
+        "requirements": [
+          "D29",
+          "P3.14"
+        ],
+        "tracker": [
+          "AFT-M1"
+        ]
+      }
+    },
+    "real-github-matrix-variants": {
+      "L1 Mid-session epic assignment to a running lead": {
+        "requirements": [
+          "live-interactive lead assignment (ll-lead-assignment scope gap)"
+        ],
+        "tracker": [
+          "AFT-L1"
+        ],
+        "note": "real tier only"
+      },
+      "N1 The lead's CLI approve cannot bypass Lead may approve off": {
+        "requirements": [
+          "D42",
+          "D12",
+          "P2.25"
+        ],
+        "tracker": [
+          "AFT-N1",
+          "AFT-A1"
+        ]
+      },
+      "N2 Approve and merge on a red PR, then recovery": {
+        "requirements": [
+          "D29",
+          "D36",
+          "P2.19b",
+          "P3.14"
+        ],
+        "tracker": [
+          "AFT-N2"
+        ]
+      },
+      "N3 The lead's merge request is refused when Lead may merge is off": {
+        "requirements": [
+          "D38",
+          "P3.16"
+        ],
+        "tracker": [
+          "AFT-N3",
+          "AFT-G2"
+        ]
+      },
+      "R1 Reject, rerun, approve": {
+        "requirements": [
+          "D29",
+          "P1.26",
+          "P1.28"
+        ],
+        "tracker": [
+          "AFT-R1"
+        ]
+      },
+      "D1 A dependent runs before its blocker is approved": {
+        "requirements": [
+          "dependents-run (Tyson 2026-10-09)",
+          "P1.26",
+          "P3.1"
+        ],
+        "tracker": [
+          "AFT-D1"
+        ]
+      },
+      "D2 Rejecting a blocker makes its dependent stale": {
+        "requirements": [
+          "dependents-run (Tyson 2026-10-09)",
+          "P3.1"
+        ],
+        "tracker": [
+          "AFT-D2"
+        ]
+      },
+      "D3 Approving a dependent before its blocker waits": {
+        "requirements": [
+          "dependents-run (Tyson 2026-10-09)",
+          "D11"
+        ],
+        "tracker": [
+          "AFT-D3"
+        ]
+      },
+      "X1 A rebuild that does not apply cleanly needs approving again": {
+        "requirements": [
+          "D26",
+          "D39",
+          "P2.19c"
+        ],
+        "tracker": [
+          "AFT-CF2",
+          "AFT-CF4"
+        ]
+      },
+      "X2 Cancelling merge after by hand": {
+        "requirements": [
+          "D29",
+          "P3.14"
+        ],
+        "tracker": [
+          "AFT-M1"
+        ]
+      }
+    },
+    "loomgit-approve-merge": {
+      "Loom stack - Approve and merge waits above the bottom, blocks on checks, merges after the restack, and can be cancelled": {
+        "requirements": [
+          "D29",
+          "P3.14",
+          "P2.19c"
+        ],
+        "tracker": [
+          "AFT-M1",
+          "AFT-CF4"
+        ]
+      },
+      "Loom stack - an approval does not carry through a restack that changes the patch": {
+        "requirements": [
+          "D26",
+          "D39"
+        ],
+        "tracker": [
+          "AFT-CF3"
+        ]
+      },
+      "Native stack - the approved PR above the bottom merges after the bottom PR": {
+        "requirements": [
+          "D4",
+          "D41",
+          "P3.7",
+          "P3.14"
+        ],
+        "tracker": []
+      },
+      "PR per task - a pushed PR is not merged, a clean one merges once, the lead never merges": {
+        "requirements": [
+          "D13",
+          "D27",
+          "P3.14"
+        ],
+        "tracker": []
+      },
+      "Cross-repo lead - each repo's stack ID is visible and the task's Approve merges without one": {
+        "requirements": [
+          "D16",
+          "D32",
+          "P3.13c"
+        ],
+        "tracker": [
+          "AFT-X1"
+        ]
+      }
+    },
+    "loomgit-approve-pr": {
+      "Stacked PRs - Approve and create PR opens the next PR of the stack; Approve only waits for Create PR; a declared stack opens none": {
+        "requirements": [
+          "D11",
+          "P2.19",
+          "P2.27",
+          "P4.13"
+        ],
+        "tracker": [
+          "AFT-RB1"
+        ],
+        "note": "uses Approve only and a declared stack: changes with P2.27 (D40) and P4.13"
+      },
+      "PR per task - each approval opens its own PR to trunk; lead approval follows Lead may approve": {
+        "requirements": [
+          "D12",
+          "D13",
+          "P2.19"
+        ],
+        "tracker": []
+      }
+    },
+    "loomgit-feedback-update": {
+      "Loom stack - a review fix-up updates the open PR without Approve, cancels merge-after, and is held on conflict": {
+        "requirements": [
+          "D36",
+          "P2.19b",
+          "P4.5"
+        ],
+        "tracker": []
+      },
+      "PR per task - a review fix-up updates the task's own PR; a secret-pattern path is never pushed": {
+        "requirements": [
+          "D36",
+          "D18",
+          "P2.19b",
+          "P1.27"
+        ],
+        "tracker": []
+      }
+    },
+    "loomgit-git-settings": {
+      "Settings Git section shows, saves and follows the CLI; lead permissions stay human only": {
+        "requirements": [
+          "D12",
+          "D21",
+          "D31",
+          "P2.20"
+        ],
+        "tracker": []
+      },
+      "switching from Stacked PRs to PR per task leaves open PRs and sends the next task to trunk": {
+        "requirements": [
+          "D13",
+          "P2.20"
+        ],
+        "tracker": []
+      }
+    },
+    "loomgit-journey-recovery": {
+      "R1 unsaved edits hold approval and an API client retries without losing dirty work": {
+        "requirements": [
+          "D9",
+          "P2.21",
+          "P2.22"
+        ],
+        "tracker": []
+      },
+      "R2 incomplete TaskRun capture stays visible and cannot be approved or applied": {
+        "requirements": [
+          "D17",
+          "D18",
+          "P1.14"
+        ],
+        "tracker": [],
+        "note": "expects approve-menu-toggle disabled: changes with P2.27 (D40)"
+      },
+      "R3 a stale deletion preview and incomplete capture refuse unsafe removal": {
+        "requirements": [
+          "P1.7"
+        ],
+        "tracker": []
+      },
+      "R4 stale review requests and foreign PR branch writes cannot overwrite newer work": {
+        "requirements": [
+          "D27",
+          "D29"
+        ],
+        "tracker": []
+      }
+    },
+    "loomgit-journey-review": {
+      "review-stack-explicit": {
+        "requirements": [
+          "D13",
+          "D29",
+          "P2.27"
+        ],
+        "tracker": [
+          "AFT-RB1"
+        ]
+      },
+      "review-stack-automatic": {
+        "requirements": [
+          "D13",
+          "D29",
+          "P2.19"
+        ],
+        "tracker": []
+      },
+      "review-stack-reject-retry": {
+        "requirements": [
+          "D13",
+          "D29",
+          "P2.19"
+        ],
+        "tracker": []
+      },
+      "review-stack-empty": {
+        "requirements": [
+          "D13",
+          "D29",
+          "P1.25"
+        ],
+        "tracker": []
+      },
+      "review-stack-held": {
+        "requirements": [
+          "D13",
+          "D29",
+          "P2.21"
+        ],
+        "tracker": []
+      },
+      "review-trunk-explicit": {
+        "requirements": [
+          "D13",
+          "D29",
+          "P2.27"
+        ],
+        "tracker": [
+          "AFT-RB1"
+        ]
+      },
+      "review-trunk-automatic": {
+        "requirements": [
+          "D13",
+          "D29",
+          "P2.19"
+        ],
+        "tracker": []
+      },
+      "review-trunk-reject-retry": {
+        "requirements": [
+          "D13",
+          "D29",
+          "P2.19"
+        ],
+        "tracker": []
+      },
+      "review-trunk-empty": {
+        "requirements": [
+          "D13",
+          "D29",
+          "P1.25"
+        ],
+        "tracker": []
+      },
+      "review-trunk-held": {
+        "requirements": [
+          "D13",
+          "D29",
+          "P2.21"
+        ],
+        "tracker": []
+      }
+    },
+    "loomgit-journey-stacks": {
+      "Loom stack prefix continuation and mode switch": {
+        "requirements": [
+          "P3.9e",
+          "P2.19c",
+          "D13"
+        ],
+        "tracker": []
+      },
+      "Loom stack lower landing and mode switch": {
+        "requirements": [
+          "P2.19c",
+          "P4.4b",
+          "D13"
+        ],
+        "tracker": [
+          "AFT-CF4"
+        ]
+      },
+      "Native stack prefix landing and mode switch": {
+        "requirements": [
+          "P3.7",
+          "D41",
+          "D13"
+        ],
+        "tracker": []
+      },
+      "Native stack lower landing and mode switch": {
+        "requirements": [
+          "P3.7",
+          "D41",
+          "D13"
+        ],
+        "tracker": []
+      },
+      "Loom signed feedback updates the stack and cancels merge-after": {
+        "requirements": [
+          "D36",
+          "P2.19b",
+          "P4.5"
+        ],
+        "tracker": []
+      },
+      "Native signed feedback updates the stack and cancels merge-after": {
+        "requirements": [
+          "D36",
+          "P2.19b",
+          "P4.5",
+          "D41"
+        ],
+        "tracker": []
+      },
+      "Trunk signed feedback updates its existing PR": {
+        "requirements": [
+          "D36",
+          "P2.19b"
+        ],
+        "tracker": []
+      }
+    },
+    "loomgit-merge-stale": {
+      "merge confirmation rejects a published head that changed after preview": {
+        "requirements": [
+          "D27",
+          "P3.9c",
+          "D38"
+        ],
+        "tracker": [],
+        "note": "merge-up-to preview: changes with P3.16 (D38)"
+      }
+    },
+    "loomgit-merge-up-to": {
+      "native four-layer stack merges through layer three over HTTP": {
+        "requirements": [
+          "P3.9c",
+          "P5.2",
+          "D38"
+        ],
+        "tracker": [],
+        "note": "changes with P3.16 (D38)"
+      },
+      "Loom four-layer stack merges through layer three from CLI": {
+        "requirements": [
+          "P3.9b",
+          "P5.2",
+          "D38"
+        ],
+        "tracker": [],
+        "note": "CLI merge-up-to is removed by P3.16 (D38); Loom backend on GitHub is removed by P3.17 (D41)"
+      }
+    },
+    "loomgit-no-changes": {
+      "stacked, an empty attempt closes as No changes and a later attempt is reviewed": {
+        "requirements": [
+          "P1.25",
+          "D29"
+        ],
+        "tracker": []
+      },
+      "PR per task, an empty attempt closes as No changes and a later attempt is reviewed": {
+        "requirements": [
+          "P1.25",
+          "D29"
+        ],
+        "tracker": []
+      }
+    },
+    "loomgit-review": {
+      "workspace deletion without a current work fingerprint is rejected": {
+        "requirements": [
+          "P1.7"
+        ],
+        "tracker": []
+      },
+      "operator approves a real task revision from the task detail panel": {
+        "requirements": [
+          "D12",
+          "D29",
+          "P2.17"
+        ],
+        "tracker": []
+      },
+      "legacy branch Push is rejected without moving the workspace branch": {
+        "requirements": [
+          "D19",
+          "D22",
+          "P2.8"
+        ],
+        "tracker": []
+      },
+      "P2.14 approved Apply advances only the lead working area": {
+        "requirements": [
+          "D22",
+          "D33",
+          "P2.14"
+        ],
+        "tracker": [
+          "AFT-AA1"
+        ]
+      },
+      "P2.16 no-area approval offers Apply in the UI": {
+        "requirements": [
+          "P2.16"
+        ],
+        "tracker": []
+      },
+      "unsaved lead edits hold an approved Apply without moving its ref": {
+        "requirements": [
+          "D9",
+          "P2.14"
+        ],
+        "tracker": []
+      }
+    },
+    "loomgit-stack": {
+      "published X lands and restacks applied dependent Y": {
+        "requirements": [
+          "P2.19c",
+          "P3.1",
+          "P4.4"
+        ],
+        "tracker": [],
+        "note": "uses approve_only: changes with P2.27 (D40)"
+      },
+      "abandoning a retained task copy preserves incomplete capture": {
+        "requirements": [
+          "P4.3",
+          "D17"
+        ],
+        "tracker": []
+      },
+      "abandoning published dependent Y preserves its task copy": {
+        "requirements": [
+          "P4.3",
+          "P4.12"
+        ],
+        "tracker": []
+      },
+      "foreign trunk push reports a diverged published change": {
+        "requirements": [
+          "P4.7"
+        ],
+        "tracker": []
+      }
+    },
+    "loomgit-sync": {
+      "Sync pulls trunk without pushing the provider": {
+        "requirements": [
+          "D22",
+          "P2.9"
+        ],
+        "tracker": []
+      }
+    },
+    "loomgit-task-diff": {
+      "stacked tasks each show the diff their PR contains": {
+        "requirements": [
+          "D29",
+          "P2.18"
+        ],
+        "tracker": []
+      },
+      "with a PR per task, each task compares with trunk": {
+        "requirements": [
+          "D29",
+          "P2.18",
+          "D13"
+        ],
+        "tracker": []
+      }
+    },
+    "loomgit-task-review": {
+      "stacked, a task with code waits in review until Approve closes it": {
+        "requirements": [
+          "P1.26",
+          "D29"
+        ],
+        "tracker": []
+      },
+      "stacked, Reject sends the task back to open": {
+        "requirements": [
+          "P1.26",
+          "D29"
+        ],
+        "tracker": []
+      },
+      "stacked, an empty attempt still closes as No changes": {
+        "requirements": [
+          "P1.25"
+        ],
+        "tracker": []
+      },
+      "PR per task, the task waits in review, Approve closes it and Reject reopens it": {
+        "requirements": [
+          "P1.26",
+          "D13"
+        ],
+        "tracker": []
+      }
+    },
+    "loomgit-trunk": {
+      "trunk replay requires and uses the operator Git identity": {
+        "requirements": [
+          "D13",
+          "P2.5",
+          "P2.11"
+        ],
+        "tracker": [],
+        "note": "uses approve_only: changes with P2.27 (D40)"
+      }
+    },
+    "loomgit-zz-lead-merge": {
+      "lead merge request runs only after a human confirms it in the UI": {
+        "requirements": [
+          "P3.11",
+          "D38"
+        ],
+        "tracker": [
+          "AFT-G2"
+        ],
+        "note": "the human-confirmed lead request goes with P3.16 (D38)"
+      },
+      "when_green merges after required checks pass and stops below changes requested": {
+        "requirements": [
+          "P3.12"
+        ],
+        "tracker": []
+      },
+      "Loom backend merges up to B and later merges C": {
+        "requirements": [
+          "P3.9e",
+          "D38"
+        ],
+        "tracker": [],
+        "note": "CLI merge-up-to is removed by P3.16 (D38)"
+      },
+      "cross-repo dependency holds loom/dependencies until its predecessor lands": {
+        "requirements": [
+          "D16",
+          "D32",
+          "P3.13"
+        ],
+        "tracker": [
+          "AFT-X1"
+        ]
+      }
+    },
+    "ll-lead-assignment": {
+      "a real Lead boots its controlled runtime and starts with its assigned epic": {
+        "requirements": [
+          "live lead assignment at launch"
+        ],
+        "tracker": [
+          "AFT-L1"
+        ],
+        "note": "mid-session delivery is covered by real-github-matrix-variants L1"
+      }
+    }
+  }
+}

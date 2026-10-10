@@ -19,6 +19,8 @@
 #
 # Usage: loomgit-matrix.sh <phase> <case> [args...]
 set -Eeuo pipefail
+source "$AFT_TESTS_DIR/scripts/loomgit-lib.sh"
+open_task() { open_issue "$(task_id "$1")"; }
 
 phase="$1"
 case_name="$2"
@@ -47,9 +49,6 @@ else
 fi
 [[ -f "$work/forge-repo" ]] && forge_repo="$(cat "$work/forge-repo")"
 
-loom() { LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" "$@" --workspace "$workspace"; }
-browser() { agent-browser --session "${AFT_SESSION:?}" "$@"; }
-json() { python3 -c "import json,sys; v=json.load(open(sys.argv[1])); $2" "$1" "${@:3}"; }
 say() { printf '[%s] %s\n' "$case_name" "$*"; }
 fail() { echo "[$case_name] FAIL: $*" >&2; exit 1; }
 # Waits scale for the real tier: Codex and GitHub Actions take minutes, not seconds.
@@ -104,7 +103,6 @@ file_at() { # file_at <ref> <path>
 
 # --- Loom helpers --------------------------------------------------------------
 
-task_id() { cat "$work/task-$1.id"; }
 file_of() { # the file a slot's task writes: its own, or another slot's (chain's 4th field)
   local slot="$1"
   [[ -f "$work/writes-$slot" ]] && slot="$(cat "$work/writes-$slot")"
@@ -158,13 +156,6 @@ ui_select() {
   [[ "$(ui_value "$1")" == "$2" ]] && return 0
   browser select "[data-testid=\"$1\"]" "$2" > /dev/null
   browser wait "[data-testid=\"$1\"]:not([disabled])" > /dev/null
-}
-
-open_task() {
-  browser open "$AFT_BASE_URL/ws/$workspace/kanban" > /dev/null
-  browser wait '[data-testid="board-toolbar"]' > /dev/null
-  browser open "$AFT_BASE_URL/ws/$workspace/issues/$(task_id "$1")" > /dev/null
-  browser wait '[data-testid="revisions-section"]' > /dev/null
 }
 
 verdict() { # verdict <slot> <kind> <id> [extra json] -> http code; body in verdict-<slot>.json
@@ -231,21 +222,12 @@ only_own_file() {
   ! grep -v -e "^$(file_of "$1")$" -e "^matrix-$case_name-$1-review" "$work/changed-$1.txt" | grep -q .
 }
 
-# Dependency policy, in one place. Tyson (2026-10-09): a dependent starts as
-# soon as its blocker's agent finishes, on the blocker's frozen, unreviewed
-# revision; Approve, Apply and Publish still follow dependency order, and
-# rejecting the blocker marks the dependent stale with a rebuild offer
-# (AFT_DEPENDENT_WAITS_FOR=run, being added to #943). The earlier P1.26 rule, a
-# dependent waits for its blocker's approved review, is AFT_DEPENDENT_WAITS_FOR=review
-# (and the generator's DEPENDENT_WAITS_FOR).
-dependent_waits_for="${AFT_DEPENDENT_WAITS_FOR:-run}"
+# Dependents (Tyson, 2026-10-09): a dependent starts as soon as its blocker's
+# agent finishes, on the blocker's frozen, unreviewed revision; Approve, Apply
+# and Publish still follow dependency order.
 blocker_ready() { # blocker_ready <slot>: may a task blocked by <slot> start now?
   revisions "$1" 2> /dev/null || return 1
-  case "$dependent_waits_for" in
-    review) json "$work/rev-$1.json" 'assert v.get("verdict") in ("approve","policy"), v' ;;
-    run) json "$work/rev-$1.json" 'assert v.get("number"), v' ;;
-    *) fail "AFT_DEPENDENT_WAITS_FOR must be review or run" ;;
-  esac
+  json "$work/rev-$1.json" 'assert v.get("number"), v'
 }
 
 # --- the lead ------------------------------------------------------------------
@@ -378,7 +360,7 @@ task)
     curl -fsS -X POST "$api/issues" -H 'Content-Type: application/json' -d @- > "$work/task-$slot.json"
   json "$work/task-$slot.json" 'print(v["data"]["id"])' > "$work/task-$slot.id"
   if [[ "$after" != - ]]; then
-    blocker_ready "$after" || fail "task $slot would start before its blocker $after is ready (dependents wait for: $dependent_waits_for)"
+    blocker_ready "$after" || fail "task $slot would start before its blocker $after is ready"
     curl -fsS -X POST "$api/issues/$(task_id "$slot")/dependencies" -H 'Content-Type: application/json' \
       -d "{\"depends_on_id\":\"$(task_id "$after")\",\"dep_type\":\"blocks\"}" > /dev/null
   fi
@@ -410,7 +392,6 @@ wait-rev)
 open-task)
   open_task "$1"
   ;;
-
 
 chain)
   # chain <case> <slot[:after][:FAIL][:writes-slot]>...: one epic holding all the tasks, each
@@ -446,7 +427,7 @@ chain)
   done
   curl -fsS -X POST "$api/workflows/epic-runner" -H 'Content-Type: application/json' \
     -d "{\"epicId\":\"$epic\",\"runner\":\"local-task-runner\"}" > "$work/workflow-chain.json"
-  say "chain $* started in epic $epic (dependents wait for: $dependent_waits_for)"
+  say "chain $* started in epic $epic"
   ;;
 
 ran-before-approval)
@@ -691,8 +672,6 @@ rerun)
   say "task $1 rerun started"
   ;;
 
-
-
 human-approve-api)
   # Only for set-up steps no case is about; every checked human action is a UI click.
   slot="$1"
@@ -727,7 +706,6 @@ no-pr)
   done
   say "no PR for $slot after ${seconds}s; publish: $(json "$work/rev-$slot.json" 'print(v.get("publish_status"),v.get("publish_reason"))')"
   ;;
-
 
 merged)
   # merged <case> <slot>...: each PR merges on the forge and Loom shows it merged.
@@ -991,7 +969,6 @@ ui)
   done
   say "task $slot page: '$seen' / '$status' (kept after reload)"
   ;;
-
 
 teardown)
   # Close this case's open PRs (real tier: the repo is kept for inspection),
