@@ -30,11 +30,18 @@ type limitEnv struct {
 	mu      sync.Mutex
 	at      time.Time
 	stop    func()
+	cfg     ServiceConfig // each start's
 }
 
 func newLimitEnv(t *testing.T, harness string, optIn bool) *limitEnv {
 	t.Helper()
-	l := &limitEnv{t: t, e: newCreateEnv(t), harness: harness, at: time.Now()}
+	return newLimitEnvWith(t, harness, optIn, ServiceConfig{})
+}
+
+// newLimitEnvWith is newLimitEnv whose services start with cfg.
+func newLimitEnvWith(t *testing.T, harness string, optIn bool, cfg ServiceConfig) *limitEnv {
+	t.Helper()
+	l := &limitEnv{t: t, e: newCreateEnv(t), harness: harness, at: time.Now(), cfg: cfg}
 	l.fh = l.e.h.Harness.(*fake.Harness)
 	l.start()
 	if err := l.s.SetLimitResume(context.Background(), optIn); err != nil {
@@ -51,7 +58,7 @@ func newLimitEnv(t *testing.T, harness string, optIn bool) *limitEnv {
 
 // start starts a service on the env's store, as a loom serve (re)start does.
 func (l *limitEnv) start() {
-	s := l.e.service(ServiceConfig{})
+	s := l.e.service(l.cfg)
 	s.harnesses = map[string]loomharness.Harness{l.harness: l.e.h}
 	l.c = useTestClock(s)
 	s.now = func() time.Time { l.mu.Lock(); defer l.mu.Unlock(); return l.at }

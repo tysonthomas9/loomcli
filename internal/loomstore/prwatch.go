@@ -127,15 +127,17 @@ func (s *Store) UnregisterPRWatch(ctx context.Context, k PRWatchKey) (bool, erro
 // AdvancePRWatch saves what the watch k last reported, as viewer: its
 // cursor, wake count and last-told text. ErrNotFound when k is not watched.
 func (s *Store) AdvancePRWatch(ctx context.Context, k PRWatchKey, viewer string, c PRWatchCursor, wakeCount int, lastTold string) error {
-	return s.tx(ctx, func(tx *sql.Tx) error { return advancePRWatch(ctx, tx, k, viewer, c, wakeCount, lastTold) })
+	return s.tx(ctx, func(tx *sql.Tx) error { return advancePRWatch(ctx, tx, k, "", viewer, c, wakeCount, lastTold) })
 }
 
 // advancePRWatch is AdvancePRWatch inside tx, so a wake's Send receipt and
-// its cursor can commit together.
-func advancePRWatch(ctx context.Context, tx *sql.Tx, k PRWatchKey, viewer string, c PRWatchCursor, wakeCount int, lastTold string) error {
+// its cursor can commit together; a since other than "" also requires the
+// watch created then, not a later one of the same key.
+func advancePRWatch(ctx context.Context, tx *sql.Tx, k PRWatchKey, since, viewer string, c PRWatchCursor, wakeCount int, lastTold string) error {
 	res, err := tx.ExecContext(ctx, `UPDATE pr_watches SET viewer = ?, head_sha = ?, checks_cursor = ?, comments_cursor = ?,
-  wake_count = ?, last_told = ?, updated_at = ? WHERE agent_id = ? AND owner = ? AND repo = ? AND number = ?`,
-		viewer, c.Head, c.Checks, c.Comments, wakeCount, lastTold, Stamp(time.Now()), k.AgentID, k.Owner, k.Repo, k.Number)
+  wake_count = ?, last_told = ?, updated_at = ? WHERE agent_id = ? AND owner = ? AND repo = ? AND number = ?
+  AND (? = '' OR created_at = ?)`,
+		viewer, c.Head, c.Checks, c.Comments, wakeCount, lastTold, Stamp(time.Now()), k.AgentID, k.Owner, k.Repo, k.Number, since, since)
 	if err != nil {
 		return err
 	}
@@ -148,11 +150,12 @@ func advancePRWatch(ctx context.Context, tx *sql.Tx, k PRWatchKey, viewer string
 	return nil
 }
 
-// PRWatchWake is a PR-watch wake's change to its watch (OR8): what the wake
-// reports, as viewer, its watch's comment-only wake count and text; End
-// removes the watch instead.
+// PRWatchWake is a PR-watch wake's change to its watch (OR8), the one
+// created at Since: what the wake reports, as viewer, its watch's
+// comment-only wake count and text; End removes the watch instead.
 type PRWatchWake struct {
 	PRWatchKey
+	Since     string
 	Viewer    string
 	Cursor    PRWatchCursor
 	WakeCount int
@@ -160,8 +163,8 @@ type PRWatchWake struct {
 	End       bool
 }
 
-// ErrPRWatchGone means a PR-watch wake's Send found its watch removed; then
-// nothing is stored.
+// ErrPRWatchGone means a PR-watch wake's Send found its watch removed, or
+// replaced by a new watch of the same PR; then nothing is stored.
 var ErrPRWatchGone = errors.New("loomstore: PR watch no longer exists")
 
 // sendPRWatch is a Send's change to the PR watch it reports, in tx, so the
@@ -170,13 +173,34 @@ func sendPRWatch(ctx context.Context, tx *sql.Tx, w *PRWatchWake) error {
 	if w == nil {
 		return nil
 	}
-	err := advancePRWatch(ctx, tx, w.PRWatchKey, w.Viewer, w.Cursor, w.WakeCount, w.LastTold)
+	err := advancePRWatch(ctx, tx, w.PRWatchKey, w.Since, w.Viewer, w.Cursor, w.WakeCount, w.LastTold)
 	if err == nil && w.End {
-		_, err = tx.ExecContext(ctx, `DELETE FROM pr_watches WHERE agent_id = ? AND owner = ? AND repo = ? AND number = ?`,
-			w.AgentID, w.Owner, w.Repo, w.Number)
+		err = dropPRWatch(ctx, tx, w.PRWatchKey, w.Since)
 	}
 	if errors.Is(err, ErrNotFound) {
 		return ErrPRWatchGone
 	}
+	return err
+}
+
+// DropPRWatch deletes the watch k created at since (a merged PR's), if it
+// is still that one.
+func (s *Store) DropPRWatch(ctx context.Context, k PRWatchKey, since string) error {
+	return s.tx(ctx, func(tx *sql.Tx) error { return dropPRWatch(ctx, tx, k, since) })
+}
+
+func dropPRWatch(ctx context.Context, tx *sql.Tx, k PRWatchKey, since string) error {
+	_, err := tx.ExecContext(ctx, `DELETE FROM pr_watches WHERE agent_id = ? AND owner = ? AND repo = ? AND number = ?
+  AND created_at = ?`, k.AgentID, k.Owner, k.Repo, k.Number, since)
+	return err
+}
+
+// SettlePRWatch saves comments as the comment cursor of the watch k
+// created at since, if it is still that one and its cursor is still from:
+// news a wake never tells, as a conflict that cleared (OR8).
+func (s *Store) SettlePRWatch(ctx context.Context, k PRWatchKey, since, from, comments string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE pr_watches SET comments_cursor = ?, updated_at = ?
+WHERE agent_id = ? AND owner = ? AND repo = ? AND number = ? AND created_at = ? AND comments_cursor = ?`,
+		comments, Stamp(time.Now()), k.AgentID, k.Owner, k.Repo, k.Number, since, from)
 	return err
 }

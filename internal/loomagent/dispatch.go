@@ -370,8 +370,18 @@ func (s *Service) RunDispatcher(ctx context.Context) { s.Dispatcher()(ctx) }
 // done it only ends the registration.
 func (s *Service) Dispatcher() func(context.Context) {
 	l := s.startLoop()
+	var pr *loop // the PR-watch loop (OR8), when s reads PRs
+	if s.prHost != nil {
+		pr = s.startLoop()
+	}
 	return func(ctx context.Context) {
 		defer s.stopLoop(l)
+		if pr != nil {
+			ctx, cancel := context.WithCancel(ctx)
+			done := make(chan struct{})
+			go func() { defer close(done); defer s.stopLoop(pr); s.runPRWatches(within(ctx), pr) }()
+			defer func() { cancel(); <-done }()
+		}
 		if ctx.Err() == nil {
 			s.runDispatcher(ctx, l)
 		}
@@ -428,7 +438,10 @@ func (s *Service) follow(ctx context.Context, sub *BusSubscription, l *loop) {
 			s.resync(ctx, false)
 			s.reconcileDue(ctx)
 			s.sweepLimitResumes(ctx)
-			s.sweepPRWatches(ctx)
+			select { // the PR-watch loop sweeps if one is due
+			case s.prTick <- struct{}{}:
+			default:
+			}
 		case <-s.queueWake:
 			l.took()
 			s.reconcileDue(ctx)

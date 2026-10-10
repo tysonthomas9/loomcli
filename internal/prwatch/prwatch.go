@@ -146,7 +146,7 @@ func readChecks(ctx context.Context, host Host, ws, owner, repo string, s *Snaps
 		statuses, _ := status["statuses"].([]any)
 		for _, st := range statuses {
 			c, _ := st.(map[string]any)
-			checks = append(checks, fmt.Sprint("status:", id(c), ":", c["context"], ":", c["state"]))
+			checks = append(checks, fmt.Sprint("status:", c["context"], ":", c["state"], ":", c["updated_at"])) // the connector keeps no status id
 			switch c["state"] {
 			case "failure", "error":
 				s.Failed = append(s.Failed, fmt.Sprint(c["context"]))

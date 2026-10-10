@@ -26,7 +26,8 @@ type Wake struct {
 
 // Decide compares the open or closed (not merged) PR s with what watch w
 // last told, and returns the wake that tells the news, or false when there
-// is none. News is checks that finished (none still running) since, a new
+// is none: then the wake's Change.Cursor is what to save quietly if it
+// differs from w's (a conflict that cleared). News is checks that finished (none still running) since, a new
 // conflict, a comment by anyone but the host viewer s.Viewer, or the PR's
 // close, which ends the watch. Only what is told moves the cursor: checks
 // still running keep theirs until they finish.
@@ -61,8 +62,13 @@ func Decide(w loomstore.PRWatch, s Snapshot) (Wake, bool) {
 	if closed {
 		news = append(news, "- It was closed, so Loom stopped watching it. Watch it again if it reopens.")
 	}
-	if len(news) == 0 {
-		return Wake{}, false
+	if len(news) == 0 { // a conflict that cleared is saved quietly, so the next is news
+		if cursor["conflict"] != seen["conflict"] {
+			maps.Copy(seen, map[string]int64{"conflict": cursor["conflict"]})
+			b, _ := json.Marshal(seen)
+			next.Comments = string(b)
+		}
+		return Wake{Change: loomstore.PRWatchWake{PRWatchKey: w.PRWatchKey, Since: w.CreatedAt, Cursor: next}}, false
 	}
 	b, _ := json.Marshal(cursor) // map keys marshal sorted
 	next.Comments = string(b)
@@ -74,11 +80,11 @@ func Decide(w loomstore.PRWatch, s Snapshot) (Wake, bool) {
 	text := wakeText(w.PRWatchKey, news, closed, end)
 	from, _ := json.Marshal(told)
 	to, _ := json.Marshal(next)
-	sum := sha256.Sum256(append(append(from, 0), to...))
+	sum := sha256.Sum256(append(append(append([]byte(w.CreatedAt), 0), append(from, 0)...), to...))
 	return Wake{
 		RequestID: fmt.Sprintf("pr-watch:%s/%s#%d:%s", w.Owner, w.Repo, w.Number, hex.EncodeToString(sum[:12])),
 		Text:      text,
-		Change:    loomstore.PRWatchWake{PRWatchKey: w.PRWatchKey, Viewer: s.Viewer, Cursor: next, WakeCount: count, LastTold: text, End: end},
+		Change:    loomstore.PRWatchWake{PRWatchKey: w.PRWatchKey, Since: w.CreatedAt, Viewer: s.Viewer, Cursor: next, WakeCount: count, LastTold: text, End: end},
 	}, true
 }
 
@@ -100,7 +106,7 @@ func checksNews(s Snapshot) string {
 	if len(s.Failed) > 0 {
 		return fmt.Sprintf("- Checks finished%s; %d of %d failed: %s.", on, len(s.Failed), s.Total, strings.Join(s.Failed, ", "))
 	}
-	return fmt.Sprintf("- All %d checks passed%s.", s.Total, on)
+	return fmt.Sprintf("- All %d checks finished%s; none failed.", s.Total, on)
 }
 
 // wakeText is a wake's message on k's PR telling news; end says the watch

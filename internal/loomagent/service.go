@@ -164,9 +164,10 @@ type Service struct {
 	// now is the usage-limit resume and PR-watch clock (OR7, OR8): time's own, or a test's.
 	now func() time.Time
 	// prHost is the host GitHub connector PR watches read through (OR8);
-	// nil sweeps none. prDue is when the next sweep is due, read and set
-	// only by the dispatcher.
+	// nil sweeps none. prTick passes the resync clock's ticks to the PR-watch
+	// loop; prDue is when its next sweep is due, read and set only by it.
 	prHost prwatch.Host
+	prTick chan struct{}
 	prDue  time.Time
 	// queue is the reconcile queue by agent ID, under mu; queueWake tells
 	// the dispatcher it changed.
@@ -182,7 +183,7 @@ func New(cfg ServiceConfig) *Service {
 		retire: cfg.Retire, prHost: cfg.PRWatchHost, workspaceID: cfg.WorkspaceID, presets: cfg.Presets, backend: cfg.DefaultBackend, bridge: cfg.Bridge,
 		inputKey: cfg.InputKey, catalogWait: 15 * time.Second, catalogPoll: 250 * time.Millisecond,
 		catalogWarmUp: cfg.CatalogWarmUp, listed: map[string]time.Time{}, tick: realTicker, after: time.After, now: time.Now,
-		queue: map[string]*queued{}, queueWake: make(chan struct{}, 1),
+		queue: map[string]*queued{}, queueWake: make(chan struct{}, 1), prTick: make(chan struct{}, 1),
 		locks: map[string]*sync.Mutex{}, asks: map[string]map[string]Ask{}, calls: map[string]map[string]string{}, resumed: map[string]map[loomharness.NativeRef]bool{}}
 	if cfg.RecoverFirst {
 		s.ready = make(chan struct{})

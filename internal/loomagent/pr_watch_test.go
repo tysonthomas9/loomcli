@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,6 +24,7 @@ type prHost struct {
 	statuses []any
 	comments map[string][]any // by op
 	fail     string
+	onRead   func(op string) // runs before each read, unlocked
 }
 
 func newPRHost() *prHost {
@@ -39,6 +41,9 @@ func (h *prHost) Viewer(context.Context, string, string, string) (string, error)
 }
 
 func (h *prHost) Read(_ context.Context, _, _, _, op string, _ map[string]any) (map[string]any, error) {
+	if h.onRead != nil {
+		h.onRead(op)
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if op == h.fail {
@@ -79,8 +84,8 @@ type prEnv struct {
 
 func newPREnv(t *testing.T, harness string) *prEnv {
 	t.Helper()
-	p := &prEnv{limitEnv: newLimitEnv(t, harness, false), host: newPRHost()}
-	p.s.prHost = p.host
+	host := newPRHost()
+	p := &prEnv{limitEnv: newLimitEnvWith(t, harness, false, ServiceConfig{PRWatchHost: host}), host: host}
 	w, _, err := prwatch.Register(context.Background(), p.s.store, p.host, "ws", p.a.AgentID, "/repo", 7)
 	if err != nil {
 		t.Fatal(err)
@@ -88,8 +93,6 @@ func newPREnv(t *testing.T, harness string) *prEnv {
 	p.key = w.PRWatchKey
 	return p
 }
-
-func (p *prEnv) restart() { p.limitEnv.restart(); p.s.prHost = p.host }
 
 // sweep runs the next PR-watch sweep and waits for any turn it started.
 func (p *prEnv) sweep() {
@@ -251,14 +254,15 @@ func TestPRWatchCheckRerun(t *testing.T) {
 		p.wantWakes("the rerun runs", 1, nil)
 		p.host.run(2, "completed", "success")
 		p.sweep()
-		p.wantWakes("the rerun passed", 2, []string{"passed"}, "failed")
+		p.wantWakes("the rerun passed", 2, []string{"none failed"}, "failed: ci")
 		p.sweep()
 		p.wantWakes("nothing new", 2, nil)
 	})
 }
 
 // TestPRWatchConflict (OR8): a new conflict wakes once, and GitHub still
-// computing it ("unknown") does not make it new again.
+// computing it ("unknown") does not make it new again; once it cleared, the
+// next conflict is new.
 func TestPRWatchConflict(t *testing.T) {
 	eachHarness(t, func(t *testing.T, p *prEnv) {
 		p.host.set(func(h *prHost) { h.pr["mergeable_state"] = "dirty" })
@@ -271,6 +275,12 @@ func TestPRWatchConflict(t *testing.T) {
 		p.host.set(func(h *prHost) { h.pr["mergeable_state"] = "dirty" })
 		p.sweep()
 		p.wantWakes("still conflicting", 2, nil)
+		p.host.set(func(h *prHost) { h.pr["mergeable_state"] = "clean" })
+		p.sweep()
+		p.wantWakes("the conflict cleared", 2, nil)
+		p.host.set(func(h *prHost) { h.pr["mergeable_state"] = "dirty" })
+		p.sweep()
+		p.wantWakes("a new conflict", 3, []string{"conflicts"})
 	})
 }
 
@@ -289,7 +299,7 @@ func TestPRWatchPartialFailureNoCursorAdvance(t *testing.T) {
 		}
 		p.host.set(func(h *prHost) { h.fail = "" })
 		p.sweep()
-		p.wantWakes("the next good read", 1, []string{"frank", "passed"})
+		p.wantWakes("the next good read", 1, []string{"frank", "none failed"})
 		p.sweep()
 		p.wantWakes("nothing new", 1, nil)
 	})
@@ -381,6 +391,16 @@ func TestPRWatchEndsOnMergeOrClose(t *testing.T) {
 		if _, ok := p.watch(); ok {
 			t.Fatal("a closed PR's watch survived")
 		}
+		p.host.set(func(h *prHost) { h.pr["state"] = "open" }) // reopened, watched again, closed again
+		if _, _, err := prwatch.Register(context.Background(), p.s.store, p.host, "ws", p.a.AgentID, "/repo", 7); err != nil {
+			t.Fatal(err)
+		}
+		p.host.set(func(h *prHost) { h.pr["state"] = "closed" })
+		p.sweep()
+		p.wantWakes("closed again", 2, []string{"closed"})
+		if _, ok := p.watch(); ok {
+			t.Fatal("the second watch survived its PR's close")
+		}
 	})
 }
 
@@ -424,4 +444,53 @@ func TestPRWatchWaitsForPendingWake(t *testing.T) {
 		p.sweep()
 		p.wantWakes("after it was handed over", 2, []string{"ivan"}, "hana")
 	})
+}
+
+// TestPRWatchRewatchDuringSweep (OR8): a watch removed and made again while
+// a sweep reads its PR is a new watch: the sweep neither tells its news nor
+// writes over it.
+func TestPRWatchRewatchDuringSweep(t *testing.T) {
+	p := newPREnv(t, "opencode")
+	p.host.comment("issue_comments", 90, "max")
+	var done atomic.Bool
+	p.host.onRead = func(op string) {
+		if op != "pr_reviews" || done.Swap(true) {
+			return
+		}
+		ctx := context.Background()
+		if _, err := prwatch.Unregister(ctx, p.s.store, p.host, "ws", p.a.AgentID, "/repo", 7); err != nil {
+			t.Error(err)
+		}
+		if _, _, err := prwatch.Register(ctx, p.s.store, p.host, "ws", p.a.AgentID, "/repo", 7); err != nil {
+			t.Error(err)
+		}
+	}
+	p.sweep()
+	p.host.onRead = nil
+	p.wantWakes("a rewatch during the read", 0, nil)
+	w, _ := p.watch()
+	if w.WakeCount != 0 || w.LastTold != "" {
+		t.Fatalf("the new watch was written over: %+v", w)
+	}
+	p.sweep()
+	p.wantWakes("the new watch saw the comment when made", 0, nil)
+}
+
+// TestPRWatchStatusRerun (OR8): a commit status that runs again and ends
+// in the same state is news again (the connector keeps no status id).
+func TestPRWatchStatusRerun(t *testing.T) {
+	p := newPREnv(t, "opencode")
+	status := func(state, at string) {
+		p.host.set(func(h *prHost) {
+			h.statuses = []any{map[string]any{"context": "lint", "state": state, "updated_at": at}}
+		})
+	}
+	status("failure", "2026-10-10T12:00:00Z")
+	p.sweep()
+	p.wantWakes("the status failed", 1, []string{"failed: lint"})
+	status("pending", "2026-10-10T12:05:00Z")
+	p.sweep()
+	status("failure", "2026-10-10T12:09:00Z")
+	p.sweep()
+	p.wantWakes("it failed again", 2, []string{"failed: lint"})
 }

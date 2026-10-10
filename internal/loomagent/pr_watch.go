@@ -24,8 +24,27 @@ var prWatchActor = ActorRef{Kind: "loom", ID: "pr-watch"}
 
 var prWatchSender = senderOf(prWatchActor)
 
-// sweepPRWatches runs every PR watch of the workspace when one is due. The
-// dispatcher runs it on the resync clock.
+// runPRWatches is the PR-watch loop l: it sweeps on each tick the
+// dispatcher passes on (s.prTick) from the resync clock, so slow GitHub
+// reads never hold up the dispatcher.
+func (s *Service) runPRWatches(ctx context.Context, l *loop) {
+	sweep := func(struct{}) bool { s.sweepPRWatches(ctx); return true }
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.prTick:
+			l.took()
+			s.sweepPRWatches(ctx)
+		case req := <-l.drain:
+			if !settle(l, req, s.prTick, sweep) {
+				return
+			}
+		}
+	}
+}
+
+// sweepPRWatches runs every PR watch of the workspace when one is due.
 func (s *Service) sweepPRWatches(ctx context.Context) {
 	if s.prHost == nil || s.now().Before(s.prDue) {
 		return
@@ -53,12 +72,14 @@ func (s *Service) prWatch(ctx context.Context, w loomstore.PRWatch) error {
 	}
 	defer s.lock(w.AgentID)()
 	if snap.Merged {
-		_, err := s.store.UnregisterPRWatch(ctx, w.PRWatchKey)
-		return err
+		return s.store.DropPRWatch(ctx, w.PRWatchKey, w.CreatedAt)
 	}
 	wake, ok := prwatch.Decide(w, snap)
 	if !ok {
-		return nil
+		if wake.Change.Cursor.Comments == w.Cursor.Comments {
+			return nil
+		}
+		return s.store.SettlePRWatch(ctx, w.PRWatchKey, w.CreatedAt, w.Cursor.Comments, wake.Change.Cursor.Comments)
 	}
 	a, err := s.store.GetAgent(ctx, w.AgentID)
 	if err != nil || a.DeletedAt != nil || a.State == StateFinished || sendable(a) != nil {
