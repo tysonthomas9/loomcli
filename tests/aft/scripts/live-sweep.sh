@@ -127,8 +127,31 @@ else
         rc=1
         pgrep_out=""
     fi
+    # Another session's CLI started mid-run (several agents share this host) is
+    # not ours. Walking up its parents, it is foreign when it reaches a process
+    # older than this run before reaching this sweep's own chain; an orphan of
+    # ours (reparented to launchd) or anything the run started still counts.
+    etime_s() { ps -o etime= -p "$1" 2>/dev/null | awk -F'[-:]' '{n=NF; s=$n+60*$(n-1); if(n>=3)s+=3600*$(n-2); if(n==4)s+=86400*$1; print s+0}'; }
+    own_chain=" "; p=$$
+    while [[ -n "$p" && "$p" -gt 1 ]]; do own_chain+="$p "; p="$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')"; done
+    run_age="$(etime_s "$PPID")"
+    foreign() {
+        local p
+        [[ -n "$run_age" ]] || return 1
+        p="$(ps -o ppid= -p "$1" 2>/dev/null | tr -d ' ')"
+        while [[ -n "$p" && "$p" -gt 1 ]]; do
+            [[ "$own_chain" == *" $p "* ]] && return 1
+            (( $(etime_s "$p") > run_age )) && return 0
+            p="$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')"
+        done
+        return 1
+    }
     for pid in $pgrep_out; do
         [[ "$pid" == "$$" ]] && continue
+        if foreign "$pid"; then
+            echo "[sweep] ignoring another session's $bin_base: $pid($(ps -o command= -p "$pid" 2>/dev/null | cut -c1-60))"
+            continue
+        fi
         if ! grep -qx "$pid" "$baseline_file" 2>/dev/null; then
             leaked="$leaked $pid($(ps -o command= -p "$pid" 2>/dev/null | cut -c1-60))"
         fi

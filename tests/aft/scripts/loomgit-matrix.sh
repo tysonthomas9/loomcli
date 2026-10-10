@@ -312,7 +312,7 @@ setup)
     AFT_GH_CLONE_TOKEN="$(gh auth token)" git -c credential.helper= \
       -c 'credential.helper=!f() { echo username=x-access-token; echo "password=$AFT_GH_CLONE_TOKEN"; }; f' \
       clone -q "https://github.com/$forge_repo.git" "$repo"
-    git -C "$repo" config --get credential.helper > /dev/null && fail "the clone stored a credential helper"
+    git -C "$repo" config --local --get-all credential.helper > /dev/null && fail "the clone stored a credential helper"
   fi
   python3 -c 'import json,sys; print(json.dumps(dict(name=sys.argv[1],type="empty",repos=[sys.argv[2]])))' "$(tr '[:upper:]' '[:lower:]' <<< "$workspace")" "$repo" |
     curl -fsS -X POST "$AFT_BASE_URL/api/workspaces" -H 'Content-Type: application/json' -d @- > "$work/workspace.json"
