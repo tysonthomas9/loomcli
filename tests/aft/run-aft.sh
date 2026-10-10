@@ -854,6 +854,15 @@ elif [[ -n "$AFT_REAL_GITHUB" ]]; then
     printf '[user]\n\tname = AFT Operator\n\temail = aft-operator@example.test\n[init]\n\tdefaultBranch = main\n' > "$AFT_GIT_CONFIG_GLOBAL"
     AFT_GITHUB_SANDBOX="$(bash "$SCRIPT_DIR/scripts/real-github-repo.sh" create)" || { echo "[aft] could not create the sandbox repo" >&2; exit 1; }
     export AFT_GITHUB_SANDBOX AFT_MATRIX_FORGE=github AFT_REAL_CODEX_BIN="$REAL_BIN_PATH"
+    # An owned CODEX_HOME for the server's codex: the operator's login (linked, so
+    # a token refresh lands in the real file) and a copy of their config. The lead
+    # asks to trust each fresh case repo; the human answers in the UI, and that
+    # decision is saved here instead of in the operator's ~/.codex/config.toml.
+    operator_codex_home="${CODEX_HOME:-$HOME/.codex}"
+    AFT_CODEX_HOME="$(mktemp -d "$REPORT_DIR/codex-home.XXXXXX")"
+    ln -s "$operator_codex_home/auth.json" "$AFT_CODEX_HOME/auth.json"
+    [[ -f "$operator_codex_home/config.toml" ]] && cp "$operator_codex_home/config.toml" "$AFT_CODEX_HOME/config.toml"
+    export CODEX_HOME="$AFT_CODEX_HOME"
     AFT_REPORT_DIR="$REPORT_DIR" bash "$SCRIPT_DIR/scripts/real-github-repo.sh" ledger "$AFT_GITHUB_SANDBOX" created "cases=$LIVE_CASE_COUNT cap=$AFT_MAX_REAL_CASES"
     echo "[aft] sandbox repo: https://github.com/$AFT_GITHUB_SANDBOX"
 fi

@@ -520,8 +520,23 @@ lead-start)
   browser open "$AFT_BASE_URL/ws/$workspace/agents/lead" > /dev/null
   # Bounded polls (agent-browser's own wait has no timeout) that keep a screenshot
   # and the terminal text when the lead does not come up.
-  started() { lead_terminal_text; grep -qE 'Launching controlled .*lead session' "$work/lead-terminal.txt"; }
-  if ! (wait_until 20 "lead terminal mounted" lead_terminal_mounted && wait_until 85 "real lead runtime started" started); then
+  # Controlled runtime: the launch line, which the Codex screen can scroll out of
+  # xterm's visible rows, or this run's own codex app-server process.
+  app_server() { pgrep -f "$AFT_TESTS_DIR/reports/real-bin/codex/codex app-server --listen" > /dev/null; }
+  started() { lead_terminal_text; grep -qE 'Launching controlled .*lead session' "$work/lead-terminal.txt" || app_server; }
+  # Codex asks to trust each fresh case repo; the human answers "Trust and continue"
+  # (saved in the run's own CODEX_HOME, see run-aft.sh).
+  trust_asked() { lead_terminal_text; grep -q 'Trust this folder' "$work/lead-terminal.txt"; }
+  trusted() { ! trust_asked; }
+  answer_trust() {
+    for _ in $(seq 1 10); do trust_asked && break; sleep 2; done
+    trust_asked || return 0
+    browser click '[data-testid="terminal-wrapper"]' > /dev/null
+    browser press Enter > /dev/null
+    printf '%s %s\n' "$(date -u +%FT%TZ)" "(human) Trust and continue" >> "$work/lead-instructions.log"
+    wait_until 25 "lead past the folder trust prompt" trusted
+  }
+  if ! (wait_until 20 "lead terminal mounted" lead_terminal_mounted && wait_until 50 "real lead runtime started" started && answer_trust); then
     browser screenshot "$work/lead-start-failed.png" > /dev/null 2>&1 || true
     lead_terminal_text
     fail "real lead did not start (screenshot $work/lead-start-failed.png); terminal: $(tail -c 600 "$work/lead-terminal.txt" 2> /dev/null)"
