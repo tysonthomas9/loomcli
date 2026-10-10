@@ -196,19 +196,26 @@ boot="$T/boot.log"
 # list the catalog and send a Create at once, recording the timings. It waits
 # as long as the build takes; it is stopped below if the boot fails.
 (
-  until podman container exists "$ctr" 2>/dev/null; do sleep 0.25; done
-  podman logs -f "$ctr" 2>&1 | while IFS= read -r line; do
-    printf '%s\n' "$line" >> "$boot"
-    if [ "$line" = "[local-mode] ready" ]; then
-      t0="$(python3 -c 'import time; print(time.time())')"
-      code="$(curl -sS -o "$T/k1-models.json" -w '%{http_code}' --max-time 1 "$prefix/harnesses/opencode/models" 2>"$T/k1-models.err" || true)"
-      t1="$(python3 -c 'import time; print(time.time())')"
-      body="$(jq -nc --arg m "$model" '{preset:"lead",name:"s15-wu1-first",repo:"source-repo",base_ref:"main",overrides:{harness:"opencode",model:$m}}')"
-      ccode="$(curl -sS -o "$T/k1-create.json" -w '%{http_code}' --max-time 60 -X POST \
-        -H 'Content-Type: application/json' -H "Idempotency-Key: s15-wu1-$$" -d "$body" "$prefix/agents" 2>"$T/k1-create.err" || true)"
-      printf '%s %s %s %s %s\n' "$t0" "$t1" "$code" "$ccode" "$(python3 -c "print($t1 - $t0)")" > "$T/k1-timing"
-      break
-    fi
+  # Compose creates loom-local before it starts it, and `podman logs -f` on a
+  # created container returns at once; attach only once it runs, and again if
+  # the stream ends before the ready line (each attach replays from the start).
+  while [ ! -s "$T/k1-timing" ]; do
+    until [ "$(podman inspect -f '{{.State.Running}}' "$ctr" 2>/dev/null)" = true ]; do sleep 0.25; done
+    : > "$boot"
+    podman logs -f "$ctr" 2>&1 | while IFS= read -r line; do
+      printf '%s\n' "$line" >> "$boot"
+      if [ "$line" = "[local-mode] ready" ]; then
+        t0="$(python3 -c 'import time; print(time.time())')"
+        code="$(curl -sS -o "$T/k1-models.json" -w '%{http_code}' --max-time 1 "$prefix/harnesses/opencode/models" 2>"$T/k1-models.err" || true)"
+        t1="$(python3 -c 'import time; print(time.time())')"
+        body="$(jq -nc --arg m "$model" '{preset:"lead",name:"s15-wu1-first",repo:"source-repo",base_ref:"main",overrides:{harness:"opencode",model:$m}}')"
+        ccode="$(curl -sS -o "$T/k1-create.json" -w '%{http_code}' --max-time 60 -X POST \
+          -H 'Content-Type: application/json' -H "Idempotency-Key: s15-wu1-$$" -d "$body" "$prefix/agents" 2>"$T/k1-create.err" || true)"
+        printf '%s %s %s %s %s\n' "$t0" "$t1" "$code" "$ccode" "$(python3 -c "print($t1 - $t0)")" > "$T/k1-timing"
+        break
+      fi
+    done
+    sleep 0.25
   done
 ) &
 follower=$!
