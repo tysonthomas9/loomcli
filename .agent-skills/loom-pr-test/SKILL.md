@@ -141,7 +141,31 @@ Slot N uses ports `B+80/82/83` (FleetDB/API/UI) and `B+90/91` (AFT `E2E_PORT`/`E
 
 Run the whole up/verify/down sequence inside one `run` so the slot is held while the stack exists, and always tear down inside it. The lock is released when the command exits, including on INT/TERM (the command is stopped first), and a lock whose owner died is reclaimed. Compose selection is unchanged: Podman when installed, otherwise `docker compose`; set `LOCAL_MODE_COMPOSE` to force one.
 
-On Linux, a gate run with a throwaway `HOME` (see AGENTS.md) has no git identity and cannot guess one, so tests that commit fail; pass one as CI does, e.g. `GIT_AUTHOR_NAME="Loom Gate" GIT_AUTHOR_EMAIL=gate@loomcli.test GIT_COMMITTER_NAME="Loom Gate" GIT_COMMITTER_EMAIL=gate@loomcli.test`.
+#### Gates on a Linux host
+
+A gate run with a throwaway `HOME` (see AGENTS.md) has no git identity there, and Linux cannot guess one, so tests that commit fail. Pass one to the gate only, as CI does. Do not export it from the slot or your shell: `GIT_AUTHOR_*` overrides `git -c user.name=...`, so a real commit made in the same env would carry the gate identity.
+
+```bash
+tmphome=$(mktemp -d)
+scripts/loom-slot.sh run -- env -u LOOM_WORKSPACE -u LOOM_CONFIG_DIR -u LOOM_NOTIFY_TOKEN \
+  GIT_AUTHOR_NAME="Loom Gate" GIT_AUTHOR_EMAIL=gate@loomcli.test \
+  GIT_COMMITTER_NAME="Loom Gate" GIT_COMMITTER_EMAIL=gate@loomcli.test \
+  HOME="$tmphome" GOPATH="$HOME/go" GOCACHE="$HOME/.cache/go-build" GOMODCACHE="$HOME/go/pkg/mod" \
+  make check-go
+```
+
+(Unset the rest of the `LOOM_*` desktop vars listed in AGENTS.md too.)
+
+Known host-only failure: `TestKillOrphanedWorktreeProcesses_StartupSweep` (internal/cli/daemon/supervisor) fails on a Linux desktop because orphans are adopted by the `systemd --user` subreaper, not PID 1 (it passes on macOS, CI and in a container). Until PROC1 lands, treat it as known: confirm the rest of step 12 and step 13 with that one test skipped (`go test ... -skip '^TestKillOrphanedWorktreeProcesses_StartupSweep$' ./...` followed by `COVERAGE_THRESHOLD=60 scripts/check-coverage.sh <profile>`, exactly as the Makefile's check-go steps 12–13 run them) and report both runs.
+
+The pinned OpenCode 2.0.19 (needed by non-EMU agents-v1 AFT) lives at `~/.loom/harness/opencode/2.0.19/opencode`. If it is missing, build it from the Dockerfile's `opencode` stage (pinned bun 1.4.2, sst/opencode b30c4d0) and copy it out; no credentials are involved:
+
+```bash
+docker build --target opencode -t loom-opencode-2.0.19 -f test/local-mode/Dockerfile .
+mkdir -p ~/.loom/harness/opencode/2.0.19
+cid=$(docker create loom-opencode-2.0.19) && docker cp "$cid":/opencode ~/.loom/harness/opencode/2.0.19/opencode && docker rm "$cid"
+~/.loom/harness/opencode/2.0.19/opencode --version   # opencode v2.0.19
+```
 
 ## Compose Overrides
 
