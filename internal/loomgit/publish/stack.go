@@ -103,10 +103,12 @@ func publishStack(ctx context.Context, store Store, request StackRequest) ([]loo
 	if err != nil {
 		return nil, err
 	}
+	all := applied
 	applied, request.BaseSHA, err = dropLandedBottom(ctx, store, request.Workspace, applied, request.BaseSHA)
 	if err != nil {
 		return nil, err
 	}
+	request.Changes = skipDroppedChanges(request.Changes, all[:len(all)-len(applied)])
 	if err := validateStackLayers(ctx, store, request, applied); err != nil {
 		return nil, err
 	}
@@ -372,13 +374,60 @@ func stackLayerGone(ctx context.Context, store any, workspace, change string) (b
 // dropLandedBottom removes the landed or merged layers at the bottom of the
 // working-area log, which a later layer may still sit on when no landing
 // restack ran, and returns the remaining layers and the tip they start from.
+// While the next layer still has an open restack offer, landing owns that
+// move (a native stack adopts the provider's heads), so nothing is dropped.
 func dropLandedBottom(ctx context.Context, store any, workspace string, applied []loomgit.AppliedLayer, base string) ([]loomgit.AppliedLayer, string, error) {
+	kept, keptBase := applied, base
 	for len(applied) > 0 {
 		gone, err := stackLayerGone(ctx, store, workspace, applied[0].Change)
-		if err != nil || !gone {
-			return applied, base, err
+		if err != nil {
+			return kept, keptBase, err
+		}
+		if !gone {
+			break
 		}
 		base, applied = applied[0].NewTip, applied[1:]
 	}
+	if len(applied) == len(kept) || len(applied) == 0 {
+		return applied, base, nil
+	}
+	pending, err := openRestackOffer(ctx, store, workspace, applied[0].Change)
+	if err != nil || pending {
+		return kept, keptBase, err
+	}
 	return applied, base, nil
+}
+
+type restackOfferReader interface {
+	RestackOffers(context.Context, string, string) ([]journal.RestackOffer, error)
+}
+
+// openRestackOffer reports whether a landing restack of change is still open.
+func openRestackOffer(ctx context.Context, store any, workspace, change string) (bool, error) {
+	reader, ok := store.(restackOfferReader)
+	if !ok {
+		return false, nil
+	}
+	offers, err := reader.RestackOffers(ctx, workspace, change)
+	if err != nil {
+		return false, err
+	}
+	for _, offer := range offers {
+		if offer.DerivedRevision == 0 {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// skipDroppedChanges removes from the front of an explicit change list the
+// changes whose bottom layers dropLandedBottom dropped.
+func skipDroppedChanges(changes []string, dropped []loomgit.AppliedLayer) []string {
+	for _, layer := range dropped {
+		if len(changes) == 0 || changes[0] != layer.Change {
+			break
+		}
+		changes = changes[1:]
+	}
+	return changes
 }

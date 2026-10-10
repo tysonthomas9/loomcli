@@ -369,8 +369,12 @@ func orderedStackChanges(ctx context.Context, store *journal.SQLite, areaPath, w
 	if err != nil {
 		return nil, err
 	}
+	all := applied
 	if applied, _, err = dropLandedBottom(ctx, store, workspace, applied, ""); err != nil {
 		return nil, err
+	}
+	if changes != nil {
+		changes = skipDroppedChanges(changes, all[:len(all)-len(applied)])
 	}
 	ordered := make([]string, 0, len(applied))
 	for _, layer := range applied {
