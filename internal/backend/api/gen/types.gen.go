@@ -1330,19 +1330,19 @@ func (e SubmitRevisionVerdictJSONBodyActorKind) Valid() bool {
 
 // Defines values for SubmitRevisionVerdictJSONBodyVerdict.
 const (
-	Approve  SubmitRevisionVerdictJSONBodyVerdict = "approve"
-	Override SubmitRevisionVerdictJSONBodyVerdict = "override"
-	Reject   SubmitRevisionVerdictJSONBodyVerdict = "reject"
+	SubmitRevisionVerdictJSONBodyVerdictApprove  SubmitRevisionVerdictJSONBodyVerdict = "approve"
+	SubmitRevisionVerdictJSONBodyVerdictOverride SubmitRevisionVerdictJSONBodyVerdict = "override"
+	SubmitRevisionVerdictJSONBodyVerdictReject   SubmitRevisionVerdictJSONBodyVerdict = "reject"
 )
 
 // Valid indicates whether the value is a known member of the SubmitRevisionVerdictJSONBodyVerdict enum.
 func (e SubmitRevisionVerdictJSONBodyVerdict) Valid() bool {
 	switch e {
-	case Approve:
+	case SubmitRevisionVerdictJSONBodyVerdictApprove:
 		return true
-	case Override:
+	case SubmitRevisionVerdictJSONBodyVerdictOverride:
 		return true
-	case Reject:
+	case SubmitRevisionVerdictJSONBodyVerdictReject:
 		return true
 	default:
 		return false
@@ -1757,21 +1757,60 @@ func (e GetGraphParamsStatus) Valid() bool {
 	}
 }
 
+// Defines values for ApproveTaskJSONBodyActorKind.
+const (
+	ApproveTaskJSONBodyActorKindAgent ApproveTaskJSONBodyActorKind = "agent"
+	ApproveTaskJSONBodyActorKindHuman ApproveTaskJSONBodyActorKind = "human"
+	ApproveTaskJSONBodyActorKindLead  ApproveTaskJSONBodyActorKind = "lead"
+)
+
+// Valid indicates whether the value is a known member of the ApproveTaskJSONBodyActorKind enum.
+func (e ApproveTaskJSONBodyActorKind) Valid() bool {
+	switch e {
+	case ApproveTaskJSONBodyActorKindAgent:
+		return true
+	case ApproveTaskJSONBodyActorKindHuman:
+		return true
+	case ApproveTaskJSONBodyActorKindLead:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApproveTaskJSONBodyVerdict.
+const (
+	ApproveTaskJSONBodyVerdictApprove  ApproveTaskJSONBodyVerdict = "approve"
+	ApproveTaskJSONBodyVerdictOverride ApproveTaskJSONBodyVerdict = "override"
+)
+
+// Valid indicates whether the value is a known member of the ApproveTaskJSONBodyVerdict enum.
+func (e ApproveTaskJSONBodyVerdict) Valid() bool {
+	switch e {
+	case ApproveTaskJSONBodyVerdictApprove:
+		return true
+	case ApproveTaskJSONBodyVerdictOverride:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RebuildStaleTaskJSONBodyActorKind.
 const (
-	RebuildStaleTaskJSONBodyActorKindAgent RebuildStaleTaskJSONBodyActorKind = "agent"
-	RebuildStaleTaskJSONBodyActorKindHuman RebuildStaleTaskJSONBodyActorKind = "human"
-	RebuildStaleTaskJSONBodyActorKindLead  RebuildStaleTaskJSONBodyActorKind = "lead"
+	Agent RebuildStaleTaskJSONBodyActorKind = "agent"
+	Human RebuildStaleTaskJSONBodyActorKind = "human"
+	Lead  RebuildStaleTaskJSONBodyActorKind = "lead"
 )
 
 // Valid indicates whether the value is a known member of the RebuildStaleTaskJSONBodyActorKind enum.
 func (e RebuildStaleTaskJSONBodyActorKind) Valid() bool {
 	switch e {
-	case RebuildStaleTaskJSONBodyActorKindAgent:
+	case Agent:
 		return true
-	case RebuildStaleTaskJSONBodyActorKindHuman:
+	case Human:
 		return true
-	case RebuildStaleTaskJSONBodyActorKindLead:
+	case Lead:
 		return true
 	default:
 		return false
@@ -4207,6 +4246,30 @@ type GetGraphParams struct {
 // GetGraphParamsStatus defines parameters for GetGraph.
 type GetGraphParamsStatus string
 
+// ApproveTaskJSONBody defines parameters for ApproveTask.
+type ApproveTaskJSONBody struct {
+	Actor struct {
+		Id   string                       `json:"id"`
+		Kind ApproveTaskJSONBodyActorKind `json:"kind"`
+	} `json:"actor"`
+	Lead   *string `json:"lead,omitempty"`
+	Reason *string `json:"reason,omitempty"`
+
+	// Revisions The task's newest revision in each repo.
+	Revisions []struct {
+		ChangeId string `json:"change_id"`
+		HeadSha  string `json:"head_sha"`
+		Number   int    `json:"number"`
+	} `json:"revisions"`
+	Verdict ApproveTaskJSONBodyVerdict `json:"verdict"`
+}
+
+// ApproveTaskJSONBodyActorKind defines parameters for ApproveTask.
+type ApproveTaskJSONBodyActorKind string
+
+// ApproveTaskJSONBodyVerdict defines parameters for ApproveTask.
+type ApproveTaskJSONBodyVerdict string
+
 // GetTaskDiffParams defines parameters for GetTaskDiff.
 type GetTaskDiffParams struct {
 	// Lead Lead whose stack to compare in. Defaults to the lead that most recently applied the change.
@@ -4437,6 +4500,9 @@ type CreateIssueJSONRequestBody = CreateIssueRequest
 
 // PatchIssueJSONRequestBody defines body for PatchIssue for application/json ContentType.
 type PatchIssueJSONRequestBody = PatchIssueRequest
+
+// ApproveTaskJSONRequestBody defines body for ApproveTask for application/json ContentType.
+type ApproveTaskJSONRequestBody ApproveTaskJSONBody
 
 // CloseIssueJSONRequestBody defines body for CloseIssue for application/json ContentType.
 type CloseIssueJSONRequestBody = CloseRequest

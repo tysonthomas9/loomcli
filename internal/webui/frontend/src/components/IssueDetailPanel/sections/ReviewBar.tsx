@@ -16,6 +16,7 @@ import {
   cancelRevisionMerge,
   getTaskRevisions,
   submitRevisionVerdict,
+  approveTask,
   updateIssue,
   type ReviewRevision,
   type TaskDiff,
@@ -494,10 +495,46 @@ export function ReviewBar({
     }
   }
 
-  // One decision for the task: every repo's newest revision, in repo order.
-  // A failure stops it and names the repo.
+  // Approves every repo's newest revision still without a PR in one request:
+  // the undecided ones and any approved earlier that was held back because
+  // another repo did not apply. The server publishes all or none (P2.23).
+  async function approveAll(verdict: "approve" | "override", why: string) {
+    const pending = shown.filter(
+      (r) =>
+        !r.no_changes &&
+        (statusLine(r, taskStatus) === null ||
+          (isApproval(r.verdict) && !r.pr_number)),
+    );
+    try {
+      await approveTask(workspaceId, taskId, pending, verdict, why, lead);
+    } catch (err) {
+      const kept = recordedVerdict(err, verdict);
+      if (kept) {
+        setRecorded((prev) => ({
+          ...prev,
+          ...Object.fromEntries(pending.map((r) => [keyOf(r), kept])),
+        }));
+      }
+      throw err;
+    }
+  }
+
+  // One decision for the task: every repo's newest revision. Approving code
+  // in several repos is one request, so every repo is published or none is
+  // (P2.23); otherwise each revision is decided in repo order, and a failure
+  // stops it and names the repo.
   function decide(verdict: "approve" | "reject" | "override", why = "") {
     void run(async () => {
+      if (
+        multi &&
+        verdict !== "reject" &&
+        !undecided.some((r) => mergeState(r, false).action === "verdict")
+      ) {
+        await approveAll(verdict, why);
+        setForm("");
+        setReason("");
+        return;
+      }
       for (const r of undecided) {
         const merge =
           verdict === "approve" && mergeState(r, false).action === "verdict";
@@ -529,7 +566,9 @@ export function ReviewBar({
           return;
         case "reapprove":
         case "retry":
-          await submitRevisionVerdict(workspaceId, r, "approve", "", lead);
+          // Several repos publish together or not at all (P2.23).
+          if (multi) await approveAll("approve", "");
+          else await submitRevisionVerdict(workspaceId, r, "approve", "", lead);
           return;
         case "rerun":
           // A rejection naming the conflict sends the task back; the rerun

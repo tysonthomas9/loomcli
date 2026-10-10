@@ -26,6 +26,39 @@ export async function getTaskRevisions(
   }
 }
 
+/**
+ * Approves the task's newest revision in every repo with one request: the
+ * server opens the PRs only when every repo applied, otherwise none (P2.23).
+ */
+export async function approveTask(
+  workspaceId: string,
+  taskId: string,
+  revisions: ReviewRevision[],
+  verdict: "approve" | "override",
+  reason: string,
+  lead?: string,
+): Promise<string | undefined> {
+  const { data, error, response } = await api.POST(
+    "/api/workspaces/{ws}/issues/{id}/approval",
+    {
+      params: { path: { ws: workspaceId, id: taskId } },
+      body: {
+        verdict,
+        reason,
+        ...(lead ? { lead } : {}),
+        actor: { kind: "human", id: "local-user" },
+        revisions: revisions.map((r) => ({
+          change_id: r.change_id,
+          number: r.number,
+          head_sha: r.head_sha,
+        })),
+      },
+    },
+  );
+  if (error) throw apiErrorFromResponse(error, response);
+  return (data as { status?: string } | undefined)?.status;
+}
+
 export async function submitRevisionVerdict(
   workspaceId: string,
   revision: ReviewRevision,

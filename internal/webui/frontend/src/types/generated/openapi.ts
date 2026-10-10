@@ -1888,6 +1888,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/issues/{id}/approval": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Approve a task's newest revision in every repo, all or none
+     * @description Records each repo's approval, applies them all, and opens the PRs only when every repo applied. If any repo does not apply, no repo is published and the reply names that repo (P2.23). A repo that applied stays applied in the lead's working area with no PR until the task is approved again.
+     */
+    post: operations["approveTask"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/changes/{change}/merge-approval": {
     parameters: {
       query?: never;
@@ -8248,6 +8268,59 @@ export interface operations {
         };
       };
       /** @description Loom refused the verdict and recorded nothing. `error` is the stable code (for example review_required or stale_subject) and `message` the reason (for example "lead approval policy is off"). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": Record<string, never>;
+        };
+      };
+    };
+  };
+  approveTask: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          /** @enum {string} */
+          verdict: "approve" | "override";
+          reason?: string;
+          lead?: string;
+          actor: {
+            /** @enum {string} */
+            kind: "human" | "agent" | "lead";
+            id: string;
+          };
+          /** @description The task's newest revision in each repo. */
+          revisions: {
+            change_id: string;
+            number: number;
+            head_sha: string;
+          }[];
+        };
+      };
+    };
+    responses: {
+      /** @description Every repo applied. `status` is published when every PR opened; `publish` lists each repo's PR outcome. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": Record<string, never>;
+        };
+      };
+      /** @description not_all_applied (the approvals are recorded, no repo is published, and `repo` and `message` name the repo that did not apply), stale_revision, or publish_failed. */
       409: {
         headers: {
           [name: string]: unknown;

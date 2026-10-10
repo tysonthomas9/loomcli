@@ -26,6 +26,7 @@ export {
   getTaskRevisions,
   rebuildTask,
   submitRevisionVerdict,
+  approveTask,
 } from "@/api/git/revisions";
 export type {
   ReviewRevision,

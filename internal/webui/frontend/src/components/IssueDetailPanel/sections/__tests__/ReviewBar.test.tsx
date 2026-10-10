@@ -15,12 +15,14 @@ import {
 const {
   applyRevision,
   approveRevisionMerge,
+  approveTask,
   cancelRevisionMerge,
   getTaskRevisions,
   submitRevisionVerdict,
   updateIssue,
 } = vi.hoisted(() => ({
   applyRevision: vi.fn(),
+  approveTask: vi.fn(),
   approveRevisionMerge: vi.fn(),
   cancelRevisionMerge: vi.fn(),
   getTaskRevisions: vi.fn(),
@@ -30,6 +32,7 @@ const {
 vi.mock("@/api/git/revisions", () => ({
   applyRevision,
   approveRevisionMerge,
+  approveTask,
   cancelRevisionMerge,
   getTaskRevisions,
   submitRevisionVerdict,
@@ -408,8 +411,8 @@ describe("ReviewBar for a task that changes several repos", () => {
     vi.clearAllMocks();
   });
 
-  it("has one set of buttons and approves every repo in repo order", async () => {
-    submitRevisionVerdict.mockResolvedValue("recorded");
+  it("has one set of buttons and approves every repo in one request", async () => {
+    approveTask.mockResolvedValue("published");
     renderBar([api, web]);
     expect(
       screen.getAllByRole("button", { name: "Approve code & create PR" }),
@@ -418,22 +421,70 @@ describe("ReviewBar for a task that changes several repos", () => {
       "2 files, +4 −2",
     );
     fireEvent.click(primary());
-    await waitFor(() => expect(submitRevisionVerdict).toHaveBeenCalledTimes(2));
-    expect(
-      submitRevisionVerdict.mock.calls.map((call) => call[1].repo),
-    ).toEqual(["api", "web"]);
+    await waitFor(() => expect(approveTask).toHaveBeenCalledTimes(1));
+    // All or none (P2.23): the server publishes every repo or no repo.
+    expect(approveTask).toHaveBeenCalledWith(
+      "W",
+      "T",
+      [api, web],
+      "approve",
+      "",
+      "lead",
+    );
+    expect(submitRevisionVerdict).not.toHaveBeenCalled();
   });
 
-  it("stops at a repo that fails and names it", async () => {
+  it("shows the server's reason naming the repo that did not apply", async () => {
+    approveTask.mockRejectedValue(
+      new ApiError(409, "Conflict", {
+        error: "not_all_applied",
+        status: "recorded",
+        repo: "web",
+        data: { Kind: "approve" },
+        message:
+          "web: couldn't apply: it conflicts with the lead's current code. No PR is opened for any repo until every repo applies.",
+      }),
+    );
+    renderBar([api, web]);
+    fireEvent.click(primary());
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /^web: couldn't apply: .*No PR is opened for any repo/,
+    );
+    // Both approvals are recorded, so neither repo offers Approve again.
+    expect(screen.queryByTestId("approve-create-pr")).toBeNull();
+  });
+
+  it("retries a repo held back by another repo together with that repo", async () => {
+    approveTask.mockResolvedValue("published");
+    const held = {
+      ...api,
+      verdict: "approve",
+      applied: true,
+      follow_status: "applied",
+    };
+    const rerun = { ...web, number: 3 };
+    renderBar([held, rerun]);
+    fireEvent.click(primary());
+    await waitFor(() => expect(approveTask).toHaveBeenCalledTimes(1));
+    expect(approveTask.mock.calls[0]![2]).toEqual([held, rerun]);
+    expect(submitRevisionVerdict).not.toHaveBeenCalled();
+  });
+
+  it("rejects each repo in turn, stopping at a failure that names the repo", async () => {
     submitRevisionVerdict
       .mockRejectedValueOnce(
         new ApiError(409, "Conflict", { error: "stale_subject" }),
       )
       .mockResolvedValue("recorded");
     renderBar([api, web]);
-    fireEvent.click(primary());
+    fireEvent.click(screen.getByTestId("review-reject"));
+    fireEvent.change(screen.getByTestId("review-reason"), {
+      target: { value: "no" },
+    });
+    fireEvent.click(screen.getByTestId("reject-confirm"));
     expect(await screen.findByRole("alert")).toHaveTextContent(/^api: /);
     expect(submitRevisionVerdict).toHaveBeenCalledTimes(1);
+    expect(approveTask).not.toHaveBeenCalled();
   });
 
   it("names the repo on each status line", () => {

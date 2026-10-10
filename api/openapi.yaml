@@ -3750,6 +3750,78 @@ paths:
               schema:
                 type: object
 
+  /api/workspaces/{ws}/issues/{id}/approval:
+    post:
+      operationId: approveTask
+      tags: [git]
+      summary: Approve a task's newest revision in every repo, all or none
+      description: >-
+        Records each repo's approval, applies them all, and opens the PRs only
+        when every repo applied. If any repo does not apply, no repo is
+        published and the reply names that repo (P2.23). A repo that applied
+        stays applied in the lead's working area with no PR until the task is
+        approved again.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [verdict, revisions, actor]
+              properties:
+                verdict:
+                  type: string
+                  enum: [approve, override]
+                reason:
+                  type: string
+                lead:
+                  type: string
+                actor:
+                  type: object
+                  required: [kind, id]
+                  properties:
+                    kind:
+                      type: string
+                      enum: [human, agent, lead]
+                    id:
+                      type: string
+                revisions:
+                  type: array
+                  description: The task's newest revision in each repo.
+                  items:
+                    type: object
+                    required: [change_id, number, head_sha]
+                    properties:
+                      change_id:
+                        type: string
+                      number:
+                        type: integer
+                      head_sha:
+                        type: string
+      responses:
+        "200":
+          description: Every repo applied. `status` is published when every PR opened; `publish` lists each repo's PR outcome.
+          content:
+            application/json:
+              schema:
+                type: object
+        "409":
+          description: >-
+            not_all_applied (the approvals are recorded, no repo is published,
+            and `repo` and `message` name the repo that did not apply),
+            stale_revision, or publish_failed.
+          content:
+            application/json:
+              schema:
+                type: object
+
   /api/workspaces/{ws}/changes/{change}/merge-approval:
     parameters:
       - $ref: "#/components/parameters/WorkspaceId"
