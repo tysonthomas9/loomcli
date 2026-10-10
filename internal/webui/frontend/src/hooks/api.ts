@@ -22,8 +22,6 @@ export {
   applyRevision,
   approveRevisionMerge,
   cancelRevisionMerge,
-  createRevisionPR,
-  getRevisionDiff,
   getTaskDiff,
   getTaskRevisions,
   rebuildTask,

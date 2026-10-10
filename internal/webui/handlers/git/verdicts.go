@@ -44,9 +44,6 @@ type verdictRequest struct {
 	Reason  string       `json:"reason"`
 	Actor   review.Actor `json:"actor"`
 	Lead    string       `json:"lead"`
-	// ApproveOnly applies an approval without opening its PR (D29 Approve
-	// only). By default an approval opens the PR as soon as it applies.
-	ApproveOnly bool `json:"approve_only"`
 	// Merge is Approve and merge on a task whose PR is already open, for a new
 	// version that needs approving again (D29 (3)): the merge is approved at
 	// this revision's head and waits for the PR to carry it. Human only.
@@ -87,8 +84,9 @@ func handleVerdictWithPublisher(w http.ResponseWriter, req *http.Request, publis
 			body.Lead = body.Actor.ID
 		}
 	}
+	// An approval always opens its PR once it applies (D40: no Approve only).
 	v, err := store.SubmitForLeadPublishing(req.Context(), req.PathValue("ws"), req.PathValue("change"), number,
-		body.HeadSHA, body.Verdict, body.Reason, body.Actor, body.Lead, !body.ApproveOnly)
+		body.HeadSHA, body.Verdict, body.Reason, body.Actor, body.Lead, true)
 	if err != nil {
 		writeReviewError(w, err)
 		return

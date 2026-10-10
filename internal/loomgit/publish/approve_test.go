@@ -300,16 +300,24 @@ func TestApproveWithoutProviderAppliesAndSaysNotPublished(t *testing.T) {
 	}
 }
 
-func TestApproveOnlyRecordsNoPublishIntent(t *testing.T) {
+// D40 removed Approve only. A change approved that way before the upgrade is
+// applied with no PR and no publish intent; Retry (approving it again) opens
+// its PR.
+func TestLegacyApproveOnlyChangeOpensPROnRetry(t *testing.T) {
 	fx, forge := approvalFixture(t, "stack")
 	ctx := context.Background()
 	a := appliedTask(t, fx, "A", fx.base)
 	approveForLead(t, fx, a, reviewer, false, "applied")
 	if outcomes, err := PublishApproved(ctx, "W", "L", nil); err != nil || len(outcomes) != 0 || len(forge.prs) != 0 {
-		t.Fatalf("Approve only published: %+v, %v; PRs=%+v", outcomes, err, forge.prs)
+		t.Fatalf("legacy Approve only published by itself: %+v, %v; PRs=%+v", outcomes, err, forge.prs)
 	}
 	if _, found, _ := fx.store.LatestApprovalPublication(ctx, "W", "A", a.Number); found {
-		t.Fatal("Approve only recorded a publish intent")
+		t.Fatal("legacy Approve only has a publish intent")
+	}
+	reapprove(t, fx, a)
+	outcomes, err := PublishApproved(ctx, "W", "L", nil)
+	if err != nil || len(outcomes) != 1 || outcomes[0].Status != "published" || len(forge.prs) != 1 {
+		t.Fatalf("Retry did not open the legacy change's PR: %+v, %v; PRs=%+v", outcomes, err, forge.prs)
 	}
 }
 

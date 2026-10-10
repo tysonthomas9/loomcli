@@ -1,0 +1,191 @@
+/* The task's one review bar, above the diff on the Changes tab (P2.23). */
+.bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.header {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  font-size: 13px;
+}
+
+.line[data-tone="ok"] {
+  color: var(--color-text-primary);
+}
+
+.line[data-tone="warn"] {
+  color: var(--color-warning);
+}
+
+.line[data-tone="bad"] {
+  color: var(--color-status-danger-text);
+}
+
+.detail {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.note {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.primary,
+.outline,
+.danger {
+  min-height: 30px;
+  padding: 5px 14px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.primary {
+  color: var(--color-text-inverse, #fff);
+  background: var(--color-primary);
+  border: 1px solid var(--color-primary);
+}
+
+.primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-primary) 85%, black);
+}
+
+.outline {
+  color: var(--color-text-primary);
+  background: transparent;
+  border: 1px solid var(--color-border);
+}
+
+.outline:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-hover);
+}
+
+.danger {
+  color: var(--color-text-inverse, #fff);
+  background: var(--color-danger);
+  border: 1px solid var(--color-danger);
+}
+
+.primary:disabled,
+.outline:disabled,
+.danger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.primary:focus-visible,
+.outline:focus-visible,
+.danger:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.more {
+  position: relative;
+}
+
+.menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  min-width: 13rem;
+  margin-top: 4px;
+  padding: 4px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 12%);
+}
+
+.menu button {
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  color: var(--color-text-primary);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.menu button:hover {
+  background: var(--color-bg-hover);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 40rem;
+  font-size: 12.5px;
+}
+
+.form textarea {
+  font: inherit;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-card);
+  color: var(--color-text-primary);
+}
+
+.formButtons {
+  display: flex;
+  gap: 8px;
+}
+
+.error {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--color-status-danger-text);
+}
+
+/* Details tab: the review's one-line status and its link to Changes. */
+.link {
+  margin: 12px 0;
+  font-size: 13px;
+  color: var(--color-text-primary);
+}
+
+.link button {
+  padding: 0;
+  font: inherit;
+  color: var(--color-primary);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.link button:hover {
+  text-decoration: underline;
+}

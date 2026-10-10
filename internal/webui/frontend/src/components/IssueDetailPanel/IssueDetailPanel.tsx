@@ -85,7 +85,7 @@ import { ResizeDivider } from "./actions";
 import { ErrorToast } from "../ErrorToast";
 import { useSplitRatio, useToast } from "@/hooks/ui";
 import { CollapsibleSection } from "./CollapsibleSection";
-import { RevisionsSection } from "./sections/RevisionsSection";
+import { ReviewStatusLink } from "./sections/ReviewBar";
 import { TaskChangesTab } from "./TaskChangesTab";
 import { isLeadRole } from "@/utils/agentRole";
 import { SessionsTab } from "./sessions";
@@ -1278,6 +1278,13 @@ function DefaultContent({
   // Determine if this is a review item
   const reviewType = getReviewType(issue);
   const isReviewItem = reviewType !== null;
+  // A planner's plan and a PR's code are never the same kind of Approve (P2.23).
+  const approveLabel =
+    reviewType === "plan"
+      ? "Approve plan"
+      : reviewType === "code"
+        ? "Approve code"
+        : "Approve";
 
   // Calculate open blocker count for banner
   const openBlockerCount =
@@ -1386,10 +1393,10 @@ function DefaultContent({
             onClick={handleApprove}
             disabled={isApproving || approveBlockedReason !== null}
             title={approveBlockedReason ?? undefined}
-            aria-label="Approve"
+            aria-label={approveLabel}
             data-testid="panel-approve-button"
           >
-            {isApproving ? "..." : "\u2713"} Approve
+            {isApproving ? "..." : "\u2713"} {approveLabel}
           </button>
           {/* Not disabled by an approve 409: reject is a different transition
               (PATCH status=open) that the claim guard does not cover, and
@@ -1602,11 +1609,14 @@ function DefaultContent({
             </div>
 
             {/* Full-width sections below the columns */}
+            {/* The review bar lives on Changes only (P2.23); Details links to it. */}
             {issue.issue_type === "task" && (
-              <RevisionsSection
+              <ReviewStatusLink
                 workspaceId={workspaceId}
                 taskId={issue.id}
                 lead={revisionLead}
+                taskStatus={issue.status}
+                onOpen={() => setActiveTabId("changes")}
               />
             )}
 
@@ -1697,6 +1707,7 @@ function DefaultContent({
             workspaceId={workspaceId}
             taskId={issue.id}
             lead={revisionLead}
+            taskStatus={issue.status}
           />
         </div>
       )}

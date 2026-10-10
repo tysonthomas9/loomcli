@@ -6,22 +6,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/types";
 import { TaskChangesTab } from "../TaskChangesTab";
 
-const {
-  applyRevision,
-  getRevisionDiff,
-  getTaskDiff,
-  getTaskRevisions,
-  submitRevisionVerdict,
-} = vi.hoisted(() => ({
-  applyRevision: vi.fn(),
-  getRevisionDiff: vi.fn(),
-  getTaskDiff: vi.fn(),
-  getTaskRevisions: vi.fn(),
-  submitRevisionVerdict: vi.fn(),
-}));
+const { getTaskDiff, getTaskRevisions, submitRevisionVerdict } = vi.hoisted(
+  () => ({
+    getTaskDiff: vi.fn(),
+    getTaskRevisions: vi.fn(),
+    submitRevisionVerdict: vi.fn(),
+  }),
+);
 vi.mock("@/api/git/revisions", () => ({
-  applyRevision,
-  getRevisionDiff,
+  applyRevision: vi.fn(),
+  approveRevisionMerge: vi.fn(),
+  cancelRevisionMerge: vi.fn(),
   getTaskDiff,
   getTaskRevisions,
   submitRevisionVerdict,
@@ -34,6 +29,8 @@ const base = {
   incomplete: false,
   applied: false,
   needs_working_area: false,
+  no_changes: false,
+  author: "coder",
 };
 const rev2 = {
   ...base,
@@ -46,6 +43,8 @@ const rev1 = {
   number: 1,
   head_sha: "a".repeat(40),
   superseded: true,
+  verdict: "reject",
+  verdict_reason: "write it to the helper instead",
   date: "2026-10-02T23:14:24Z",
 };
 const patch = (line: string) =>
@@ -60,22 +59,18 @@ const taskDiff = {
     { path: "big.bin", patchSize: 3_000_000, truncated: true },
   ],
 };
+const approve = () =>
+  screen.getByRole("button", { name: "Approve code & create PR" });
 
 describe("TaskChangesTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getTaskRevisions.mockResolvedValue([rev2, rev1]);
     getTaskDiff.mockResolvedValue([taskDiff]);
-    getRevisionDiff.mockResolvedValue({
-      revision: 1,
-      files: [
-        { path: "f", patchSize: 40, truncated: false, patch: patch("old-try") },
-      ],
-    });
     submitRevisionVerdict.mockResolvedValue("recorded");
   });
 
-  it("loads the revisions before the task diff and shows one diff", async () => {
+  it("loads the revisions before the task diff and shows the bar above one diff", async () => {
     let releaseRevisions: (value: unknown) => void = () => {};
     getTaskRevisions.mockReturnValueOnce(
       new Promise((resolve) => {
@@ -83,19 +78,13 @@ describe("TaskChangesTab", () => {
       }),
     );
     render(<TaskChangesTab workspaceId="W" taskId="T" lead="lead" />);
-    expect(screen.getByText("Loading revisions…")).toBeInTheDocument();
+    expect(screen.getByText("Loading changes…")).toBeInTheDocument();
     expect(getTaskDiff).not.toHaveBeenCalled();
     releaseRevisions([rev2, rev1]);
-    expect(
-      await screen.findByText(
-        "Revision 2 against the layer below it in the stack",
-      ),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("+task")).toBeInTheDocument();
     expect(getTaskDiff).toHaveBeenCalledWith("W", "T", "lead");
     expect(getTaskDiff).toHaveBeenCalledTimes(1);
-    expect(getRevisionDiff).not.toHaveBeenCalled();
-    expect(screen.getByText("+task")).toBeInTheDocument();
-    // The patch's trailing newline is not rendered as an empty line.
+    // The trailing newline is not rendered as an empty line.
     expect(document.querySelectorAll('[data-type="context"]')).toHaveLength(0);
     const files = screen.getByRole("complementary", { name: "Changed files" });
     expect(within(files).getAllByRole("button")).toHaveLength(2);
@@ -103,16 +92,46 @@ describe("TaskChangesTab", () => {
     expect(
       screen.getByText(/3000000 bytes · too large to show/),
     ).toBeInTheDocument();
+    // The bar comes before the diff.
+    const bar = screen.getByTestId("revisions-section");
+    expect(
+      bar.compareDocumentPosition(files) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
-  it("puts verdict buttons on the newest revision only", async () => {
+  it("has no attempts list, revision number or SHA (P2.23)", async () => {
     render(<TaskChangesTab workspaceId="W" taskId="T" lead="lead" />);
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Approve and create PR" }),
+    await screen.findByText("+task");
+    const tab = screen.getByTestId("task-changes-tab");
+    expect(tab).not.toHaveTextContent(
+      /History|Earlier attempts|Revision \d|bbbbbbbbbbbb/,
     );
+    expect(screen.queryByRole("button", { name: /History/ })).toBeNull();
+    // S7: no "Since your last review" toggle.
+    expect(tab).not.toHaveTextContent("Since your last review");
+  });
+
+  it("shows the rejection reason above the full diff of the rerun", async () => {
+    render(<TaskChangesTab workspaceId="W" taskId="T" lead="lead" />);
+    expect(await screen.findByTestId("rejection-reason")).toHaveTextContent(
+      "Retried after you rejected: write it to the helper instead",
+    );
+  });
+
+  it("drops the rejection reason once the rerun is decided", async () => {
+    getTaskRevisions.mockResolvedValue([{ ...rev2, verdict: "approve" }, rev1]);
+    render(<TaskChangesTab workspaceId="W" taskId="T" lead="lead" />);
+    await screen.findByText("+task");
+    expect(screen.queryByTestId("rejection-reason")).toBeNull();
+  });
+
+  it("decides the newest revision only, and reloads the diff after", async () => {
+    render(<TaskChangesTab workspaceId="W" taskId="T" lead="lead" />);
+    await screen.findByText("+task");
     expect(
-      screen.getAllByRole("button", { name: "Approve and create PR" }),
+      screen.getAllByRole("button", { name: "Approve code & create PR" }),
     ).toHaveLength(1);
+    fireEvent.click(approve());
     await vi.waitFor(() =>
       expect(submitRevisionVerdict).toHaveBeenCalledWith(
         "W",
@@ -120,95 +139,19 @@ describe("TaskChangesTab", () => {
         "approve",
         "",
         "lead",
-        false,
       ),
     );
+    await vi.waitFor(() => expect(getTaskDiff).toHaveBeenCalledTimes(2));
   });
 
-  it("reloads the task diff after a verdict applies the revision", async () => {
-    getTaskDiff
-      .mockResolvedValueOnce([{ ...taskDiff, compare: "base" }])
-      .mockResolvedValue([{ ...taskDiff, compare: "trunk" }]);
-    render(<TaskChangesTab workspaceId="W" taskId="T" />);
-    expect(
-      await screen.findByText("Revision 2 against its base (not applied yet)"),
-    ).toBeInTheDocument();
-    fireEvent.click(
-      screen.getByRole("button", { name: "Approve and create PR" }),
-    );
-    expect(
-      await screen.findByText("Revision 2 against trunk"),
-    ).toBeInTheDocument();
-    expect(getTaskDiff).toHaveBeenCalledTimes(2);
-  });
-
-  it("lists older revisions read-only under History with their own diffs", async () => {
-    render(<TaskChangesTab workspaceId="W" taskId="T" />);
-    const history = await screen.findByRole("button", { name: "History (1)" });
-    expect(screen.queryByRole("list", { name: "Revision history" })).toBeNull();
-    fireEvent.click(history);
-    const list = screen.getByRole("list", { name: "Revision history" });
-    expect(within(list).getByText("aaaaaaaaaaaa")).toBeInTheDocument();
-    expect(within(list).getByText(/completed/)).toBeInTheDocument();
-    expect(
-      within(list).getByText(/replaced by a newer revision/),
-    ).toBeInTheDocument();
-    expect(
-      within(list).queryByRole("button", { name: "Approve and create PR" }),
-    ).toBeNull();
-    fireEvent.click(within(list).getByRole("button", { name: "Revision 1" }));
-    expect(await screen.findByText("+old-try")).toBeInTheDocument();
-    expect(getRevisionDiff).toHaveBeenCalledWith("W", rev1);
-    expect(
-      screen.getByText("Revision 1 (read-only history), against its base"),
-    ).toBeInTheDocument();
-    // Still one set of verdict buttons: the task's, never the old revision's.
-    expect(
-      screen.getAllByRole("button", { name: "Approve and create PR" }),
-    ).toHaveLength(1);
-    fireEvent.click(
-      screen.getByRole("button", { name: "Back to the task diff" }),
-    );
-    expect(screen.getByText("+task")).toBeInTheDocument();
-  });
-
-  it("says No changes for an empty newest revision", async () => {
-    getTaskRevisions.mockResolvedValue([rev2]);
-    getTaskDiff.mockResolvedValue([
-      { ...taskDiff, compare: "base", files: [] },
-    ]);
-    render(<TaskChangesTab workspaceId="W" taskId="T" />);
-    expect(await screen.findByText("No changes")).toBeInTheDocument();
-    expect(
-      screen.getByText("Revision 2 against its base (not applied yet)"),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /History/ })).toBeNull();
-  });
-
-  it("closes an empty attempt as No changes with no verdict buttons", async () => {
+  it("closes an empty attempt as No changes with no buttons", async () => {
     getTaskRevisions.mockResolvedValue([{ ...rev2, no_changes: true }]);
-    getTaskDiff.mockResolvedValue([
-      { ...taskDiff, compare: "base", files: [] },
-    ]);
+    getTaskDiff.mockResolvedValue([{ ...taskDiff, files: [] }]);
     render(<TaskChangesTab workspaceId="W" taskId="T" />);
-    expect(
-      await screen.findByTestId("revision-no-changes"),
-    ).toBeInTheDocument();
-    expect(await screen.findAllByText("No changes")).toHaveLength(2);
-    expect(screen.queryByText("Awaiting review")).toBeNull();
-    for (const name of ["Approve and create PR", "Reject", "Override"])
-      expect(screen.queryByRole("button", { name })).toBeNull();
-  });
-
-  it("marks an empty earlier attempt in History and reviews the newer one", async () => {
-    getTaskRevisions.mockResolvedValue([rev2, { ...rev1, no_changes: true }]);
-    render(<TaskChangesTab workspaceId="W" taskId="T" />);
-    fireEvent.click(await screen.findByRole("button", { name: "History (1)" }));
-    const list = screen.getByRole("list", { name: "Revision history" });
-    expect(within(list).getByText(/no changes/)).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Approve and create PR" }),
-    ).toBeEnabled();
+    expect(await screen.findByTestId("revision-no-changes")).toHaveTextContent(
+      "No changes",
+    );
+    expect(screen.queryByRole("button", { name: /Approve/ })).toBeNull();
   });
 
   it("shows the API error code when the diff fails", async () => {
@@ -221,11 +164,37 @@ describe("TaskChangesTab", () => {
     );
   });
 
-  it("does not ask for a diff when the task has no revisions", async () => {
+  it("does not ask for a diff when the task has no code yet", async () => {
     getTaskRevisions.mockResolvedValue([]);
     render(<TaskChangesTab workspaceId="W" taskId="T" />);
-    expect(await screen.findByText("No revisions yet.")).toBeInTheDocument();
+    expect(await screen.findByText("No code changes yet.")).toBeInTheDocument();
     expect(getTaskDiff).not.toHaveBeenCalled();
+  });
+
+  it("keeps a newer revision's buttons disabled until its own diff has loaded", async () => {
+    const first = { ...rev2, number: 1, verdict: undefined };
+    const diffOf = (revision: number) => ({
+      ...taskDiff,
+      revision,
+      files: [taskDiff.files[0]],
+    });
+    getTaskRevisions
+      .mockResolvedValueOnce([first])
+      .mockResolvedValue([rev2, first]);
+    let releaseSecond: (value: unknown) => void = () => {};
+    getTaskDiff.mockResolvedValueOnce([diffOf(1)]).mockReturnValueOnce(
+      new Promise((resolve) => {
+        releaseSecond = resolve;
+      }),
+    );
+    render(<TaskChangesTab workspaceId="W" taskId="T" />);
+    await screen.findByText("+task");
+    fireEvent.click(approve());
+    // The reload shows revision 2 while the diff on screen is still revision 1's.
+    await vi.waitFor(() => expect(getTaskRevisions).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(approve()).toBeDisabled());
+    releaseSecond([diffOf(2)]);
+    await vi.waitFor(() => expect(approve()).toBeEnabled());
   });
 
   describe("a task with code in two repos", () => {
@@ -260,187 +229,35 @@ describe("TaskChangesTab", () => {
       ],
     });
 
-    it("shows one section per repo, ordered by repo name, each with its own diff and verdicts", async () => {
-      // The list's order is not the repo order: zeta comes first.
+    it("shows one diff section per repo, ordered by repo name, under one review bar", async () => {
       getTaskRevisions.mockResolvedValue([zeta, alpha]);
       getTaskDiff.mockResolvedValue([
-        diffFor("A", "alpha", "alpha-code"),
-        diffFor("Z", "zeta", "zeta-code"),
+        diffFor("A", "alpha", "a"),
+        diffFor("Z", "zeta", "z"),
       ]);
       render(<TaskChangesTab workspaceId="W" taskId="T" lead="lead" />);
-      const alphaSection = await screen.findByRole("region", {
-        name: "Repo alpha",
-      });
-      const zetaSection = screen.getByRole("region", { name: "Repo zeta" });
+      await screen.findByText("+a");
+      expect(screen.getAllByTestId("revisions-section")).toHaveLength(1);
       expect(
-        alphaSection.compareDocumentPosition(zetaSection) &
-          Node.DOCUMENT_POSITION_FOLLOWING,
-      ).toBeTruthy();
-      expect(
-        await within(alphaSection).findByText("+alpha-code"),
-      ).toBeVisible();
-      expect(within(alphaSection).queryByText("+zeta-code")).toBeNull();
-      expect(within(zetaSection).getByText("+zeta-code")).toBeVisible();
-      expect(within(zetaSection).queryByText("+alpha-code")).toBeNull();
-      // Each repo's own revision gets its own, enabled verdict buttons.
-      const zetaApprove = await within(zetaSection).findByRole("button", {
-        name: "Approve and create PR",
-      });
-      expect(
-        within(alphaSection).getAllByRole("button", {
-          name: "Approve and create PR",
-        }),
+        screen.getAllByRole("button", { name: "Approve code & create PR" }),
       ).toHaveLength(1);
-      await vi.waitFor(() => expect(zetaApprove).toBeEnabled());
-      fireEvent.click(zetaApprove);
-      await vi.waitFor(() =>
-        expect(submitRevisionVerdict).toHaveBeenCalledWith(
-          "W",
-          zeta,
-          "approve",
-          "",
-          "lead",
-          false,
-        ),
-      );
+      const sections = screen.getAllByTestId("task-repo-changes");
+      expect(sections.map((s) => s.getAttribute("aria-label"))).toEqual([
+        "Repo alpha",
+        "Repo zeta",
+      ]);
+      expect(within(sections[1]!).getByText("+z")).toBeInTheDocument();
     });
 
-    it("keeps a repo's verdict buttons disabled until that repo's diff has loaded", async () => {
+    it("enables the buttons only once every repo's diff has loaded", async () => {
       getTaskRevisions.mockResolvedValue([zeta, alpha]);
-      let release: (value: unknown) => void = () => {};
-      getTaskDiff.mockReturnValue(
-        new Promise((resolve) => {
-          release = resolve;
-        }),
-      );
-      render(<TaskChangesTab workspaceId="W" taskId="T" />);
-      const zetaSection = await screen.findByRole("region", {
-        name: "Repo zeta",
-      });
-      const approve = await within(zetaSection).findByRole("button", {
-        name: "Approve and create PR",
-      });
-      expect(approve).toBeDisabled();
-      expect(within(zetaSection).getByText("Loading diff…")).toBeVisible();
-      release([
-        diffFor("A", "alpha", "alpha-code"),
-        diffFor("Z", "zeta", "zeta-code"),
-      ]);
-      await vi.waitFor(() => expect(approve).toBeEnabled());
-    });
-
-    it("keeps verdicts disabled when the diff shown is not the newest revision's", async () => {
-      getTaskRevisions.mockResolvedValue([{ ...zeta, number: 2 }, alpha]);
-      getTaskDiff.mockResolvedValue([
-        diffFor("A", "alpha", "alpha-code"),
-        diffFor("Z", "zeta", "zeta-code"),
-      ]);
-      render(<TaskChangesTab workspaceId="W" taskId="T" />);
-      const zetaSection = await screen.findByRole("region", {
-        name: "Repo zeta",
-      });
-      expect(await within(zetaSection).findByText("+zeta-code")).toBeVisible();
-      expect(
-        within(zetaSection).getByRole("button", {
-          name: "Approve and create PR",
-        }),
-      ).toBeDisabled();
-      const alphaSection = screen.getByRole("region", { name: "Repo alpha" });
-      await vi.waitFor(() =>
-        expect(
-          within(alphaSection).getByRole("button", {
-            name: "Approve and create PR",
-          }),
-        ).toBeEnabled(),
-      );
-    });
-  });
-
-  describe("verdicts only for the revision whose diff is shown", () => {
-    const first = {
-      ...base,
-      number: 1,
-      head_sha: "1".repeat(40),
-      superseded: false,
-    };
-    const second = {
-      ...base,
-      number: 2,
-      head_sha: "2".repeat(40),
-      superseded: false,
-    };
-    const diffOf = (revision: number) => ({
-      ...taskDiff,
-      revision,
-      files: [taskDiff.files[0]],
-    });
-
-    it("renders the verdicts from the tab's own revisions snapshot, not a newer fetch", async () => {
-      // A second revisions fetch would already see revision 2, whose diff is
-      // not on screen.
-      getTaskRevisions
-        .mockResolvedValueOnce([first])
-        .mockResolvedValue([second, first]);
-      getTaskDiff.mockResolvedValue([diffOf(1)]);
+      getTaskDiff.mockResolvedValue([diffFor("A", "alpha", "a")]);
       render(<TaskChangesTab workspaceId="W" taskId="T" lead="lead" />);
+      await screen.findByText("+a");
       expect(
-        await screen.findByText(
-          "Revision 1 against the layer below it in the stack",
-        ),
-      ).toBeVisible();
-      const approve = screen.getByRole("button", {
-        name: "Approve and create PR",
-      });
-      expect(approve).toBeEnabled();
-      expect(screen.queryByText("Revision 2")).toBeNull();
-      expect(getTaskRevisions).toHaveBeenCalledTimes(1);
-      fireEvent.click(approve);
-      await vi.waitFor(() =>
-        expect(submitRevisionVerdict).toHaveBeenCalledWith(
-          "W",
-          first,
-          "approve",
-          "",
-          "lead",
-          false,
-        ),
-      );
-    });
-
-    it("keeps a newer revision's verdicts disabled until its own diff has loaded", async () => {
-      getTaskRevisions
-        .mockResolvedValueOnce([first])
-        .mockResolvedValue([second, first]);
-      let releaseSecond: (value: unknown) => void = () => {};
-      getTaskDiff.mockResolvedValueOnce([diffOf(1)]).mockReturnValueOnce(
-        new Promise((resolve) => {
-          releaseSecond = resolve;
-        }),
-      );
-      render(<TaskChangesTab workspaceId="W" taskId="T" />);
-      fireEvent.click(
-        await screen.findByRole("button", { name: "Approve and create PR" }),
-      );
-      // The verdict reloads the snapshot: revision 2 appears while the diff on
-      // screen is still revision 1's.
-      expect(await screen.findByText("Revision 2")).toBeVisible();
-      expect(
-        screen.getByText("Revision 1 against the layer below it in the stack"),
-      ).toBeVisible();
-      expect(
-        screen.getByRole("button", { name: "Approve and create PR" }),
-      ).toBeDisabled();
-      releaseSecond([diffOf(2)]);
-      expect(
-        await screen.findByText(
-          "Revision 2 against the layer below it in the stack",
-        ),
-      ).toBeVisible();
-      await vi.waitFor(() =>
-        expect(
-          screen.getByRole("button", { name: "Approve and create PR" }),
-        ).toBeEnabled(),
-      );
+        screen.getByText("No diff for this repo yet."),
+      ).toBeInTheDocument();
+      expect(approve()).toBeDisabled();
     });
   });
 });

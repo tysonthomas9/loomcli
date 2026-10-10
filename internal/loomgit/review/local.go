@@ -86,10 +86,16 @@ type TaskRevision struct {
 	Outcome    string `json:"outcome"`
 	Incomplete bool   `json:"incomplete"`
 	Verdict    string `json:"verdict,omitempty"`
-	Applied    bool   `json:"applied"`
+	// VerdictReason is the reason recorded with the latest verdict, such as
+	// why it was rejected; a rerun shows it above its diff.
+	VerdictReason string `json:"verdict_reason,omitempty"`
+	// Author is the agent that recorded this revision, when known.
+	Author  string `json:"author,omitempty"`
+	Applied bool   `json:"applied"`
 	// FollowStatus is the lead follow state of this revision's approval
-	// ("spent" when its apply can never run; approve again to re-arm), with
-	// the reviewer-facing reason.
+	// ("spent" when its apply can never run; approve again to re-arm;
+	// "unapplied" when it was applied and later removed), with the
+	// reviewer-facing reason.
 	FollowStatus string `json:"follow_status,omitempty"`
 	FollowReason string `json:"follow_reason,omitempty"`
 	// NeedsWorkingArea marks an approved, unapplied revision whose target lead
@@ -165,8 +171,11 @@ func (l *Local) TaskRevisionsForLead(ctx context.Context, workspace, task, lead 
 		i.Superseded = latest > r.Number
 		v, err := l.store.LatestVerdict(ctx, r)
 		if err == nil {
-			i.Verdict = v.Kind
+			i.Verdict, i.VerdictReason = v.Kind, v.Reason
 		} else if !errors.Is(err, journal.ErrNotFound) {
+			return nil, err
+		}
+		if _, i.Author, err = l.store.RevisionAuthor(ctx, r); err != nil {
 			return nil, err
 		}
 		if i.Applied, err = l.store.RevisionApplied(ctx, workspace, lead, r.Change, r.Number); err != nil {
@@ -175,6 +184,11 @@ func (l *Local) TaskRevisionsForLead(ctx context.Context, workspace, task, lead 
 		if v.Kind == "approve" || v.Kind == "override" || v.Kind == "policy" {
 			if i.FollowStatus, i.FollowReason, err = l.store.ApprovalFollowState(ctx, workspace, lead, r.Change, r.Number); err != nil {
 				return nil, err
+			}
+			// The follow stays "applied" after Unapply removed the layer (F6):
+			// report what the working area holds, so the reviewer can Apply.
+			if i.FollowStatus == "applied" && !i.Applied {
+				i.FollowStatus = "unapplied"
 			}
 			if i.NeedsWorkingArea, err = l.needsWorkingArea(ctx, workspace, lead, r.Change, r.Number); err != nil {
 				return nil, err

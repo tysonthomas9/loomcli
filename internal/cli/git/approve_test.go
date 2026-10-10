@@ -45,10 +45,10 @@ func TestApproveCmdFollowsApprovedRevision(t *testing.T) {
 func stubApprovePublish(t *testing.T, publisher func(context.Context, string, string) ([]publish.ApprovalOutcome, error)) {
 	t.Helper()
 	oldApprove, oldResolver, oldPublish := approveLocal, approveResolver, publishApprovedLocal
-	oldWorkspace, oldLead, oldOnly := approveWorkspace, approveLead, approveOnly
+	oldWorkspace, oldLead := approveWorkspace, approveLead
 	t.Cleanup(func() {
 		approveLocal, approveResolver, publishApprovedLocal = oldApprove, oldResolver, oldPublish
-		approveWorkspace, approveLead, approveOnly = oldWorkspace, oldLead, oldOnly
+		approveWorkspace, approveLead = oldWorkspace, oldLead
 	})
 	publishApprovedLocal = func(ctx context.Context, workspace, lead string, stacks publish.DeclaredStacks) ([]publish.ApprovalOutcome, error) {
 		if stacks == nil {
@@ -79,14 +79,10 @@ func runApproveForTest(t *testing.T) string {
 	return out.String()
 }
 
-func TestApproveCmdOnlyDoesNotOpenPR(t *testing.T) {
-	stubApprovePublish(t, func(context.Context, string, string) ([]publish.ApprovalOutcome, error) {
-		t.Fatal("Approve only opened a PR")
-		return nil, nil
-	})
-	approveOnly = true
-	if out := runApproveForTest(t); !strings.Contains(out, "Approved and added to the lead working area") {
-		t.Fatalf("unexpected output %q", out)
+func TestApproveCmdHasNoOnlyFlag(t *testing.T) {
+	// D40: there is no Approve only; every approval opens its PR.
+	if approveCmd.Flags().Lookup("only") != nil {
+		t.Fatal("loom approve still has --only")
 	}
 }
 

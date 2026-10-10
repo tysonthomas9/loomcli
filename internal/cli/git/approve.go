@@ -15,14 +15,13 @@ import (
 
 var approveWorkspace string
 var approveLead string
-var approveOnly bool
 var approveChange string
 var approveRevision int
 var approveDryRun bool
 var approveHeads []string
 var approveResolver = cli.NewResolver
 var approveLocal = func(ctx context.Context, workspace, lead, change string, revision int, headSHA string, actor review.Actor) (apply.FollowResult, error) {
-	return apply.ApproveLocalPinned(ctx, workspace, lead, change, revision, headSHA, actor, !approveOnly)
+	return apply.ApproveLocalPinned(ctx, workspace, lead, change, revision, headSHA, actor, true)
 }
 var publishApprovedLocal = publish.PublishApproved
 
@@ -41,7 +40,8 @@ lead's session is the lead (refused while Lead may approve is off) and a task
 agent is an agent (refused for its own task).
 
 Once applied, its PR opens straight away: the next PR of the stack (Stacked PRs),
-or its own PR to trunk (PR per task). --only applies it without opening a PR.`,
+or its own PR to trunk (PR per task). With no Git provider it stays applied
+and says "not published: no provider".`,
 	GroupID: "git",
 	Args:    cobra.RangeArgs(0, 2),
 	RunE:    runApprove,
@@ -50,7 +50,6 @@ or its own PR to trunk (PR per task). --only applies it without opening a PR.`,
 func init() {
 	approveCmd.Flags().StringVarP(&approveWorkspace, "workspace", "W", "", "Workspace to operate on")
 	approveCmd.Flags().StringVar(&approveLead, "lead", "lead", "Lead working area (default: the lead running the command, else lead)")
-	approveCmd.Flags().BoolVar(&approveOnly, "only", false, "Approve only: apply without opening a PR")
 	approveCmd.Flags().StringVar(&approveChange, "change", "", "Approve this change (advanced; needs --revision)")
 	approveCmd.Flags().IntVar(&approveRevision, "revision", 0, "Revision of --change to approve (advanced)")
 	approveCmd.Flags().BoolVar(&approveDryRun, "dry-run", false, "Print what would be approved and record nothing")
@@ -112,10 +111,6 @@ func approveTarget(cmd *cobra.Command, workspace, lead string, target verdictTar
 	}
 	if len(result.Pending) > 0 {
 		_, err = fmt.Fprintln(cmd.OutOrStdout(), "Approved; waiting for the lead working area")
-		return err
-	}
-	if approveOnly {
-		_, err = fmt.Fprintln(cmd.OutOrStdout(), "Approved and added to the lead working area")
 		return err
 	}
 	outcomes, publishErr := publishApprovedLocal(cmd.Context(), workspace, lead, stackstore.Declared())

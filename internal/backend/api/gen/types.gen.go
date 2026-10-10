@@ -3098,8 +3098,11 @@ type PullRequestReviewResult struct {
 // ReviewRevision defines model for ReviewRevision.
 type ReviewRevision struct {
 	// Applied True while this exact revision is applied in a lead working area (from the applied log, so it survives reloads and clears after unapply).
-	Applied  bool   `json:"applied"`
-	ChangeId string `json:"change_id"`
+	Applied bool `json:"applied"`
+
+	// Author The agent that recorded this revision, when known.
+	Author   *string `json:"author,omitempty"`
+	ChangeId string  `json:"change_id"`
 
 	// Date Commit date (ISO 8601) of the revision head, when the repo is readable.
 	Date *string `json:"date,omitempty"`
@@ -3119,7 +3122,7 @@ type ReviewRevision struct {
 	// FollowReason Reviewer-facing reason for a spent or waiting follow, such as "waiting for T1 to be approved".
 	FollowReason *string `json:"follow_reason,omitempty"`
 
-	// FollowStatus Lead follow state of this revision's approval (approved, waiting_for_dependency, applied, conflict, apply_pending, superseded, spent). "waiting_for_dependency" means the approval waits for the task this code was built on, which applies first. "spent" means the approval's apply can never run (for example the change was unapplied before the follow settled, or the code it was built on was rejected or replaced); approving again re-arms it.
+	// FollowStatus Lead follow state of this revision's approval (approved, waiting_for_dependency, applied, unapplied, conflict, apply_pending, superseded, spent). "waiting_for_dependency" means the approval waits for the task this code was built on, which applies first. "unapplied" means it was applied and later removed from the working area (Unapply); Apply puts it back. "spent" means the approval's apply can never run (for example the change was unapplied before the follow settled, or the code it was built on was rejected or replaced); approving again re-arms it.
 	FollowStatus *string `json:"follow_status,omitempty"`
 	HeadSha      string  `json:"head_sha"`
 	Incomplete   bool    `json:"incomplete"`
@@ -3174,6 +3177,9 @@ type ReviewRevision struct {
 	// Superseded True when a newer source revision of the same change exists; verdicts on it are refused.
 	Superseded bool    `json:"superseded"`
 	Verdict    *string `json:"verdict,omitempty"`
+
+	// VerdictReason Reason recorded with the latest verdict, such as why it was rejected.
+	VerdictReason *string `json:"verdict_reason,omitempty"`
 }
 
 // ReviewRevisionFeedbackStatus For a review fix-up of a change whose PR is open, how Loom's automatic update of that PR stands (no Approve needed).
@@ -3921,11 +3927,8 @@ type SubmitRevisionVerdictJSONBody struct {
 		Id   string                                 `json:"id"`
 		Kind SubmitRevisionVerdictJSONBodyActorKind `json:"kind"`
 	} `json:"actor"`
-
-	// ApproveOnly Apply the approval without opening its PR (Approve only). By default an approval opens the change's PR as soon as it applies (D29).
-	ApproveOnly *bool   `json:"approve_only,omitempty"`
-	HeadSha     string  `json:"head_sha"`
-	Lead        *string `json:"lead,omitempty"`
+	HeadSha string  `json:"head_sha"`
+	Lead    *string `json:"lead,omitempty"`
 
 	// Merge Approve and merge for a task whose PR is already open and whose newest version needs approving again. Human only; the merge is approved at this revision's head and waits for the PR to carry it (D29).
 	Merge   *bool                                `json:"merge,omitempty"`

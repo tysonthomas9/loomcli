@@ -3441,9 +3441,13 @@ export interface components {
       outcome: string;
       incomplete: boolean;
       verdict?: string;
+      /** @description Reason recorded with the latest verdict, such as why it was rejected. */
+      verdict_reason?: string;
+      /** @description The agent that recorded this revision, when known. */
+      author?: string;
       /** @description True while this exact revision is applied in a lead working area (from the applied log, so it survives reloads and clears after unapply). */
       applied: boolean;
-      /** @description Lead follow state of this revision's approval (approved, waiting_for_dependency, applied, conflict, apply_pending, superseded, spent). "waiting_for_dependency" means the approval waits for the task this code was built on, which applies first. "spent" means the approval's apply can never run (for example the change was unapplied before the follow settled, or the code it was built on was rejected or replaced); approving again re-arms it. */
+      /** @description Lead follow state of this revision's approval (approved, waiting_for_dependency, applied, unapplied, conflict, apply_pending, superseded, spent). "waiting_for_dependency" means the approval waits for the task this code was built on, which applies first. "unapplied" means it was applied and later removed from the working area (Unapply); Apply puts it back. "spent" means the approval's apply can never run (for example the change was unapplied before the follow settled, or the code it was built on was rejected or replaced); approving again re-arms it. */
       follow_status?: string;
       /** @description Reviewer-facing reason for a spent or waiting follow, such as "waiting for T1 to be approved". */
       follow_reason?: string;
@@ -8223,8 +8227,6 @@ export interface operations {
           verdict: "approve" | "reject" | "override";
           reason?: string;
           lead?: string;
-          /** @description Apply the approval without opening its PR (Approve only). By default an approval opens the change's PR as soon as it applies (D29). */
-          approve_only?: boolean;
           /** @description Approve and merge for a task whose PR is already open and whose newest version needs approving again. Human only; the merge is approved at this revision's head and waits for the PR to carry it (D29). */
           merge?: boolean;
           actor: {
