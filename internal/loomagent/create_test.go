@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -25,6 +26,15 @@ type openRec struct {
 	specs []loomharness.OpenSpec
 	root  string
 	hang  atomic.Bool // Open takes the call and never answers, as a frozen harness does
+	stuck atomic.Bool // Purge does the same
+}
+
+func (o *openRec) Purge(ctx context.Context, owned []loomharness.NativeRef) error {
+	if o.stuck.Load() {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return o.Harness.Purge(ctx, owned)
 }
 
 func (o *openRec) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharness.NativeRef, error) {
@@ -919,5 +929,16 @@ func TestCreateClearsCreateIncompleteRaisedInFlight(t *testing.T) {
 	row, _ := e.st.GetAgent(ctx, a.AgentID)
 	if row.State != StateIdle || row.AttentionReason != nil {
 		t.Fatalf("after Create: state %s Attention %v; want idle with none", row.State, deref(row.AttentionReason))
+	}
+}
+
+// HANG1: an Open that ran out of openWait is retried, even when the harness
+// answered the cancelled call with a bad request.
+func TestOpenTimeoutNeverPermanent(t *testing.T) {
+	ctx, cancel := context.WithTimeoutCause(context.Background(), 0, errors.New("did not open"))
+	defer cancel()
+	<-ctx.Done()
+	if err := openErr(timedOut(ctx, fmt.Errorf("opencode: %w", loomharness.ErrBadRequest))); isPermanent(err) {
+		t.Fatalf("%v is permanent; want retried", err)
 	}
 }
