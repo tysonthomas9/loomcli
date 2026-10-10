@@ -487,7 +487,18 @@ stale)
   # stale <case> <slot> <blocker>: after the blocker was rejected, the dependent's
   # revision is stale and the task offers a rebuild; it has no PR.
   slot="$1" blocker="$2"
-  is_stale() { revisions "$slot"; grep -qi 'stale' "$work/rev-$slot.json"; }
+  # A truthy stale flag or a status/reason saying stale; a "stale": false field does not count.
+  is_stale() {
+    revisions "$slot"
+    json "$work/rev-$slot.json" '
+def hit(x):
+    if isinstance(x, dict):
+        return any(("stale" in k.lower() and bool(w) and w is not False) or hit(w) for k, w in x.items())
+    if isinstance(x, list):
+        return any(hit(w) for w in x)
+    return isinstance(x, str) and "stale" in x.lower()
+assert hit(v), v'
+  }
   wait_until 30 "$slot is stale after $blocker was rejected: $(cat "$work/rev-$slot.json" 2> /dev/null | head -c 600)" is_stale
   [[ -z "$(pull_field "$slot" number)" ]] || fail "stale $slot has a PR"
   open_task "$slot"
@@ -512,7 +523,7 @@ lead-start)
 lead-do)
   # lead-do <case> <action> <slot|-> <expect>
   #   approve       ok|refused  Approve and create PR through the verdict API as the lead
-  #   cli-approve   refused     the lead runs `loom git approve` (must not bypass the policy)
+  #   cli-approve   refused     the lead runs `loom approve` (must not bypass the policy; needs P2.25)
   #   merge         refused     Approve and merge through the API as the lead
   #   set-approve   refused     the lead turns Lead may approve off
   #   set-merge     refused     the lead turns Lead may merge to when green
@@ -535,18 +546,19 @@ lead-do)
     *) fail "unknown lead action $action" ;;
   esac
   settings_json > "$work/settings-before-$action.json"
+  # Loom's own refusal text, never a bare status or exit code: an unknown
+  # command, a wrong flag or a 400 must not count as a refusal.
   case "$action" in
-    approve) refusal='review_required|\b409\b' ;;
-    merge) refusal='\b409\b|not authori[sz]ed|review_required' ;;
-    set-approve | set-merge) refusal='\b403\b|forbidden|human' ;;
-    cli-approve) refusal='review_required|not allowed|refus|forbidden|denied|not authori[sz]ed|409|403' ;;
+    approve | cli-approve) refusal='lead approval policy is off' ;;
+    merge) refusal='only a human can approve a merge' ;;
+    set-approve | set-merge) refusal='only a human can change workspace policy' ;;
     *) refusal='' ;;
   esac
   [[ "$forge" == github && -n "$refusal" ]] && lead_mark "$refusal"
   if [[ "$forge" == fake ]]; then
     if [[ "$action" == cli-approve ]]; then
       set +e
-      LOOM_AGENT_NAME=lead LOOM_AGENT_ROLE=lead LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" git approve "$change" "$number" --workspace "$workspace" > "$work/lead-$action.out" 2>&1
+      LOOM_AGENT_NAME=lead LOOM_AGENT_ROLE=lead LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" approve "$change" "$number" --workspace "$workspace" > "$work/lead-$action.out" 2>&1
       code=$?
       set -e
     else
@@ -555,14 +567,15 @@ lead-do)
     say "lead stand-in $action: $code $(head -c 300 "$work/lead-$action.out")"
   else
     if [[ "$action" == cli-approve ]]; then
-      lead_say "Loom test harness: approve change $change revision $number of workspace $workspace by running exactly: loom git approve $change $number --workspace $workspace . Then report the command output."
+      lead_say "Loom test harness: approve change $change revision $number of workspace $workspace by running exactly: loom approve $change $number --workspace $workspace . Then report the command output."
     else
       lead_say "Loom test harness: as the lead, run exactly this one command and report the HTTP status it prints: curl -sS -w '%{http_code}' -X $method '$url' -H 'Content-Type: application/json' -d '$body'"
     fi
   fi
   [[ "$forge" == github && "$want" == refused ]] && lead_refused "$refusal"
-  if [[ "$forge" == fake && "$action" == cli-approve && "$want" == refused ]]; then
-    [[ "$code" != 0 ]] || fail "loom git approve run as the lead succeeded with Lead may approve off: $(cat "$work/lead-$action.out")"
+  if [[ "$forge" == fake && "$want" == refused ]]; then
+    [[ "$code" != 0 && "$code" != 2?? ]] || fail "lead $action succeeded with exit/HTTP $code: $(head -c 400 "$work/lead-$action.out")"
+    grep -qF "$refusal" "$work/lead-$action.out" || fail "lead $action was not refused by Loom (want \"$refusal\"; got $code: $(head -c 400 "$work/lead-$action.out"))"
   fi
   case "$action:$want" in
     approve:ok)
@@ -706,6 +719,7 @@ no-pr)
   revisions "$slot"
   json "$work/rev-$slot.json" 'print(v["change_id"])' > "$work/change-$slot.id"
   for _ in $(seq 1 "$seconds"); do
+    pulls || fail "the forge's PR list is unreachable; cannot prove that no PR opened"
     [[ -z "$(pull_field "$slot" number)" ]] || fail "task $slot opened PR #$(pull_field "$slot" number)"
     sleep 1
   done

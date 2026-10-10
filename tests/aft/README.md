@@ -249,7 +249,8 @@ In real mode the harness also unsets `OPENAI_API_KEY`, defaults `AFT_TIMEOUT` to
 `loomgit-matrix-walk` (W1–W8: one stacked journey), `loomgit-matrix-settings`
 (S1–S10: delivery mode × Lead may approve × Lead may merge, plus mode switch and
 lead permissions) and `loomgit-matrix-variants` (L1 mid-session epic assignment
-to a running lead, N1 the lead's `loom git approve` with Lead may approve off,
+to a running lead, N1 the lead's `loom approve` with Lead may approve off, refused with Loom's own
+text (expected red until P2.25),
 N2 Approve and merge on a red PR and its recovery, N3 the lead's merge request
 needing a human, R1 Reject → rerun → approve, D1–D3 dependents that run before
 their blocker's review) run on the fake forge with every

@@ -226,9 +226,9 @@ def variants():
 
     c = "n1"
     st = setup(c) + settings(c, "stack", "off", "off")
-    st += task(c, "a") + lead(c, "cli-approve", "a", "refused", "runs loom git approve on A with Lead may approve off; no verdict is recorded and A stays in review") + \
+    st += task(c, "a") + lead(c, "cli-approve", "a", "refused", "runs loom approve on A with Lead may approve off; Loom refuses with 'lead approval policy is off', no verdict is recorded and A stays in review") + \
         run(f"no-pr {c} a 5", "No PR opens") + human_create_pr(c, "a", "main")
-    out += case("N1 The lead's CLI approve cannot bypass Lead may approve off", "loom git approve run by the lead must not record a human approval", st)
+    out += case("N1 The lead's CLI approve cannot bypass Lead may approve off [needs P2.25]", "loom approve run by the lead must be refused with 'lead approval policy is off', record no verdict and leave the task in review. Expected to fail until P2.25: the CLI records a human actor whoever runs it.", st, needs=False)
 
     c = "n2"
     st = setup(c) + settings(c, "trunk", "off", "off")
