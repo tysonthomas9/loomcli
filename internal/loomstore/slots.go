@@ -613,6 +613,24 @@ func (s *Store) MarkDelivered(ctx context.Context, agentID, sender, requestID st
 	return nil
 }
 
+// MarkRan marks the input agentID handed with native key key delivered and
+// counts its turn, which ran while Loom was down, in agent_turns, in one
+// transaction (OR6a). With nothing handed under key it changes nothing, so a
+// repeat counts the turn once.
+func (s *Store) MarkRan(ctx context.Context, agentID, key string) error {
+	return s.tx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE agent_slots SET state = ?, first = 0, updated_at = ?
+			WHERE agent_id = ? AND native_key = ? AND state = ?`, SlotDelivered, Stamp(time.Now()), agentID, key, SlotHanded)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return nil
+		}
+		return countTurn(ctx, tx, agentID)
+	})
+}
+
 // Withdraw results.
 const (
 	Withdrawn      = "withdrawn"

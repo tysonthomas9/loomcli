@@ -274,7 +274,7 @@ CREATE TABLE IF NOT EXISTS agent_limit_resumes (
   session  TEXT NOT NULL,          -- the native session whose turn hit the limit
   due_at   TEXT NOT NULL
 );
-`}
+`, agentTurns}
 
 // historyRepair (OR11) is the one-time scan of histories saved before a state
 // change and its events were one write: it is run again with no effect. An
@@ -325,4 +325,15 @@ FROM c JOIN n ON n.k < c.attempt
 WHERE NOT EXISTS (SELECT 1 FROM agent_events e WHERE e.agent_id = c.parent_agent_id
     AND e.event_id = 'task_completed:' || c.agent_id || ':' || n.k)
   AND NOT EXISTS (SELECT 1 FROM agent_completion_markers m WHERE m.child_agent_id = c.agent_id AND m.attempt = n.k);
+`
+
+// agentTurns (OR6a) counts the turns Loom has ended per agent.
+const agentTurns = `
+-- OR6a: how many of an agent's turns Loom has ended (a running turn cleared
+-- by a state change, or a recovered input whose turn ran while Loom was
+-- down). The last one's checkpoint ref is refs/loom/checkpoints/<agent>/turn/<ended>.
+CREATE TABLE IF NOT EXISTS agent_turns (
+  agent_id TEXT PRIMARY KEY REFERENCES agents(agent_id),
+  ended    INTEGER NOT NULL
+);
 `

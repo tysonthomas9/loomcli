@@ -282,41 +282,64 @@ func TestBaselineFailureHoldsFirstPrompt(t *testing.T) {
 }
 
 // TestCheckpointSwitchMidTurn: a harness switch that stops a running turn
-// counts that turn's end before the new session's first hand-over, so turn/1
-// is captured while the next message still waits, whenever the old
-// session's own end arrives.
+// counts it as ended, so turn/1 is captured while the next message waits; the
+// stopped turn's own native end arriving later, under another turn ID when
+// turn.started had not named it, counts nothing more, and the next turn is
+// turn/2: no number skipped or doubled.
 func TestCheckpointSwitchMidTurn(t *testing.T) {
-	ctx := context.Background()
-	e := newSwitchEnv(t, StateActive)
-	e.startTurn(t)
-	to := e.s.get(t, "a1").StateOf()
-	to.RunningTurn = sp("turn_0")
-	if _, err := e.s.store.CommitState(ctx, "a1", e.s.get(t, "a1").StateOf(), to, e.s.get(t, "a1").Revision, nil); err != nil {
-		t.Fatal(err)
-	}
-	waitingAtTurn1 := ""
-	e.ws.capture = func(ref string) error {
-		if ref == checkpointRef("a1", 1) {
-			waitingAtTurn1 = slotState(t, e.s, "a1", "r-next")
-		}
-		return nil
-	}
-	runDispatcher(t, e.s)
-	settled(t, e.s)
-	mustSendMsg(t, e.s, sendReq("a1", "r-next", "next", user))
-	if _, err := e.s.Update(ctx, switchReq("r1", 1, "fb")); err != nil {
-		t.Fatal(err)
-	}
-	drained(t, e.s, "the hand-over", func() bool { return len(handedReqs(t, e.s, "a1", "r-next")) == 1 })
-	if waitingAtTurn1 != loomstore.SlotWaiting {
-		t.Fatalf("r-next at the turn/1 capture = %q; want it captured while r-next waited", waitingAtTurn1)
-	}
-	late := loomharness.Event{Type: loomharness.EventTurnCompleted, TurnID: "turn_0", StopReason: "cancelled", Session: e.old}
-	if _, err := e.s.events.Append(ctx, nativeRow("a1", EventTurnCompleted, late)); err != nil { // the old session's own end, late
-		t.Fatal(err)
-	}
-	if n, err := e.s.store.CountEvents(ctx, "a1", EventTurnCompleted); err != nil || n != 1 {
-		t.Fatalf("saved turn ends = %d, %v; want the stopped turn's one", n, err)
+	for _, running := range []string{"turn_0", "k0"} { // named, and stopped before turn.started named it
+		t.Run(running, func(t *testing.T) {
+			ctx := context.Background()
+			e := newSwitchEnv(t, StateActive)
+			e.startTurn(t)
+			to := e.s.get(t, "a1").StateOf()
+			to.RunningTurn = sp(running)
+			if _, err := e.s.store.CommitState(ctx, "a1", e.s.get(t, "a1").StateOf(), to, e.s.get(t, "a1").Revision, nil); err != nil {
+				t.Fatal(err)
+			}
+			waitingAtTurn1 := ""
+			e.ws.capture = func(ref string) error {
+				if ref == checkpointRef("a1", 1) {
+					waitingAtTurn1 = slotState(t, e.s, "a1", "r-next")
+				}
+				return nil
+			}
+			runDispatcher(t, e.s)
+			settled(t, e.s)
+			mustSendMsg(t, e.s, sendReq("a1", "r-next", "next", user))
+			if _, err := e.s.Update(ctx, switchReq("r1", 1, "fb")); err != nil {
+				t.Fatal(err)
+			}
+			drained(t, e.s, "the hand-over", func() bool { return len(handedReqs(t, e.s, "a1", "r-next")) == 1 })
+			if waitingAtTurn1 != loomstore.SlotWaiting {
+				t.Fatalf("r-next at the turn/1 capture = %q; want it captured while r-next waited", waitingAtTurn1)
+			}
+			late := loomharness.Event{Type: loomharness.EventTurnCompleted, TurnID: "turn_real", StopReason: "cancelled", Session: e.old}
+			if err := e.s.HarnessEvent(ctx, "a1", late); err != nil { // the old session's own end, late
+				t.Fatal(err)
+			}
+			a := e.s.get(t, "a1")
+			newRef := loomharness.NativeRef{Root: "/root/fb", NativeID: *a.HarnessSessionID}
+			key := *a.RunningTurnID
+			for _, ev := range []loomharness.Event{{Type: loomharness.EventTurnStarted, InputKey: key, TurnID: "t_new", Session: newRef},
+				{Type: loomharness.EventTurnCompleted, TurnID: "t_new", StopReason: "completed", Session: newRef}} {
+				if err := e.s.HarnessEvent(ctx, "a1", ev); err != nil {
+					t.Fatal(err)
+				}
+			}
+			settled(t, e.s)
+			if got := e.s.get(t, "a1").TurnsEnded; got != 2 {
+				t.Fatalf("turns ended = %d; want 2 (the stopped turn once, then the new one)", got)
+			}
+			for n := 1; n <= 2; n++ {
+				if _, ok := e.ws.checkpoint(checkpointRef("a1", n)); !ok {
+					t.Fatalf("turn/%d missing", n)
+				}
+			}
+			if _, ok := e.ws.checkpoint(checkpointRef("a1", 3)); ok {
+				t.Fatal("turn/3 exists: a number was skipped")
+			}
+		})
 	}
 }
 
@@ -401,50 +424,55 @@ func TestCheckpointHandedEndedWhileDown(t *testing.T) {
 	}
 }
 
-// TestCheckpointArchiveCancelledSavesEnd: Archive(cancelled) saves the end of
-// the turn it stops before the agent is archived, so its ref stays owed with
-// no feed: the native end when the history has it (its own stop reason),
-// else a cancelled one.
-func TestCheckpointArchiveCancelledSavesEnd(t *testing.T) {
+// TestCheckpointArchiveCancelledCountsTurn: Archive(cancelled) of a running
+// turn counts it as ended in its own commit, with no feed and no made-up end
+// row: the turn's real end, when the feed brings it (as Claude's must, having
+// no history to read), is the one saved, with its own stop reason.
+func TestCheckpointArchiveCancelledCountsTurn(t *testing.T) {
 	for _, c := range []struct {
 		name string
 		turn fake.Turn
-		stop func(string) bool
 	}{
-		{"running", fake.Turn{Steps: []fake.Step{{Ask: "t1"}}}, func(r string) bool { return r != "" }},
-		{"ended natively", fake.Turn{}, func(r string) bool { return r != "cancelled" && r != "" }},
+		{"running", fake.Turn{Steps: []fake.Step{{Ask: "t1"}}}},
+		{"ended natively", fake.Turn{}}, // completed; its feed event not yet read
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			ctx := context.Background()
 			e := newCreateEnv(t)
 			fh := e.h.Harness.(*fake.Harness)
 			s := e.service(ServiceConfig{})
-			a, _ := newLead(t, e, s, "alpha")
+			a, ref := newLead(t, e, s, "alpha")
 			fh.Script(a.AgentID, c.turn)
 			mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user)) // no feed: the row's turn still runs
 			if err := s.Archive(ctx, ArchiveRequest{AgentID: a.AgentID, Reason: ArchiveCancelled}); err != nil {
 				t.Fatal(err)
 			}
-			ends := kinds(rows(t, s, a.AgentID, 0), EventTurnCompleted)
-			var p struct{ StopReason string }
-			if len(ends) == 1 {
-				_ = json.Unmarshal(ends[0].Payload, &p)
+			if n, ends := s.get(t, a.AgentID).TurnsEnded, kinds(rows(t, s, a.AgentID, 0), EventTurnCompleted); n != 1 || len(ends) != 0 {
+				t.Fatalf("turns ended = %d, saved ends %d; want 1, none made up", n, len(ends))
 			}
-			if len(ends) != 1 || !c.stop(p.StopReason) {
-				t.Fatalf("saved ends = %d, stop reason %q", len(ends), p.StopReason)
+			if c.name == "ended natively" {
+				native := loomharness.Event{Type: loomharness.EventTurnCompleted, TurnID: "turn_x", StopReason: "completed", Session: ref}
+				if _, err := s.events.Append(ctx, nativeRow(a.AgentID, EventTurnCompleted, native)); err != nil { // the feed's, late
+					t.Fatal(err)
+				}
+				var p struct{ StopReason string }
+				ends := kinds(rows(t, s, a.AgentID, 0), EventTurnCompleted)
+				if len(ends) != 1 || json.Unmarshal(ends[0].Payload, &p) != nil || p.StopReason != "completed" {
+					t.Fatalf("saved ends %d, stop reason %q; want the native completed", len(ends), p.StopReason)
+				}
 			}
 			if err := s.reconcileAgent(ctx, a.AgentID); err != nil {
 				t.Fatal(err)
 			}
-			if _, ok := e.ws.checkpoint(checkpointRef(a.AgentID, 1)); !ok {
-				t.Fatal("turn/1 missing for the archived agent")
+			if _, ok := e.ws.checkpoint(checkpointRef(a.AgentID, 1)); !ok || s.get(t, a.AgentID).TurnsEnded != 1 {
+				t.Fatal("turn/1 missing for the archived agent, or the late end counted again")
 			}
 		})
 	}
 }
 
-// TestCheckpointRecoveredEndSaveFails: when saving a recovered turn's end
-// fails, the handed message stays handed, so the retry saves the end and
+// TestCheckpointRecoveredEndSaveFails: when counting a recovered turn fails,
+// its input stays handed (one transaction), so the retry counts it and
 // captures turn/1 before the next message is handed over.
 func TestCheckpointRecoveredEndSaveFails(t *testing.T) {
 	ctx := context.Background()
@@ -457,33 +485,59 @@ func TestCheckpointRecoveredEndSaveFails(t *testing.T) {
 		t.Fatal("did not crash")
 	}
 	s = e.service(ServiceConfig{}) // Loom restarts
-	lift := failSaving(t, e, EventTurnCompleted)
+	lift := failOn(t, e, "INSERT ON agent_turns")
 	if _, err := s.Send(ctx, sendReq(a.AgentID, "c1", "next", child)); err == nil {
-		t.Fatal("the recovery saved the end despite the failing store")
+		t.Fatal("the recovery counted the turn despite the failing store")
 	}
 	lift()
 	if err := s.Dispatch(ctx, a.AgentID); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := e.ws.checkpoint(checkpointRef(a.AgentID, 1)); !ok || len(handedReqs(t, s, a.AgentID, "c1")) != 1 {
-		t.Fatalf("turn/1 exists %v, c1 handed %v; want turn/1 before c1", ok, handedReqs(t, s, a.AgentID, "c1"))
+	if _, ok := e.ws.checkpoint(checkpointRef(a.AgentID, 1)); !ok || len(handedReqs(t, s, a.AgentID, "c1")) != 1 || s.get(t, a.AgentID).TurnsEnded != 1 {
+		t.Fatalf("turn/1 exists %v, c1 handed %v, turns ended %d; want turn/1 before c1, one turn",
+			ok, handedReqs(t, s, a.AgentID, "c1"), s.get(t, a.AgentID).TurnsEnded)
 	}
 }
 
-// TestCheckpointStopUnwiredHarnessSavesEnd: Archive(cancelled) of an agent
-// whose harness is not wired still saves the stopped turn's end, under its
-// recorded session, so its ref stays owed.
-func TestCheckpointStopUnwiredHarnessSavesEnd(t *testing.T) {
+// TestCheckpointStopUnwiredHarnessCountsTurn: Archive(cancelled) of an agent
+// whose harness is not wired still counts its stopped turn, so its ref stays owed.
+func TestCheckpointStopUnwiredHarnessCountsTurn(t *testing.T) {
 	ctx := context.Background()
 	a := svcAgent("a1", "persistent", StateActive)
 	a.WorktreePath, a.RunningTurnID = sp("/wt/a1"), sp("turn_1")
-	a.HarnessSessionRoot, a.HarnessSessionID = sp("/root/fake"), sp("ses_1")
-	s := newService(t, ServiceConfig{Workspace: &fakeWorkspace{}, Interrupt: func(context.Context, loomstore.Agent) error { return nil }}, a)
+	ws := &fakeWorkspace{}
+	s := newService(t, ServiceConfig{Workspace: ws, Interrupt: func(context.Context, loomstore.Agent) error { return nil }}, a)
 	if err := s.Archive(ctx, ArchiveRequest{AgentID: "a1", Reason: ArchiveCancelled}); err != nil {
 		t.Fatal(err)
 	}
-	ends := kinds(rows(t, s, "a1", 0), EventTurnCompleted)
-	if len(ends) != 1 || ends[0].EventID != EventTurnCompleted+":/root/fake:ses_1:turn_1" {
-		t.Fatalf("saved ends = %+v; want turn_1's under its recorded session", ends)
+	if n := s.get(t, "a1").TurnsEnded; n != 1 {
+		t.Fatalf("turns ended = %d; want the stopped turn", n)
 	}
+}
+
+// TestCheckpointOrdinalSurvivesRestart: the turn count is saved, so after a
+// restart the next turn's ref is turn/2, not a second turn/1.
+func TestCheckpointOrdinalSurvivesRestart(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	s := e.service(ServiceConfig{})
+	stop := runFeed(t, s, "opencode")
+	a, ref := newLead(t, e, s, "alpha")
+	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "t1"}}}, fake.Turn{Steps: []fake.Step{{Ask: "t2"}}})
+	for i, turn := range []string{"t1", "t2"} {
+		if i == 1 {
+			stop()
+			s = e.service(ServiceConfig{}) // the restart
+			stop = runFeed(t, s, "opencode")
+		}
+		e.ws.setTree("end of " + turn)
+		mustSendMsg(t, s, sendReq(a.AgentID, "u"+turn, "go", user))
+		drained(t, s, turn+" asked", func() bool { return len(s.openAsks(a.AgentID)) == 1 })
+		if err := fh.Session(ref).Reply(ctx, turn, loomharness.Reply{Allow: true}); err != nil {
+			t.Fatal(err)
+		}
+		drained(t, s, turn+" captured", func() bool { _, ok := e.ws.checkpoint(checkpointRef(a.AgentID, i+1)); return ok })
+	}
+	wantCheckpoints(t, e.ws, a.AgentID, "", "end of t1", "end of t2")
 }

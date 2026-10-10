@@ -155,8 +155,7 @@ func (s *Service) switchTarget(ctx context.Context, a loomstore.Agent, req Updat
 }
 
 // stopTurn stops a's running turn for a switch (R30): the turn is interrupted
-// and not replayed, each open ask is saved as ask.lost first, its end is
-// saved, and a goes idle.
+// and not replayed, each open ask is saved as ask.lost first, and a goes idle.
 func (s *Service) stopTurn(ctx context.Context, a loomstore.Agent) (loomstore.Agent, error) {
 	if a.State != StateActive && a.State != StateWaiting {
 		return a, nil
@@ -165,9 +164,6 @@ func (s *Service) stopTurn(ctx context.Context, a loomstore.Agent) (loomstore.Ag
 		return a, harnessErr(err)
 	}
 	if err := s.loseOpen(ctx, a, nil); err != nil {
-		return a, err
-	}
-	if err := s.stoppedEnd(ctx, a); err != nil { // counted before the new session runs
 		return a, err
 	}
 	to := a.StateOf()

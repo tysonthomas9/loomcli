@@ -209,14 +209,6 @@ func (s *Store) HasEvent(ctx context.Context, agentID, eventID string) (bool, er
 	return n > 0, err
 }
 
-// CountEvents reports how many events of kind agentID has saved.
-func (s *Store) CountEvents(ctx context.Context, agentID, kind string) (int, error) {
-	var n int
-	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_events WHERE agent_id = ? AND kind = ?`,
-		agentID, kind).Scan(&n)
-	return n, err
-}
-
 // Unreceipted lists agentID's events of kind, in order, whose EventID has
 // no Send receipt on the agent yet: notices not yet put in a slot.
 func (s *Store) Unreceipted(ctx context.Context, agentID, kind string) ([]Event, error) {

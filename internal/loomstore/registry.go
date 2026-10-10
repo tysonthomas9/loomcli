@@ -46,6 +46,10 @@ type Agent struct {
 	// LastSeq is the agent's latest committed event seq, read in the same
 	// statement as the row. Only GetAgent and ListAgents set it.
 	LastSeq int64
+	// TurnsEnded counts the turns Loom has ended (OR6a): CommitState counts
+	// one when a change clears the running turn, MarkRan a recovered one.
+	// Only GetAgent and ListAgents set it.
+	TurnsEnded int64
 }
 
 // insertCols are the columns InsertAgent writes; agentCols adds those only
@@ -62,9 +66,10 @@ const insertCols = `agent_id, workspace_id, name, profile_key, preset, preset_ve
 const agentCols = insertCols + `, history_purge_failed_at, revision`
 
 // readCols adds LastSeq: one lookup on agent_events' (agent_id, seq) key.
-const readCols = agentCols + `, (SELECT COALESCE(MAX(seq), 0) FROM agent_events e WHERE e.agent_id = agents.agent_id)`
+const readCols = agentCols + `, (SELECT COALESCE(MAX(seq), 0) FROM agent_events e WHERE e.agent_id = agents.agent_id),
+ (SELECT COALESCE(MAX(ended), 0) FROM agent_turns t WHERE t.agent_id = agents.agent_id)`
 
-func (a *Agent) readFields() []any { return append(a.fields(), &a.LastSeq) }
+func (a *Agent) readFields() []any { return append(a.fields(), &a.LastSeq, &a.TurnsEnded) }
 
 // fields lists a's fields in agentCols order; used both to bind and to scan.
 func (a *Agent) fields() []any {
@@ -386,7 +391,8 @@ var commitStateCrash = func() {}
 // of the new revision. Both are saved or neither. It returns the saved events.
 // A turn ending in finished (from active or waiting) also sets finished_at,
 // the background R29 deadline, in the same statement. owed, the completion
-// markers of an attempt the change ends, are saved in it too.
+// markers of an attempt the change ends, are saved in it too. A change that
+// clears the running turn counts it in agent_turns.
 func (s *Store) CommitState(ctx context.Context, agentID string, from, to AgentState, rev int64, events []Event,
 	owed ...CompletionMarker) ([]Event, error) {
 	for _, e := range events {
@@ -441,6 +447,11 @@ func (s *Store) commitState(ctx context.Context, agentID string, from, to AgentS
 				return err
 			}
 		}
+		if from.RunningTurn != nil && to.RunningTurn == nil { // the change ends the running turn
+			if err := countTurn(ctx, tx, agentID); err != nil {
+				return err
+			}
+		}
 		if saved, err = commitEvents(ctx, tx, agentID, rev+1, events); err != nil {
 			return err
 		}
@@ -453,6 +464,13 @@ func (s *Store) commitState(ctx context.Context, agentID string, from, to AgentS
 		return nil
 	})
 	return saved, err
+}
+
+// countTurn counts one more of agentID's turns as ended (agent_turns).
+func countTurn(ctx context.Context, tx *sql.Tx, agentID string) error {
+	_, err := tx.ExecContext(ctx, `INSERT INTO agent_turns (agent_id, ended) VALUES (?, 1)
+		ON CONFLICT(agent_id) DO UPDATE SET ended = ended + 1`, agentID)
+	return err
 }
 
 // commitEvents saves events in agentID's change to revision rev: one with

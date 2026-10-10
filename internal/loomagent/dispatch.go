@@ -129,7 +129,7 @@ func (s *Service) dispatch(ctx context.Context, a loomstore.Agent) (loomstore.Ag
 // no turn runs from it and dispatch may go on: it never landed and is back
 // in line, or it landed and its turn already ended.
 func (s *Service) recoverHanded(ctx context.Context, a loomstore.Agent, sl loomstore.Slot, slots []loomstore.Slot) (loomstore.Agent, bool, error) {
-	sess, ref, err := s.current(ctx, a)
+	sess, _, err := s.current(ctx, a)
 	if err != nil || sess == nil {
 		return a, false, errors.Join(err, &Error{Code: CodeHarnessUnavailable, Message: a.Harness + " is not available"})
 	}
@@ -143,16 +143,11 @@ func (s *Service) recoverHanded(ctx context.Context, a loomstore.Agent, sl looms
 		if err != nil {
 			return a, false, harnessErr(err)
 		}
-		if !st.Running { // its turn ran while Loom was down: its end is saved while the slot still marks it handed
-			if err := s.saveTurnEnd(ctx, a.AgentID, sess, ref, deref(sl.NativeKey)); err != nil {
-				return a, false, err
-			}
+		if !st.Running { // its turn ran while Loom was down: delivered and counted as ended, at once
+			return a, true, s.store.MarkRan(ctx, a.AgentID, deref(sl.NativeKey))
 		}
 		if err := s.settleInput(ctx, a.AgentID, slots, deref(sl.NativeKey), s.store.MarkDelivered); err != nil {
 			return a, false, err
-		}
-		if !st.Running {
-			return a, true, nil
 		}
 		to := a.StateOf()
 		to.RunningTurn = sl.NativeKey // until turn.started names it
