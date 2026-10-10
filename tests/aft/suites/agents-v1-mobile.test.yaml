@@ -2,7 +2,7 @@
 # MOB2's agents drawer), and the user-message hover pill in a narrow chat
 # column (UI7, UI7b). OpenCode runs for real or as its emulator
 # (LOOM_HARNESS_EMU=1); only the model is scripted, through 2.0d's fake model.
-# Viewports are set per case with agent-browser and put back at the end of it.
+# Each case sets the viewport it needs with agent-browser.
 suite: agents-v1-mobile
 classification: { area: agents, feature: agent-api-mobile, surface: mixed, purpose: journey }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
@@ -38,11 +38,13 @@ setup: |
   SH
   chmod +x "$AFT_WORK_DIR/mob-lead"
 teardown: |
-  set +e
-  agent-browser --session "$AFT_SESSION" set viewport 1920 1080 >/dev/null
+  left=""
   for ws in E2E-AGV1-MOB E2E-AGV1-MOB-B E2E-AGV1-MOB-C E2E-AGV1-MOB-D; do
     curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/$ws" >/dev/null
+    code="$(curl -s -o /dev/null -w '%{http_code}' "$AFT_BASE_URL/api/workspaces/$ws")"
+    [ "$code" = 404 ] || left="$left $ws($code)"
   done
+  [ -z "$left" ] || { echo "workspaces left behind:$left" >&2; exit 1; }
 
 tests:
   # covers: MB1 phone/tablet chat layout; MB1b switcher whole items and more hint
@@ -76,11 +78,11 @@ tests:
           set -e
           "$AFT_WORK_DIR/mob-lead" "agv1-mob-alpha-${RUN_ID:-local}" mobAlphaId
           "$AFT_WORK_DIR/mob-lead" "agv1-mob-beta-${RUN_ID:-local}" mobBetaId
-          agent-browser --session "$AFT_SESSION" set viewport 390 844 >/dev/null
+          agent-browser --session "$AFT_SESSION" set viewport 360 800 >/dev/null
           agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-MOB/chat/$(cat "$AFT_WORK_DIR/mobAlphaId")"
-        intent: "Create two OpenCode leads and open the first one's chat on a 390 px phone"
+        intent: "Create two OpenCode leads and open the first one's chat on a 360 px phone"
       - wait:
-          fn: >-
+          fn: &mobDrawerClosed >-
             (() => { const b = document.querySelector('nav[aria-label="Primary"] button[aria-label="Agents"]');
               const row = Array.from(document.querySelectorAll('a[href*="/chat/agt_"]')).find((a) => (a.textContent || '').includes('agv1-mob-beta-${RUN_ID:-local}'));
               return document.querySelector('section[aria-label="Agent chat"] header h2')?.textContent === 'agv1-mob-alpha-${RUN_ID:-local}' &&
@@ -88,7 +90,7 @@ tests:
                 (!row || row.getBoundingClientRect().width === 0); })()
         intent: "Wait until the rail shows a closed Agents button and the agent list is hidden"
       - click: { selector: "nav[aria-label='Primary'] button[aria-label='Agents']" }
-        intent: "Tap Agents"
+        intent: "Tap Agents at 360 px"
       - wait:
           fn: &mobDrawerOpen >-
             (() => { const b = document.querySelector('nav[aria-label="Primary"] button[aria-label="Agents"]');
@@ -101,6 +103,34 @@ tests:
               return r.left >= 0 && r.right <= innerWidth && r.top > 0 && r.bottom <= rail.top + 0.5 &&
                 cur.getAttribute('aria-current') === 'page' && !!top && row.contains(top); })()
         intent: "Wait until the drawer lists both leads between the header and the rail, the open one marked current, with the other row tappable"
+      - press: Escape
+      - wait:
+          fn: *mobDrawerClosed
+        intent: "Wait until Escape closes the drawer at 360 px"
+      - run: 'agent-browser --session "$AFT_SESSION" set viewport 557 844 >/dev/null'
+        intent: "Widen to a 557 px narrow tablet"
+      - wait:
+          fn: innerWidth === 557
+        intent: "Wait for the 557 px viewport"
+      - click: { selector: "nav[aria-label='Primary'] button[aria-label='Agents']" }
+        intent: "Tap Agents at 557 px"
+      - wait:
+          fn: *mobDrawerOpen
+        intent: "Wait until the drawer opens in place at 557 px"
+      - press: Escape
+      - wait:
+          fn: *mobDrawerClosed
+        intent: "Wait until Escape closes the drawer at 557 px"
+      - run: 'agent-browser --session "$AFT_SESSION" set viewport 390 844 >/dev/null'
+        intent: "Narrow to a 390 px phone"
+      - wait:
+          fn: innerWidth === 390
+        intent: "Wait for the 390 px viewport"
+      - click: { selector: "nav[aria-label='Primary'] button[aria-label='Agents']" }
+        intent: "Tap Agents at 390 px"
+      - wait:
+          fn: *mobDrawerOpen
+        intent: "Wait until the drawer opens in place at 390 px"
       - run: |
           set -e
           ab() { agent-browser --session "$AFT_SESSION" "$@"; }
@@ -166,10 +196,11 @@ tests:
       - run: |
           set -e
           "$AFT_WORK_DIR/mob-lead" "agv1-mob-pill-${RUN_ID:-local}" mobPillId
+          agent-browser --session "$AFT_SESSION" set viewport 1920 1080 >/dev/null
           curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" \
             -d '{"steps":[{"text":"AGV1-MOB-PILL-ONE"}]}' >/dev/null
           agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-MOB/chat/$(cat "$AFT_WORK_DIR/mobPillId")"
-        intent: "Create an OpenCode lead, script its first reply and open its chat"
+        intent: "Create an OpenCode lead, script its first reply and open its chat at the desktop width"
       - fill: { label: Message, value: "ok" }
       - press: Enter
       - wait:

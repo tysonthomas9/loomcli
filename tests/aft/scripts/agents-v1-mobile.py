@@ -78,13 +78,38 @@ SWITCHER = r"""(() => {
     if (shown <= 0.5) hidden.add(r.right <= w.left + 0.5 ? 'left' : 'right');
     else if (shown < r.width - 0.5) cut.push(b.getAttribute('aria-label') + ' shows ' + shown.toFixed(1));
   }
-  const hints = Array.from(document.querySelectorAll('nav[aria-label="Primary"] [data-more-hint]')).filter((h) => {
+  const nav = document.querySelector('nav[aria-label="Primary"]');
+  const shown = Array.from(nav.querySelectorAll('[data-more-hint]')).filter((h) => {
     const cs = getComputedStyle(h), r = h.getBoundingClientRect();
     return cs.visibility !== 'hidden' && Number(cs.opacity) > 0.5 && r.width > 0 && r.height > 0;
-  }).map((h) => h.dataset.moreHint).sort();
-  return { scrollLeft: s.scrollLeft, max: s.scrollWidth - s.clientWidth, cut, hints,
+  });
+  // A hint sits at its own edge of the switcher and on nothing it points
+  // past: no shown part of an item, no other rail button's icon.
+  const marks = [
+    ...Array.from(s.querySelectorAll('button')).map((b) => { const r = b.getBoundingClientRect();
+      return { label: b.getAttribute('aria-label'), left: Math.max(r.left, w.left), right: Math.min(r.right, w.right), r }; }),
+    ...Array.from(nav.querySelectorAll('button svg')).filter((i) => !s.contains(i)).map((i) => { const r = i.getBoundingClientRect();
+      return { label: i.closest('button').getAttribute('aria-label') + ' icon', left: r.left, right: r.right, r }; }),
+  ].filter((m) => m.right - m.left > 0.5);
+  const misplaced = shown.flatMap((h) => { const r = h.getBoundingClientRect(), side = h.dataset.moreHint;
+    const atEdge = side === 'left' ? Math.abs(r.left - w.left) <= 8 : Math.abs(r.right - w.right) <= 8;
+    return [...(atEdge ? [] : [side + ' hint away from its edge']),
+      ...marks.filter((m) => r.left < m.right - 0.5 && r.right > m.left + 0.5 && r.top < m.r.bottom && r.bottom > m.r.top)
+        .map((m) => side + ' hint over ' + m.label)]; });
+  const a = s.querySelector('button[data-active]')?.getBoundingClientRect();
+  return { scrollLeft: s.scrollLeft, max: s.scrollWidth - s.clientWidth, cut, misplaced,
+    hints: shown.map((h) => h.dataset.moreHint).sort(),
+    activeWhole: !!a && a.left >= w.left - 0.5 && a.right <= w.right + 0.5,
     want: ['left', 'right'].filter((x) => hidden.has(x)),
     items: s.querySelectorAll('button[aria-label^="Switch to "]').length }; })()"""
+
+
+def wait_for(js, what):
+    for _ in range(40):
+        if evaluate(js):
+            return
+        time.sleep(0.25)
+    sys.exit(f"timed out waiting for {what}")
 
 
 def settled_switcher(label):
@@ -94,6 +119,7 @@ def settled_switcher(label):
         if prev is not None and v["scrollLeft"] == prev:
             check(not v["cut"], f"{label}: switcher items cut", v)
             check(v["hints"] == v["want"], f"{label}: more hints", v)
+            check(not v["misplaced"], f"{label}: more hints misplaced", v)
             return v
         prev = v["scrollLeft"]
         time.sleep(0.25)
@@ -102,7 +128,7 @@ def settled_switcher(label):
 
 def layout(width, height):
     browser("set", "viewport", str(width), str(height))
-    time.sleep(1)
+    wait_for(f"innerWidth === {width} && innerHeight === {height}", f"{width}x{height} viewport")
     o = evaluate(OVERFLOW)
     check(not o["out"] and o["scrollWidth"] <= o["vw"], f"{width}px: elements past the right edge", o)
     v = evaluate(LAYOUT)
@@ -113,6 +139,7 @@ def layout(width, height):
           f"{width}px: composer covered", v)
     first = settled_switcher(f"{width}px as loaded")
     check(first["items"] >= 4, f"{width}px: the switcher needs four workspaces", first)
+    check(first["activeWhole"], f"{width}px: the open workspace is not wholly in view as loaded", first)
     if width < 557:
         check(first["max"] > 0, f"{width}px: nothing off-screen in the switcher", first)
     for x in range(0, first["max"] + 14, 13):
@@ -124,34 +151,46 @@ def layout(width, height):
 PILL = r"""(() => { const r = document.querySelector('[data-aft-row="%s"]');
   const p = r.querySelector('[data-testid=message-actions]'), b = r.querySelector('[class*=userBubble]');
   const c = p?.querySelector('button[aria-label="Copy your message"]');
-  const rect = (e) => { const q = e.getBoundingClientRect(); return { left: q.left, top: q.top, right: q.right, bottom: q.bottom, width: q.width }; };
+  const rect = (e) => { const q = e.getBoundingClientRect(); return { left: q.left, top: q.top, right: q.right, bottom: q.bottom, width: q.width, height: q.height }; };
   return { row: rect(r), bubble: rect(b), pill: p && rect(p), copy: c && rect(c),
-    shown: !!p && getComputedStyle(p).opacity !== '0' }; })()"""
+    shown: !!p && getComputedStyle(p).opacity === '1' }; })()"""
+
+SHORT, LONG = "ok", "A longer message that wraps"
+
 
 
 def pill():
-    rows = evaluate("""(() => { const rows = Array.from(document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=user]'));
-      rows.forEach((r, i) => r.dataset.aftRow = 'u' + i); return rows.map((r) => r.textContent.length); })()""")
-    check(len(rows) >= 2, "two user rows (short and long)", rows)
+    found = evaluate("""(() => { const rows = Array.from(document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=user]'));
+      const tag = (name, match) => { const r = rows.filter(match); if (r.length === 1) r[0].dataset.aftRow = name; return r.length; };
+      return { short: tag('short', (r) => r.querySelector('[class*=userBody]')?.textContent.trim() === '%s'),
+        long: tag('long', (r) => (r.querySelector('[class*=userBody]')?.textContent || '').startsWith('%s')) }; })()""" % (SHORT, LONG))
+    check(found == {"short": 1, "long": 1}, "one short and one long user row", found)
     for width in (130, 105, 80):
         evaluate("(() => { document.querySelector('[data-testid=chat-transcript]').style.setProperty('--chat-column', '%dpx'); return true; })()" % width)
-        for i in range(len(rows)):
-            sel = f'[data-aft-row="u{i}"]'
+        heights = {}
+        for row in ("short", "long"):
+            sel = f'[data-aft-row="{row}"]'
             browser("scrollintoview", sel)
             browser("hover", sel)
-            time.sleep(0.3)
-            m = evaluate(PILL % f"u{i}")
-            label = f"row u{i} at {width}px"
+            for _ in range(20):
+                m = evaluate(PILL % row)
+                if m["shown"]:
+                    break
+                time.sleep(0.15)
+            label = f"{row} row at {width}px"
             check(m["pill"] and m["copy"] and m["shown"], f"{label}: hover pill not shown", m)
             p, b, r, c = m["pill"], m["bubble"], m["row"], m["copy"]
             apart = p["right"] <= b["left"] + 0.5 or p["left"] >= b["right"] - 0.5 or \
                 p["bottom"] <= b["top"] + 0.5 or p["top"] >= b["bottom"] - 0.5
             check(apart, f"{label}: pill overlaps the bubble", m)
-            check(p["left"] >= r["left"] - 0.5 and p["right"] <= r["right"] + 0.5, f"{label}: pill outside its row", m)
+            check(p["left"] >= r["left"] - 0.5 and p["right"] <= r["right"] + 0.5 and
+                  p["top"] >= r["top"] - 0.5 and p["bottom"] <= r["bottom"] + 0.5, f"{label}: pill outside its row", m)
+            heights[row] = b["height"]
             check(c["width"] >= 14 and c["left"] >= p["left"] - 0.5 and c["right"] <= p["right"] + 0.5,
                   f"{label}: copy button cut", m)
+        check(heights["long"] >= 2 * heights["short"], f"{width}px: the long message does not wrap", heights)
     evaluate("(() => { document.querySelector('[data-testid=chat-transcript]').style.removeProperty('--chat-column'); return true; })()")
-    print(f"pill clear of the bubble for {len(rows)} user rows at 130, 105 and 80px")
+    print("pill clear of the bubble for the short and the long message at 130, 105 and 80px")
 
 
 if __name__ == "__main__":
