@@ -209,18 +209,20 @@ tests:
           fn: >-
             (() => { if (document.querySelector('[data-testid=harness-label]')?.textContent !== 'opencode') return false;
               if (!window.__ui5) {
-                const s = { lens: [], caretWhile: 0, cls: 0, samples: 0 };
+                const s = { lens: [], caretWhile: 0, cls: 0, samples: 0, lost: 0, fresh: 0, seen: false };
                 const add = (es) => { for (const e of es) if (!e.hadRecentInput) s.cls += e.value; };
                 s.po = new PerformanceObserver((l) => add(l.getEntries()));
                 s.po.observe({ type: 'layout-shift', buffered: false });
                 s.drain = () => add(s.po.takeRecords());
                 s.timer = setInterval(() => {
-                  const md = Array.from(document.querySelectorAll('[data-testid=chat-transcript] [data-testid=chat-markdown]'))
+                  const md = Array.from(document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent] [data-testid=chat-markdown]'))
                     .find((m) => (m.textContent || '').includes('AGV1-ACT-STREAM-A'));
-                  if (!md) return;
+                  if (!md) { if (s.seen) { s.lost++; s.lens.push(0); } return; }
+                  s.seen = true;
                   s.samples++;
                   s.lens.push((md.textContent || '').length);
                   if (md.querySelector('[data-streaming-caret]')) s.caretWhile++;
+                  if (md.querySelector('[data-fresh]')) s.fresh++;
                 }, 100);
                 window.__ui5 = s;
               }
@@ -242,10 +244,10 @@ tests:
               clearInterval(s.timer);
               s.drain();
               const grows = s.lens.every((n, i) => i === 0 || n >= s.lens[i - 1]);
-              return s.samples >= 20 && grows && s.caretWhile >= 10 && s.cls <= 0.05 &&
+              return s.samples >= 20 && s.lost === 0 && grows && s.caretWhile >= 10 && s.fresh > 0 && s.cls <= 0.05 &&
                 t.split('AGV1-ACT-STREAM-A').length === 2; })()
         budget: 30000
-        intent: "Wait until the reply has ended with no caret left, and check that over at least 20 samples its text never got shorter, the caret showed while it streamed, and the layout-shift score stayed at or below 0.05"
+        intent: "Wait until the reply has ended with no caret left, and check that over at least 20 samples the reply never vanished or got shorter, the caret showed and new words faded in while it streamed, and the layout-shift score stayed at or below 0.05"
       - run: |
           set -e
           agent-browser --session "$AFT_SESSION" mouse move 0 0
@@ -291,13 +293,15 @@ tests:
           fn: >-
             (() => { if (!matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
               if (!window.__calm) {
-                const s = { anims: 0, samples: 0, caret: 0 };
+                const s = { anims: 0, samples: 0, caret: 0, fades: 0 };
                 s.timer = setInterval(() => {
                   const tr = document.querySelector('[data-testid=chat-transcript]');
                   if (!(tr?.textContent || '').includes('AGV1-ACT-CALM-A')) return;
                   s.samples++;
                   if (tr.querySelector('[data-streaming-caret]')) s.caret++;
                   s.anims += tr.getAnimations({ subtree: true }).filter((a) => a.playState === 'running').length;
+                  s.fades += Array.from(tr.querySelectorAll('[data-fresh], [data-testid=chat-markdown] [style*=opacity]'))
+                    .filter((e) => parseFloat(getComputedStyle(e).opacity) < 1).length;
                 }, 100);
                 window.__calm = s;
               }
@@ -310,9 +314,9 @@ tests:
             (() => { const s = window.__calm; const tr = document.querySelector('[data-testid=chat-transcript]');
               if (!s || !(tr?.textContent || '').includes('AGV1-ACT-CALM-END') || tr.querySelector('[data-streaming-caret]')) return false;
               clearInterval(s.timer);
-              return s.samples >= 10 && s.caret >= 5 && s.anims === 0; })()
+              return s.samples >= 10 && s.caret >= 5 && s.anims === 0 && s.fades === 0; })()
         budget: 30000
-        intent: "Wait until the second reply has ended, and check that while it streamed no animation ran in the transcript"
+        intent: "Wait until the second reply has ended, and check that while it streamed no animation ran in the transcript and no word faded in"
       - run: |
           set -e
           agent-browser --session "$AFT_SESSION" set media light
