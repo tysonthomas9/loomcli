@@ -204,12 +204,12 @@ tests:
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" open-task r1 a"
         intent: "Human opens task A"
       - click:
-          testid: detail-reject-button
+          testid: panel-reject-button
         intent: Human clicks Reject on task A
-      - fill: { testid: detail-reject-comment, value: "Rejected by the matrix: try again." }
+      - fill: { testid: reject-textarea, value: "Rejected by the matrix: try again." }
         intent: Human writes why
       - click:
-          testid: detail-reject-submit
+          testid: reject-submit
         intent: Human sends the rejection
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" reject r1 a"
         intent: "Task A is open again, with a reject verdict and no PR"
@@ -352,12 +352,12 @@ tests:
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" open-task d2 a"
         intent: "Human opens task A"
       - click:
-          testid: detail-reject-button
+          testid: panel-reject-button
         intent: Human clicks Reject on task A
-      - fill: { testid: detail-reject-comment, value: "Rejected by the matrix: B must be rebuilt." }
+      - fill: { testid: reject-textarea, value: "Rejected by the matrix: B must be rebuilt." }
         intent: Human writes why
       - click:
-          testid: detail-reject-submit
+          testid: reject-submit
         intent: Human sends the rejection
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" reject d2 a"
         intent: "A is open again with a reject verdict and no PR"
