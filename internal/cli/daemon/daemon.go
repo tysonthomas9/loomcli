@@ -13,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	cfgpkg "github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
+	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/events"
 	"github.com/tysonthomas9/loomcli/internal/notify"
 	"github.com/tysonthomas9/loomcli/internal/store"
@@ -279,6 +280,7 @@ func wireSupervisorCallbacks(sup *supervisor.Supervisor, issueBackend backend.Is
 			slog.Warn("failed to emit event", "event_type", evt.Type, "err", err)
 		}
 	}
+	sup.DependentBase = driver.ResolveDependentBase
 	sup.FindRepoConfig = func(repoName string) *cfgpkg.RepoConfig {
 		if repoName == "" {
 			return nil

@@ -82,6 +82,12 @@ func runtimePath(path string) bool {
 	return false
 }
 
+// RuntimeFile reports whether path is a Loom or agent runtime file that
+// captures leave out (P1.22).
+func RuntimeFile(repo, path string, tracked bool) bool {
+	return excludedRuntimePath(repo, path, tracked)
+}
+
 func excludedRuntimePath(repo, path string, tracked bool) bool {
 	if runtimePath(path) {
 		return true

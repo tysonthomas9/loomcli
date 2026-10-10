@@ -3,12 +3,10 @@ package taskcopy
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
-	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/agentcapture"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 )
 
@@ -25,22 +23,8 @@ func LeadSource(ctx context.Context, workspace, lead, repo string) (string, stri
 	}
 	for _, a := range areas {
 		if a.Repo == repo {
-			if _, err := os.Stat(filepath.Join(a.Path, ".git")); err != nil {
-				return "", "", err
-			}
-			r, err := gitexec.New(a.Path, gitexec.Options{ReadOnly: true})
-			if err != nil {
-				return "", "", err
-			}
-			ref, err := r.Run(ctx, "rev-parse", "--symbolic-full-name", "HEAD")
-			if err != nil {
-				return "", "", err
-			}
-			if strings.TrimSpace(string(ref)) != "refs/heads/"+a.Branch {
-				return "", "", errors.New("lead working area branch changed")
-			}
-			sha, err := r.Run(ctx, "rev-parse", "HEAD")
-			return a.Path, strings.TrimSpace(string(sha)), err
+			tip, err := agentcapture.WorkingAreaTip(ctx, a)
+			return a.Path, tip, err
 		}
 	}
 	return "", "", errors.New("lead working area not found")
