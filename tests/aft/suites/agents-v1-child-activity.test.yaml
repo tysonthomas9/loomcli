@@ -142,7 +142,7 @@ tests:
                 // test's own Stop with a message (arm) until that turn's first
                 // step (DF2b gives each turn a fresh time and no step).
                 // Anywhere else it is a fallback within a turn.
-                const w = { seen, bad, armed: false, gap: false, armKind: '', fallback: 0 };
+                const w = { seen, bad, at: [Date.now()], arms: [], armed: false, gap: false, armKind: '', fallback: 0 };
                 const isStep = (l) => l.startsWith('▸ ') || l.startsWith('💭 ');
                 const kind = (l) => l.split(' · ').slice(0, -1).join(' · ');
                 const look = () => { const r = row(); if (!r) return; const l = r.lastElementChild?.textContent || '';
@@ -150,8 +150,8 @@ tests:
                   if (l === 'Working…' && !w.armed) w.fallback++;
                   if (w.armed && !isStep(l)) w.gap = true;
                   if (w.armed && isStep(l) && (w.gap || kind(l) !== w.armKind)) w.armed = false;
-                  if (seen[seen.length - 1] !== l) seen.push(l); };
-                w.arm = () => { w.armed = true; w.gap = false; w.armKind = kind(seen[seen.length - 1] || ''); return true; };
+                  if (seen[seen.length - 1] !== l) { seen.push(l); w.at.push(Date.now()); } };
+                w.arm = () => { w.arms.push(Date.now()); w.armed = true; w.gap = false; w.armKind = kind(seen[seen.length - 1] || ''); return true; };
                 w.obs = new MutationObserver(look);
                 w.obs.observe(document.body, { subtree: true, childList: true, characterData: true });
                 window.__df2 = w;
@@ -203,11 +203,13 @@ tests:
       - wait:
           fn: >-
             (() => { const w = window.__df2; if (!w) return false;
-              const first = (k) => w.seen.find((l) => l.startsWith(k));
-              const ran = Math.max(...w.seen.filter((l) => l.startsWith('▸ Ran command · ')).map(w.secs));
-              const read = first('▸ Read file · '), think = first('💭 Thinking · ');
-              return ran >= 4 && !!read && !!think && w.secs(read) < ran && w.secs(think) < ran; })()
-        intent: "Check that each Stop with a message restarted the turn's timer (DF2b): the read and thinking turns' first lines read a lower time than the first turn reached, not the first turn's running total"
+              // A turn's first line may read at most the time since the test
+              // stopped the turn before it, plus one tick; carrying on from
+              // the first turn (which ran 0:04 or more) reads more.
+              const fresh = (k, arm) => { const i = w.seen.findIndex((l) => l.startsWith(k));
+                return i >= 0 && w.arms.length === 2 && w.secs(w.seen[i]) <= (w.at[i] - w.arms[arm]) / 1000 + 1; };
+              return fresh('▸ Read file · ', 0) && fresh('💭 Thinking · ', 1); })()
+        intent: "Check that each Stop with a message restarted the turn's timer (DF2b): the read and thinking turns' first lines read no more than the time since the test stopped the turn before, not the first turn's running total"
       - run: |
           set -e
           "$AFT_WORK_DIR/act-send" "$(cat "$AFT_WORK_DIR/actDf2Kid")" "agv1-act-df2-stop-${RUN_ID:-local}" ""
