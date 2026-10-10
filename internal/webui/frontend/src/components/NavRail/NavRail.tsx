@@ -297,8 +297,9 @@ export function NavRail({
   const frameRef = useRef<HTMLDivElement>(null);
   const leftChevronRef = useRef<HTMLButtonElement>(null);
   const rightChevronRef = useRef<HTMLButtonElement>(null);
-  // The chevron to focus once the focused one goes away at an end.
-  const refocusChevron = useRef<"left" | "right" | null>(null);
+  // Where focus goes once a focused chevron goes away: the other chevron at
+  // an end, or a shown workspace when the slot narrows to passive hints.
+  const refocusChevron = useRef<"left" | "right" | "item" | null>(null);
 
   const hasAdd = Boolean(onAddWorkspace);
   // Which ends of the sideways (mobile) switcher have workspaces scrolled out
@@ -351,6 +352,13 @@ export function NavRail({
       refocusChevron.current = "right";
     if (focused && focused === rightChevronRef.current && !right)
       refocusChevron.current = "left";
+    if (
+      !buttons &&
+      focused &&
+      (focused === leftChevronRef.current ||
+        focused === rightChevronRef.current)
+    )
+      refocusChevron.current = "item";
     setMore((m) =>
       m.left === left && m.right === right && m.buttons === buttons
         ? m
@@ -369,8 +377,17 @@ export function NavRail({
   useEffect(() => {
     const side = refocusChevron.current;
     refocusChevron.current = null;
-    if (side)
+    if (side === "left" || side === "right")
       (side === "left" ? leftChevronRef : rightChevronRef).current?.focus();
+    const s = switcherRef.current;
+    if (side !== "item" || !s) return;
+    const w = s.getBoundingClientRect();
+    Array.from(s.querySelectorAll("button"))
+      .find((b) => {
+        const r = b.getBoundingClientRect();
+        return r.left >= w.left - 0.5 && r.right <= w.right + 0.5;
+      })
+      ?.focus();
   }, [more]);
 
   const scrollByItem = (side: "left" | "right") => {

@@ -526,11 +526,19 @@ test("switcher: resizing across the switch point keeps the scroll", async ({
   ).toBeVisible();
   await switcher.evaluate((s) => s.scrollTo({ left: 0 }));
   await expect.poll(() => switcher.evaluate((s) => s.scrollLeft)).toBe(0);
+  // The keyboard is on a chevron that becomes a passive hint.
+  await rail.getByRole("button", { name: "Scroll workspaces right" }).focus();
   await page.setViewportSize({ width: 470, height: 844 });
   await expect(
     rail.getByRole("button", { name: /^Scroll workspaces / }),
   ).toHaveCount(0);
-  await page.waitForTimeout(200);
+  // Focus moves to a workspace that shows, not to the document.
+  await expect(switcher.locator("button:focus")).toHaveCount(1);
+  // Let any effect-driven scroll land: two frames after the re-render.
+  await page.evaluate(
+    () =>
+      new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
+  );
   expect(await switcher.evaluate((s) => s.scrollLeft)).toBe(0);
 });
 
