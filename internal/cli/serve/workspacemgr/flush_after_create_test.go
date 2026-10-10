@@ -1,4 +1,4 @@
-package serve
+package workspacemgr
 
 import (
 	"context"
@@ -13,7 +13,7 @@ func TestFlushAfterCreate(t *testing.T) {
 		return service.WorkspaceCreateResult{WorkspaceID: "WS"}, nil
 	}
 	flushed := 0
-	ok := flushAfterCreate(create, func(context.Context) error { flushed++; return nil })
+	ok := FlushAfterCreate(create, func(context.Context) error { flushed++; return nil })
 	ctx := service.WithCreateWarnings(context.Background())
 	if res, err := ok(ctx, service.WorkspaceCreateRequest{}); err != nil || res.WorkspaceID != "WS" || flushed != 1 {
 		t.Fatalf("got %+v, %v, flushed=%d", res, err, flushed)
@@ -22,7 +22,7 @@ func TestFlushAfterCreate(t *testing.T) {
 		t.Fatalf("unexpected warnings %v", w)
 	}
 
-	failing := flushAfterCreate(create, func(context.Context) error { return errors.New("disk full") })
+	failing := FlushAfterCreate(create, func(context.Context) error { return errors.New("disk full") })
 	ctx = service.WithCreateWarnings(context.Background())
 	if res, err := failing(ctx, service.WorkspaceCreateRequest{}); err != nil || res.WorkspaceID != "WS" {
 		t.Fatalf("got %+v, %v", res, err)
@@ -33,7 +33,7 @@ func TestFlushAfterCreate(t *testing.T) {
 
 	expired, cancel := context.WithCancel(service.WithCreateWarnings(context.Background()))
 	cancel()
-	timedOut := flushAfterCreate(create, func(ctx context.Context) error { return ctx.Err() })
+	timedOut := FlushAfterCreate(create, func(ctx context.Context) error { return ctx.Err() })
 	if _, err := timedOut(expired, service.WorkspaceCreateRequest{}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("want the request's context error from an expired flush, got %v", err)
 	}
