@@ -95,6 +95,8 @@ export interface UseAgentChatReturn {
    * feed.gap until its catch-up loads, so rows that arrive while true are live.
    */
   synced: boolean;
+  /** Get said agent_not_found: the agent is gone (deleted, or a reset). */
+  notFound: boolean;
 }
 
 /** REST Send's JSON request body limit (the server's 1 MiB guard). */
@@ -136,11 +138,16 @@ export function useAgentChat(
   const [error, setError] = useState<string | null>(null);
   const [expiredErr, setExpiredErr] = useState(false);
   const [synced, setSynced] = useState(false);
+  const [notFound, setNotFound] = useState(false);
 
   const refresh = useCallback(() => {
     getAgent(workspaceId, agentId)
       .then(setAgent)
-      .catch((err) => setError(message(err)));
+      .catch((err) =>
+        errorCode(err) === "agent_not_found"
+          ? setNotFound(true)
+          : setError(message(err)),
+      );
   }, [workspaceId, agentId]);
 
   useEffect(() => {
@@ -275,6 +282,7 @@ export function useAgentChat(
     unarchive,
     expired: expiredErr || !!agent?.history_purged_at,
     synced,
+    notFound,
   };
 }
 

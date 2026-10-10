@@ -1044,6 +1044,45 @@ describe("AgentChat lifecycle (1.8b)", () => {
     expect(box).toHaveValue("big");
   });
 
+  it("shows Agent not found, with no raw id and no composer, when the agent is gone", async () => {
+    api.getAgent.mockRejectedValue(
+      new ApiError(404, "Not Found", {
+        error: "agt_gone",
+        code: "agent_not_found",
+      }),
+    );
+    const { container } = render(
+      <MemoryRouter>
+        <AgentChat workspaceId="w1" agentId="agt_gone" />
+      </MemoryRouter>,
+    );
+    const state = await screen.findByTestId("agent-not-found");
+    expect(state).toHaveTextContent("Agent not found");
+    expect(state).toHaveTextContent(
+      "This agent no longer exists. It may have been deleted.",
+    );
+    expect(
+      within(state).getByRole("link", { name: "Go home" }),
+    ).toHaveAttribute("href", "/ws/w1/home");
+    expect(container.textContent).not.toContain("agt_gone");
+    expect(screen.queryByLabelText("Message")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("keeps the chat and its error for a Get failure other than agent_not_found", async () => {
+    api.getAgent.mockRejectedValue(
+      new ApiError(404, "Not Found", { error: "boom", code: "not_found" }),
+    );
+    render(
+      <MemoryRouter>
+        <AgentChat workspaceId="w1" agentId="a1" />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("boom");
+    expect(screen.getByLabelText("Message")).toBeInTheDocument();
+    expect(screen.queryByTestId("agent-not-found")).toBeNull();
+  });
+
   it("marks a harness switch with a context divider and keeps the earlier transcript; a failed switch shows none", async () => {
     await mount(agent());
     // A failed switch saves no harness.changed: no divider.

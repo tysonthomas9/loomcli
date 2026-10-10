@@ -96,6 +96,7 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
     unarchive,
     expired,
     synced,
+    notFound,
   } = useAgentChat(workspaceId, agentId);
   const compact = useNarrow(COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX);
   const own = ownSender(useAuth().user?.id);
@@ -173,6 +174,19 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
   };
 
   const empty = rows.length === 0 && waiting.length === 0 && !running;
+
+  if (notFound)
+    return (
+      <section className={page.chat} aria-label="Agent chat">
+        <div className={page.notFound} data-testid="agent-not-found">
+          <h2>Agent not found</h2>
+          <p>This agent no longer exists. It may have been deleted.</p>
+          <Link to={`/ws/${encodeURIComponent(workspaceId)}/home`}>
+            Go home
+          </Link>
+        </div>
+      </section>
+    );
 
   return (
     <section className={page.chat} aria-label="Agent chat">

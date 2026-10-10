@@ -543,6 +543,31 @@
   border-radius: 1rem 1rem 0 0;
 }
 
+/* A chat URL whose agent is gone (NF1). */
+.notFound {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: var(--chat-gutter);
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+}
+
+.notFound h2 {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.notFound p {
+  margin: 0;
+}
+
 .error {
   color: var(--color-danger);
   font-size: 0.75rem;
