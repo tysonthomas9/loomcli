@@ -182,15 +182,7 @@ func (l *Local) TaskRevisionsForLead(ctx context.Context, workspace, task, lead 
 			return nil, err
 		}
 		if v.Kind == "approve" || v.Kind == "override" || v.Kind == "policy" {
-			if i.FollowStatus, i.FollowReason, err = l.store.ApprovalFollowState(ctx, workspace, lead, r.Change, r.Number); err != nil {
-				return nil, err
-			}
-			// The follow stays "applied" after Unapply removed the layer (F6):
-			// report what the working area holds, so the reviewer can Apply.
-			if i.FollowStatus == "applied" && !i.Applied {
-				i.FollowStatus = "unapplied"
-			}
-			if i.NeedsWorkingArea, err = l.needsWorkingArea(ctx, workspace, lead, r.Change, r.Number); err != nil {
+			if err := l.addFollowState(ctx, workspace, lead, &i); err != nil {
 				return nil, err
 			}
 		}
@@ -206,6 +198,21 @@ func (l *Local) TaskRevisionsForLead(ctx context.Context, workspace, task, lead 
 		out = append(out, i)
 	}
 	return out, nil
+}
+
+// addFollowState reports where an approval's Apply stands for one lead.
+func (l *Local) addFollowState(ctx context.Context, workspace, lead string, i *TaskRevision) error {
+	var err error
+	if i.FollowStatus, i.FollowReason, err = l.store.ApprovalFollowState(ctx, workspace, lead, i.ChangeID, i.Number); err != nil {
+		return err
+	}
+	// The follow stays "applied" after Unapply removed the layer (F6):
+	// report what the working area holds, so the reviewer can Apply.
+	if i.FollowStatus == "applied" && !i.Applied {
+		i.FollowStatus = "unapplied"
+	}
+	i.NeedsWorkingArea, err = l.needsWorkingArea(ctx, workspace, lead, i.ChangeID, i.Number)
+	return err
 }
 
 // needsWorkingArea reports whether a lead targeted by this revision's approval
