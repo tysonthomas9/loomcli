@@ -281,6 +281,11 @@ func TestPRWatchConflict(t *testing.T) {
 		p.host.set(func(h *prHost) { h.pr["mergeable_state"] = "dirty" })
 		p.sweep()
 		p.wantWakes("a new conflict", 3, []string{"conflicts"})
+		p.host.set(func(h *prHost) { h.pr["mergeable_state"] = "clean" }) // nothing else changes this time
+		p.sweep()
+		p.host.set(func(h *prHost) { h.pr["mergeable_state"] = "dirty" })
+		p.sweep()
+		p.wantWakes("the conflict back with no other news", 4, []string{"conflicts"})
 	})
 }
 
@@ -477,20 +482,20 @@ func TestPRWatchRewatchDuringSweep(t *testing.T) {
 }
 
 // TestPRWatchStatusRerun (OR8): a commit status that runs again and ends
-// in the same state is news again (the connector keeps no status id).
+// in the same state, in the same second, is news again: it has a new id.
 func TestPRWatchStatusRerun(t *testing.T) {
 	p := newPREnv(t, "opencode")
-	status := func(state, at string) {
+	status := func(id float64, state string) {
 		p.host.set(func(h *prHost) {
-			h.statuses = []any{map[string]any{"context": "lint", "state": state, "updated_at": at}}
+			h.statuses = []any{map[string]any{"id": id, "context": "lint", "state": state, "updated_at": "2026-10-10T12:00:00Z"}}
 		})
 	}
-	status("failure", "2026-10-10T12:00:00Z")
+	status(1, "failure")
 	p.sweep()
 	p.wantWakes("the status failed", 1, []string{"failed: lint"})
-	status("pending", "2026-10-10T12:05:00Z")
+	status(2, "pending")
 	p.sweep()
-	status("failure", "2026-10-10T12:09:00Z")
+	status(3, "failure")
 	p.sweep()
 	p.wantWakes("it failed again", 2, []string{"failed: lint"})
 }

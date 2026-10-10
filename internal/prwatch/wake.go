@@ -80,7 +80,10 @@ func Decide(w loomstore.PRWatch, s Snapshot) (Wake, bool) {
 	text := wakeText(w.PRWatchKey, news, closed, end)
 	from, _ := json.Marshal(told)
 	to, _ := json.Marshal(next)
-	sum := sha256.Sum256(append(append(append([]byte(w.CreatedAt), 0), append(from, 0)...), to...))
+	// The watch's last write (made, told or settled) keeps news that recurs,
+	// as a conflict back after it cleared or a PR closed again after a
+	// rewatch, from reusing an earlier receipt.
+	sum := sha256.Sum256(append(append(append([]byte(w.UpdatedAt), 0), append(from, 0)...), to...))
 	return Wake{
 		RequestID: fmt.Sprintf("pr-watch:%s/%s#%d:%s", w.Owner, w.Repo, w.Number, hex.EncodeToString(sum[:12])),
 		Text:      text,
