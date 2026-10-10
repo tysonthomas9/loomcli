@@ -134,9 +134,7 @@ tests:
           status: 200
         intent: "An orchestration client assigns the epic to the not-yet-running Lead"
       - open: /ws/E2E-WS-LEADLIVE/agents/live-lead-${RUN_ID:-local}
-      - wait:
-          fn: >-
-            !!document.querySelector('[data-testid=terminal-wrapper] .wterm')
+      - run: '"$AFT_TESTS_DIR/scripts/terminal.sh" mounted'
         intent: "Wait until the live Lead terminal mounts its grid"
       # Clause 2 — runtime started. Only the controlled runtime prints this, and only
       # after waitForCodexAppServer succeeds (leadcontrol/codex_runtime.go:163).
@@ -145,17 +143,7 @@ tests:
       # `codex --remote` TUI is exec'd, so this proves the app-server stage came up —
       # not that the TUI survived. The delivery assertion below is what shows the lead
       # process then did real work.
-      - wait:
-          fn: >-
-            (() => {
-              const wrapper = document.querySelector('[data-testid=terminal-wrapper]');
-              if (!wrapper) return false;
-              const rows = Array.from(wrapper.querySelectorAll('.term-row')).map((el) => el.textContent || '').join('\n');
-              if (rows.includes('Error running agent') || rows.includes('backend is not installed')) {
-                throw new Error('lead runtime failed to start: ' + rows.slice(-400));
-              }
-              return /Launching controlled .*lead session/.test(rows);
-            })()
+      - run: '"$AFT_TESTS_DIR/scripts/terminal.sh" wait "Launching controlled .*lead session" 110 "Error running agent|backend is not installed"'
         intent: "Wait until the controlled lead runtime reports it started, which only happens after the backend is ready"
       # The delivery state machine, against a live runtime for the first time. Poll
       # only for the terminal state: `pending` is transient, and /monitor/status

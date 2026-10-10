@@ -299,20 +299,9 @@ tests:
               equals: "prrbad-${RUN_ID:-local}"
         intent: "An API client provisions an interactive agent whose role stores an unknown built-in prompt"
       - open: /ws/E2E-WS-PRR/agents/prrbad-${RUN_ID:-local}
-      - wait:
-          fn: >-
-            !!document.querySelector('[data-testid=terminal-wrapper][data-terminal-renderer=xterm] .xterm')
+      - run: '"$AFT_TESTS_DIR/scripts/terminal.sh" mounted'
         intent: "Wait until the bad-prompt agent terminal grid mounts"
-      - wait:
-          fn: >-
-            (() => {
-              const wrapper = document.querySelector('[data-testid=terminal-wrapper]');
-              if (!wrapper) return false;
-              const rows = Array.from(wrapper.querySelectorAll('.term-row')).map((el) => el.textContent || '').join('\n');
-              const text = rows || wrapper.textContent || '';
-              return text.includes('Error loading terminal prompt:') &&
-                text.includes('unknown built-in interactive prompt');
-            })()
+      - run: '"$AFT_TESTS_DIR/scripts/terminal.sh" wait "Error loading terminal prompt:.*unknown built-in interactive prompt"'
         intent: "Wait until the bad built-in prompt error is visible in the surviving terminal"
       - expect: { notText: "Something went wrong" }
       - run: |
