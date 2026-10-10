@@ -207,12 +207,13 @@ func (s *Service) delete(ctx context.Context, req DeleteRequest) error {
 	return s.tombstone(ctx, a)
 }
 
-// tombstone marks a deleted and purges its history in one transaction under
-// the event lane, then publishes its settled and agent.deleted events, live
-// only, as the history is gone.
+// tombstone marks a deleted, clears its Attention and purges its history in
+// one transaction under the event lane, then publishes its settled,
+// attention.cleared and agent.deleted events, live only, as the history is
+// gone.
 func (s *Service) tombstone(ctx context.Context, a loomstore.Agent) error {
 	now, after := time.Now(), a
-	after.DeletedAt = sp(loomstore.Stamp(now))
+	after.DeletedAt, after.AttentionReason = sp(loomstore.Stamp(now)), nil // a finished Delete owes nothing
 	out := append(changeEvents(a, after), Event{AgentID: a.AgentID, Type: EventDeleted, Time: now})
 	for i := range out {
 		out[i].EventID = a.AgentID + ":deleted:" + out[i].Type

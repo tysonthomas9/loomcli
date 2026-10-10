@@ -581,15 +581,16 @@ func (s *Store) Tombstone(ctx context.Context, agentID string, now time.Time) er
 }
 
 // TombstoneEvents is Tombstone that, in the same transaction that sets
-// deleted_at and history_purged_at and deletes agentID's events and the
-// completion markers owed to it (a deleted parent gets no record), also saves
+// deleted_at and history_purged_at, clears Attention and deletes agentID's
+// events and the completion markers owed to it (a deleted parent gets no
+// record), also saves
 // events as AppendEvent does: after the purge they are live only (seq 0).
 // It returns them.
 func (s *Store) TombstoneEvents(ctx context.Context, agentID string, now time.Time, events []Event) (saved []Event, err error) {
 	err = s.tx(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `UPDATE agents SET deleted_at = COALESCE(deleted_at, ?),
-			history_purged_at = COALESCE(history_purged_at, ?), history_purge_failed_at = NULL, updated_at = ?
-			WHERE agent_id = ?`, Stamp(now), Stamp(now), Stamp(now), agentID); err != nil {
+			history_purged_at = COALESCE(history_purged_at, ?), history_purge_failed_at = NULL, attention_reason = NULL,
+			updated_at = ?, revision = revision + 1 WHERE agent_id = ?`, Stamp(now), Stamp(now), Stamp(now), agentID); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM agent_events WHERE agent_id = ?`, agentID); err != nil {
