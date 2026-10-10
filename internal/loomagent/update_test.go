@@ -19,6 +19,7 @@ type switchEnv struct {
 	fa, fb     *fake.Harness
 	old        loomharness.NativeRef
 	interrupts int
+	crash      bool           // the Interrupt hook panics, as a crash before it
 	ws         *fakeWorkspace // a1 has a working copy here
 }
 
@@ -44,6 +45,9 @@ func newSwitchEnv(t *testing.T, state string) *switchEnv {
 			return loomharness.Launch{Root: "/root/" + h}, nil
 		},
 		Interrupt: func(ctx context.Context, a loomstore.Agent) error {
+			if e.crash {
+				panic("crash")
+			}
 			e.interrupts++
 			sess, _, err := e.s.current(ctx, a)
 			if err != nil {
