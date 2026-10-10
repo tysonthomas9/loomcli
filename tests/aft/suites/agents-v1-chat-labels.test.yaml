@@ -1,0 +1,447 @@
+# Lead chat labels on OpenCode (or its emulator with LOOM_HARNESS_EMU=1),
+# with the model scripted through 2.0d's fake model: CL4 (a Lead's code mode
+# call never shows its raw code), CL1 (one stable colour per child across
+# the Started marker, the tray, the result card and the sidebar), EF1 (the
+# effort option is called "Effort" in every wired harness's catalog and in
+# the composer's picker) and SK1 (the skip link shows only when reached by
+# keyboard).
+suite: agents-v1-chat-labels
+classification: { area: agents, feature: agent-api-chat-labels, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: |
+  set -e
+  curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LABELS" >/dev/null || true
+  repo="$AFT_WORK_DIR/agv1-labels-repo"
+  mkdir -p "$repo"
+  git -C "$repo" init -q -b main
+  echo "agents-v1 chat labels ${RUN_ID:-local}" > "$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" -c user.email=e2e@x -c user.name=e2e commit -q -m init
+  printf '{"name":"e2e-agv1-labels","type":"empty","repos":["%s"]}' "$repo" |
+    curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @- >/dev/null
+  # lbl-watch: installs window.__aftLbl in the open page (once per document).
+  # Its MutationObserver sets raw when the page's text ever shows a code mode
+  # call's raw input (Execute {"code"...), from the moment it is installed;
+  # colours() reads each started child's avatar colour (its palette index
+  # and computed background) where it shows: the Started marker, the tray
+  # header, the result card and the sidebar; keep() saves the first colour
+  # seen per child in sessionStorage, which a reload keeps; same(places)
+  # holds when every child shows in those places, in one colour that
+  # matches the saved one.
+  cat > "$AFT_WORK_DIR/lbl-watch.js" <<'JS'
+  (() => {
+    if (window.__aftLbl) return 'kept';
+    const rawNow = () => /Execute\s*\{\s*"code"/.test(document.body ? document.body.innerText : '');
+    const st = { raw: rawNow(), checks: 0 };
+    new MutationObserver(() => { st.checks++; if (!st.raw && rawNow()) st.raw = true; })
+      .observe(document, { subtree: true, childList: true, characterData: true, attributes: true });
+    const look = (el) => {
+      if (!el) return null;
+      const bg = getComputedStyle(el).backgroundColor;
+      return bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent' ? el.getAttribute('data-agent-color') + '|' + bg : null;
+    };
+    const kids = () => Array.from(document.querySelectorAll('[data-testid=started-marker] a[href*="/chat/"]')).map((a) => {
+      const badge = a.querySelector('[data-agent-color]');
+      const text = (a.textContent || '').trim();
+      const ini = (badge ? badge.textContent : '').trim();
+      return { id: a.getAttribute('href').split('/chat/')[1], name: text.slice(ini.length).trim(), ini, marker: look(badge) };
+    });
+    const colours = () => {
+      const out = {};
+      const ks = kids();
+      const tray = Array.from(document.querySelectorAll('[data-testid=agent-tray] button[aria-expanded] [data-agent-color]'));
+      const cards = Array.from(document.querySelectorAll('[data-testid=completion-record]'));
+      for (const k of ks) {
+        const t = tray.filter((b) => (b.textContent || '').trim() === k.ini);
+        const c = cards.filter((e) => (e.textContent || '').includes(k.name));
+        const nav = document.querySelector('nav[aria-label=Agents] a[href$="/chat/' + k.id + '"]');
+        const side = nav && nav.querySelector('[data-agent-color]');
+        const sideAvatar = side && side.querySelector('[aria-label$=" avatar"]');
+        out[k.id] = { name: k.name, ini: k.ini, marker: k.marker,
+          tray: t.length === 1 ? look(t[0]) : (t.length ? 'dup' : null),
+          card: c.length === 1 ? look(c[0].querySelector('[data-agent-color]')) : (c.length ? 'dup' : null),
+          side: side && sideAvatar ? side.getAttribute('data-agent-color') + '|' + getComputedStyle(sideAvatar).backgroundColor : null };
+      }
+      return out;
+    };
+    const saved = () => JSON.parse(sessionStorage.getItem('aft-lbl-colours') || '{}');
+    const keep = () => {
+      const s = saved();
+      for (const [id, c] of Object.entries(colours())) if (!s[id] && c.marker) s[id] = c.marker;
+      sessionStorage.setItem('aft-lbl-colours', JSON.stringify(s));
+      return s;
+    };
+    const same = (places) => {
+      const all = colours(), s = keep();
+      const ids = Object.keys(all);
+      if (ids.length !== 2 || new Set(ids.map((id) => all[id].ini)).size !== 2) return false;
+      return ids.every((id) => places.every((p) => all[id][p] && all[id][p] === s[id]));
+    };
+    window.__aftLbl = { st, kids, colours, keep, same };
+    return 'installed';
+  })()
+  JS
+  # lbl-watch-install: installs the watcher in the browser session's page.
+  cat > "$AFT_WORK_DIR/lbl-watch-install" <<'SH'
+  #!/bin/sh
+  set -e
+  out="$(agent-browser --session "$AFT_SESSION" eval -b "$(base64 < "$AFT_WORK_DIR/lbl-watch.js" | tr -d '\n')")"
+  echo "lbl-watch: $out"
+  case "$out" in *installed*|*kept*) ;; *) echo "the watcher did not install" >&2; exit 1 ;; esac
+  SH
+  chmod +x "$AFT_WORK_DIR/lbl-watch-install"
+teardown: |
+  set +e
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LABELS" >/dev/null
+
+tests:
+  - name: I2 CL4 and CL1 - a Lead's two children start under one Started marker with no raw Execute code, each child keeps one colour everywhere it shows, and a reload keeps both
+    intent: An operator asks an OpenCode lead for two workers. From the moment the message is sent through the children finishing and a reload, the page never shows a code mode call's raw input (Execute {"code"...). The Lead's two execute calls fold into one Started marker naming both children with "2 tool calls", which expands to two "Ran code" rows whose code shows only when a row is opened. Each child's avatar has one colour in the Started marker, the tray, the sidebar and its result card, and the same colour after a reload; one result card shows per child.
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-LABELS/v1/agents
+          headers: { Idempotency-Key: "agv1-lbl-lead-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-lbl-lead-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-labels-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: lblLeadId
+        intent: "The operator's API client creates an OpenCode lead through the Agent API"
+      - run: |
+          set -e
+          # The lead creates both children in one step, one execute call each
+          # (the agents-v1-children T10 script); each child holds its turn (a
+          # tool the emulator does not run waits until interrupted), so both
+          # keep working until stopped.
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          python3 -c 'import json,sys
+          mk = lambda n: {"name": "execute", "arguments": {"code": "return await tools.loom.agent_create(%s)" % json.dumps({"name": n, "brief": "do the task"})}}
+          hold = {"next": "prompt", "tool_calls": [{"name": "df1_hold"}]}
+          print(json.dumps({"steps": [{"next": "prompt", "tool_calls": [mk(sys.argv[1]), mk(sys.argv[2])]},
+            {"next": "tool", "text": "AGV1-LBL-STARTED"}, hold, hold]}))' "lbl-${RUN_ID:-local}-alpha" "lbl-${RUN_ID:-local}-bravo" |
+            curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" -d @- >/dev/null
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-LABELS/chat/$(cat "$AFT_WORK_DIR/lblLeadId")"
+        intent: "Script the lead's two agent_create calls and two working children, and open the lead's chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "The operator waits until the lead's chat is ready"
+      - run: |
+          set -e
+          agent-browser --session "$AFT_SESSION" eval "sessionStorage.removeItem('aft-lbl-colours')" >/dev/null
+          "$AFT_WORK_DIR/lbl-watch-install"
+        intent: "Start watching the page for raw Execute code before the operator sends the message"
+      - fill: { label: Message, value: "start two workers" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const w = window.__aftLbl; if (!w || w.st.raw) return false;
+              const m = document.querySelectorAll('[data-testid=started-marker]');
+              const ks = w.kids().map((k) => k.name);
+              const calls = m[0]?.querySelector('button[aria-expanded]');
+              const t = (document.querySelector('[data-testid=chat-transcript]')?.textContent || '');
+              return m.length === 1 && ks.join(',') === 'lbl-${RUN_ID:-local}-alpha,lbl-${RUN_ID:-local}-bravo' &&
+                /^2 tool calls/.test((calls?.textContent || '').trim()) && calls.getAttribute('aria-expanded') === 'false' &&
+                (m[0].textContent || '').replace(/\s+/g, ' ').includes('Started') &&
+                t.includes('AGV1-LBL-STARTED') && !t.includes('tools.loom') && !t.includes('"code"') &&
+                !document.querySelector('[data-testid=tool-call]'); })()
+        budget: 90000
+        intent: "The operator waits until one Started marker names both children in order with 2 tool calls folded behind it, no tool row or code shows, and no raw Execute input ever showed"
+      - wait:
+          fn: >-
+            (() => { const w = window.__aftLbl; if (!w || w.st.raw) return false;
+              const t = document.querySelector('[data-testid=agent-tray]')?.textContent || '';
+              return t.includes('2 agents · 2 running') && w.same(['marker', 'tray', 'side']); })()
+        budget: 90000
+        intent: "The operator waits until, while both children work, each child's avatar has one colour in the Started marker, the tray and the sidebar"
+      - click: { selector: "[data-testid=started-marker] button[aria-expanded]" }
+      - wait:
+          fn: >-
+            (() => { const w = window.__aftLbl; if (!w || w.st.raw) return false;
+              const rows = Array.from(document.querySelectorAll('[data-testid=chat-transcript] [data-testid=tool-call]'));
+              const heads = rows.map((r) => r.querySelector('[role=button]'));
+              return rows.length === 2 && heads.every((h) => !!h && h.getAttribute('aria-expanded') === 'false' &&
+                /^Started\b/.test(h.getAttribute('aria-label') || '') && !/tools\.loom|"code"|agent_create|Execute/.test(h.getAttribute('aria-label') || '')) &&
+                rows.every((r) => !/tools\.loom|"code"|agent_create/.test(r.textContent || '')); })()
+        intent: "The operator, expanding the marker, sees the two calls as two Started rows whose headers hold no code"
+      - click: { selector: "[data-testid=chat-transcript] [data-testid=tool-call] [role=button][aria-expanded=false]" }
+      - wait:
+          fn: >-
+            (() => { const w = window.__aftLbl; if (!w || w.st.raw) return false;
+              const rows = Array.from(document.querySelectorAll('[data-testid=chat-transcript] [data-testid=tool-call]'));
+              return rows.length === 2 && (rows[0].textContent || '').includes('tools.loom.agent_create(') &&
+                (rows[0].textContent || '').includes('lbl-${RUN_ID:-local}-alpha') && !(rows[0].textContent || '').includes('lbl-${RUN_ID:-local}-bravo') &&
+                !(rows[1].textContent || '').includes('tools.loom'); })()
+        intent: "The operator, opening the first call, sees its code (the first child's agent_create), and only that row's"
+      - click: { selector: "[data-testid=chat-transcript] [data-testid=tool-call] [role=button][aria-expanded=false]" }
+      - wait:
+          fn: >-
+            (() => { const w = window.__aftLbl; if (!w || w.st.raw) return false;
+              const rows = Array.from(document.querySelectorAll('[data-testid=chat-transcript] [data-testid=tool-call]'));
+              return rows.length === 2 && (rows[1].textContent || '').includes('tools.loom.agent_create(') &&
+                (rows[1].textContent || '').includes('lbl-${RUN_ID:-local}-bravo') && !(rows[1].textContent || '').includes('lbl-${RUN_ID:-local}-alpha') &&
+                !/Execute\s*\{\s*"code"/.test(document.body.innerText); })()
+        intent: "The operator, opening the second call, sees the second child's agent_create code, and still no raw Execute input"
+      - run: |
+          set -e
+          lead="$(cat "$AFT_WORK_DIR/lblLeadId")" api="$AFT_BASE_URL/api/workspaces/E2E-AGV1-LABELS/v1/agents"
+          # Each child's next turn and the lead's answer to each result are one
+          # short line, whichever takes a step first (two spare steps, so a
+          # retried request never finds the queue empty).
+          printf '{"steps":[{"next":"prompt","text":"AGV1-LBL-DONE"},{"next":"prompt","text":"AGV1-LBL-DONE"},{"next":"prompt","text":"AGV1-LBL-DONE"},{"next":"prompt","text":"AGV1-LBL-DONE"},{"next":"prompt","text":"AGV1-LBL-DONE"},{"next":"prompt","text":"AGV1-LBL-DONE"}]}' |
+            curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" -d @- >/dev/null
+          for n in alpha bravo; do
+            id="$(curl -sf "$api?parent=$lead" | python3 -c 'import json,sys; print([a["agent_id"] for a in json.load(sys.stdin)["agents"] if a["name"] == sys.argv[1]][0])' "lbl-${RUN_ID:-local}-$n")"
+            curl -sf -X POST "$api/$id/messages" -H "Content-Type: application/json" \
+              -H "Idempotency-Key: agv1-lbl-finish-$n-${RUN_ID:-local}" -d '{"text":"wrap up now","delivery":"interrupt"}' >/dev/null
+          done
+        intent: "The operator's API client tells both children to wrap up now, interrupting their held turns; each child's next turn finishes its task and the Lead acknowledges each result"
+      - wait:
+          fn: >-
+            (() => { const w = window.__aftLbl; if (!w || w.st.raw) return false;
+              const r = Array.from(document.querySelectorAll('[data-testid=completion-record]'));
+              const one = (n) => r.filter((e) => (e.textContent || '').includes(n)).length === 1;
+              return r.length === 2 && one('lbl-${RUN_ID:-local}-alpha') && one('lbl-${RUN_ID:-local}-bravo') &&
+                r.every((e) => e.dataset.outcome === 'completed' && (e.textContent || '').includes('✓ done') &&
+                  e.dataset.delivery === 'delivered') && !document.querySelector('[data-testid=agent-tray]') &&
+                w.same(['marker', 'card']); })()
+        budget: 90000
+        intent: "The operator sees one ✓ done result card per child, both read by the Lead, the tray gone, and each card's avatar in its child's colour"
+      - run: |
+          set -e
+          # A fresh window, its watcher registered before the page's first
+          # script runs, so the replay is watched from its first frame.
+          ab() { agent-browser --session "$AFT_SESSION" "$@"; }
+          fresh="lbl-replay-${RUN_ID:-local}-$$"
+          echo "$fresh" > "$AFT_WORK_DIR/lbl-replay-session"
+          saved="$(ab eval "sessionStorage.getItem('aft-lbl-colours')")"
+          echo "saved colours: $saved"
+          url="$AFT_BASE_URL/ws/E2E-AGV1-LABELS/chat/$(cat "$AFT_WORK_DIR/lblLeadId")"
+          agent-browser --session "$fresh" --init-script "$AFT_WORK_DIR/lbl-watch.js" open "$url" >/dev/null
+          trap 'agent-browser --session "$fresh" close >/dev/null 2>&1 || true' EXIT
+          check="(() => { const w = window.__aftLbl; if (!w) return 'pending';
+            const sv = $saved; if (!sessionStorage.getItem('aft-lbl-colours')) sessionStorage.setItem('aft-lbl-colours', typeof sv === 'string' ? sv : JSON.stringify(sv));
+            if (w.st.raw) return 'RAW';
+            const m = document.querySelectorAll('[data-testid=started-marker]');
+            const calls = m[0]?.querySelector('button[aria-expanded]');
+            const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+            const ok = m.length === 1 && w.kids().map((k) => k.name).join(',') === 'lbl-${RUN_ID:-local}-alpha,lbl-${RUN_ID:-local}-bravo' &&
+              /^2 tool calls/.test((calls?.textContent || '').trim()) &&
+              document.querySelectorAll('[data-testid=completion-record][data-outcome=completed]').length === 2 &&
+              !t.includes('tools.loom') && !t.includes('agent_create') && w.same(['marker', 'card']);
+            return ok ? 'OK:' + w.st.checks : 'pending'; })()"
+          b64="$(printf '%s' "$check" | base64 | tr -d '\n')"
+          # The browser awaits the replay (each wait is bounded by agent-browser's
+          # default timeout; at most six in all).
+          for i in 1 2 3 4 5 6; do
+            agent-browser --session "$fresh" wait --fn "$check !== 'pending'" >/dev/null 2>&1 && break
+          done
+          out="$(agent-browser --session "$fresh" eval -b "$b64" 2>&1 || true)"
+          case "$out" in *RAW*) echo "raw Execute input showed while the chat replayed" >&2; exit 1 ;; esac
+          echo "replay: $out"
+          case "$out" in *OK:*) ;; *) echo "the replay never settled: $out" >&2; exit 1 ;; esac
+        intent: "The operator opens the lead's chat in a fresh window: watched from its first frame, the replay never shows raw Execute input, and shows one Started marker with both children and 2 tool calls, two ✓ done cards, and each child in the colour it had before"
+      - reload: true
+      - run: '"$AFT_WORK_DIR/lbl-watch-install"'
+        intent: "Watch the operator's reloaded page for raw Execute code"
+      - wait:
+          fn: >-
+            (() => { const w = window.__aftLbl; if (!w || w.st.raw) return false;
+              return document.querySelectorAll('[data-testid=started-marker]').length === 1 &&
+                document.querySelectorAll('[data-testid=completion-record]').length === 2 &&
+                !/Execute\s*\{\s*"code"/.test(document.body.innerText) && w.same(['marker', 'card']); })()
+        intent: "The operator, reloading the lead's chat, sees each child in the colour it had before the reload and no raw code"
+      - click: { selector: "[data-testid=started-marker] a:nth-of-type(1)" }
+      - wait:
+          fn: >-
+            (() => { const w = window.__aftLbl; if (!w || w.st.raw) return false;
+              const s = JSON.parse(sessionStorage.getItem('aft-lbl-colours') || '{}');
+              const id = location.pathname.split('/chat/')[1];
+              const nav = document.querySelector('nav[aria-label=Agents] a[href$="/chat/' + id + '"]');
+              const side = nav?.querySelector('[data-agent-color]'), av = side?.querySelector('[aria-label$=" avatar"]');
+              return !!s[id] && (document.querySelector('[aria-label="Agent chat"] header')?.textContent || '').includes('lbl-${RUN_ID:-local}-alpha') &&
+                nav.getAttribute('aria-current') === 'page' && !!av &&
+                side.getAttribute('data-agent-color') + '|' + getComputedStyle(av).backgroundColor === s[id]; })()
+        intent: "The operator, opening the first child from its Started marker, sees it in the sidebar in the colour it had before the reload"
+      - click: { selector: "nav[aria-label=Agents] a[aria-label^='agv1-lbl-lead-${RUN_ID:-local} ']" }
+      - wait:
+          fn: >-
+            (() => location.pathname.endsWith('/chat/' + document.querySelector('nav[aria-label=Agents] a[aria-label^="agv1-lbl-lead-${RUN_ID:-local} "]')?.getAttribute('href')?.split('/chat/')[1]) &&
+              document.querySelectorAll('[data-testid=started-marker] a').length === 2)()
+        intent: "The operator goes back to the lead's chat from the sidebar"
+      - click: { selector: "[data-testid=started-marker] a:nth-of-type(2)" }
+      - wait:
+          fn: >-
+            (() => { const w = window.__aftLbl; if (!w || w.st.raw) return false;
+              const s = JSON.parse(sessionStorage.getItem('aft-lbl-colours') || '{}');
+              const id = location.pathname.split('/chat/')[1];
+              const nav = document.querySelector('nav[aria-label=Agents] a[href$="/chat/' + id + '"]');
+              const side = nav?.querySelector('[data-agent-color]'), av = side?.querySelector('[aria-label$=" avatar"]');
+              return !!s[id] && (document.querySelector('[aria-label="Agent chat"] header')?.textContent || '').includes('lbl-${RUN_ID:-local}-bravo') &&
+                nav.getAttribute('aria-current') === 'page' && !!av &&
+                side.getAttribute('data-agent-color') + '|' + getComputedStyle(av).backgroundColor === s[id]; })()
+        intent: "The operator, opening the second child from its Started marker, sees it in the sidebar in the colour it had before the reload"
+
+  - name: I3 EF1 effort label - every wired harness's catalog and the composer's picker call the effort option Effort, never Variant, Reasoning or Xhigh
+    intent: The composer's picker (an API client of the Agent API) reads each wired harness's model catalog, and an operator opens the effort picker in a lead's composer. Every effort option is labelled "Effort", never "Variant" or "Reasoning"; no choice reads "Xhigh", and an xhigh choice, where a harness offers one, reads "Extra High". The picker's menu is headed "Effort" and lists the catalog's choices.
+    steps:
+      - run: |
+          set -e
+          base="$AFT_BASE_URL/api/workspaces/E2E-AGV1-LABELS/v1/harnesses"
+          # A harness the server does not run is refused with the ones it does.
+          curl -s "$base/aft-no-such-harness/models" > "$AFT_WORK_DIR/ef1-wired.json"
+          python3 - "$AFT_WORK_DIR/ef1-wired.json" > "$AFT_WORK_DIR/ef1-wired.txt" <<'PY'
+          import json, sys
+          e = json.load(open(sys.argv[1]))
+          assert e.get("code") == "harness_unavailable" and e.get("allowed"), e
+          assert "opencode" in e["allowed"], e
+          print("\n".join(e["allowed"]))
+          PY
+          echo "wired harnesses: $(tr '\n' ' ' < "$AFT_WORK_DIR/ef1-wired.txt")"
+          for h in $(cat "$AFT_WORK_DIR/ef1-wired.txt"); do
+            curl -sf "$base/$h/models" > "$AFT_WORK_DIR/ef1-$h.json"
+            python3 - "$h" "$AFT_WORK_DIR/ef1-$h.json" <<'PY'
+          import json, sys
+          h, cat = sys.argv[1], json.load(open(sys.argv[2]))
+          assert cat["harness"] == h, cat
+          models = [m for p in cat["providers"] for m in p["models"]]
+          effort = [(m["id"], d) for m in models for d in m["option_descriptors"] if d["id"] == "effort"]
+          if h == "opencode":
+              assert effort, "opencode lists no effort option: %s" % models
+          xhigh = 0
+          for mid, d in effort:
+              assert d["label"] == "Effort", "%s %s: effort label %r" % (h, mid, d["label"])
+              for c in d.get("options") or []:
+                  assert c["label"] != "Xhigh", "%s %s: choice %r" % (h, mid, c)
+                  if c["id"] == "xhigh":
+                      xhigh += 1
+                      assert c["label"] == "Extra High", "%s %s: xhigh label %r" % (h, mid, c["label"])
+          labels = [d["label"] for m in models for d in m["option_descriptors"]]
+          assert not any(l in ("Variant", "Reasoning") for l in labels), "%s: option labels %r" % (h, labels)
+          print("%s: %d effort options, %d xhigh choices" % (h, len(effort), xhigh))
+          PY
+          done
+          # The picker shows the default opencode model's choices, in order.
+          python3 -c 'import json,sys
+          cat = json.load(open(sys.argv[1]))
+          m = [m for p in cat["providers"] for m in p["models"] if m["is_default"]][0]
+          print("|".join(o["label"] for d in m["option_descriptors"] if d["id"] == "effort" for o in d["options"]))' \
+            "$AFT_WORK_DIR/ef1-opencode.json" > "$AFT_WORK_DIR/ef1-choices.txt"
+          echo "opencode default model effort choices: $(cat "$AFT_WORK_DIR/ef1-choices.txt")"
+          grep -q '"id": *"xhigh"' "$AFT_WORK_DIR"/ef1-*.json ||
+            echo "xhigh: no wired harness offers it on this stack, so its Extra High label is unverified here (the Go table test TestEffortLabelEveryHarness covers it)"
+        intent: "The composer's picker, as an API client, reads every wired harness's catalog: each effort option is labelled Effort, never Variant or Reasoning, and no choice reads Xhigh (an xhigh choice reads Extra High)"
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-LABELS/v1/agents
+          headers: { Idempotency-Key: "agv1-lbl-ef1-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-lbl-ef1-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-labels-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: ef1LeadId
+        intent: "The operator's API client creates an OpenCode lead through the Agent API"
+      - run: |
+          set -e
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-LABELS/chat/$(cat "$AFT_WORK_DIR/ef1LeadId")"
+          # The wait below compares the picker with the catalog's labels.
+          agent-browser --session "$AFT_SESSION" eval "sessionStorage.setItem('aft-ef1-choices', $(python3 -c 'import json,sys; print(json.dumps(open(sys.argv[1]).read().strip()))' "$AFT_WORK_DIR/ef1-choices.txt"))" >/dev/null
+        intent: "Open the lead's chat"
+      - wait:
+          fn: >-
+            (() => { const b = document.querySelector('[data-chat-traits-picker]');
+              return document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode' && !!b &&
+                /^Effort: /.test(b.getAttribute('aria-label') || ''); })()
+        intent: "The operator waits until the composer's effort control is labelled Effort"
+      - click: { selector: "[data-chat-traits-picker]" }
+      - wait:
+          fn: >-
+            (() => { const menu = document.querySelector('[role=menu]');
+              const g = menu ? Array.from(menu.querySelectorAll('[role=group]')) : [];
+              const items = g[0] ? Array.from(g[0].querySelectorAll('[role=menuitemradio]')).map((i) => (i.textContent || '').replace(/Default$/, '').trim()) : [];
+              const text = menu?.textContent || '';
+              return g.length === 1 && g[0].getAttribute('aria-label') === 'Effort' && text.startsWith('Effort') &&
+                items.length > 0 && items.join('|') === sessionStorage.getItem('aft-ef1-choices') &&
+                !/Variant|Reasoning|Xhigh/.test(text); })()
+        intent: "The operator waits until the operator's open picker is headed Effort and lists exactly the catalog's choices, with no Variant, Reasoning or Xhigh"
+
+  - name: I4 SK1 skip link - the skip link is off-screen on load and after a mouse click, and shows only when the first Tab reaches it; Enter moves focus into main
+    intent: An operator loads the app and sees no "Skip to main content" link, nor after clicking in the page; a keyboard user's first Tab shows it, and Enter takes the next Tab into the main content, after which the link is off-screen again
+    steps:
+      - open: /ws/E2E-AGV1-LABELS/agents
+      - wait:
+          fn: >-
+            (() => { const a = document.querySelector('a[href="#main-content"]'), m = document.querySelector('main#main-content');
+              if (!a || !m) return false;
+              const r = a.getBoundingClientRect();
+              const sw = Array.from(document.querySelectorAll('[aria-label="Workspace selector"] button')).some((b) => /^Switch to /.test(b.getAttribute('aria-label') || b.textContent || ''));
+              return sw && (a.textContent || '').trim() === 'Skip to main content' && document.activeElement === document.body &&
+                (r.bottom <= 0 || r.right <= 0 || r.top >= innerHeight || r.left >= innerWidth); })()
+        intent: "The operator waits until, on a fresh load with nothing focused, the skip link is in the page but fully off-screen"
+      - run: |
+          set -e
+          ab() { agent-browser --session "$AFT_SESSION" "$@"; }
+          xy="$(ab eval "(() => { const b = document.querySelector('main#main-content').getBoundingClientRect(); return Math.round(b.right - 5) + ' ' + Math.round(b.bottom - 5); })()" | tr -d '"')"
+          echo "click at $xy"
+          ab mouse move $xy >/dev/null
+          ab mouse down >/dev/null
+          ab mouse up >/dev/null
+        intent: "The operator clicks inside the main content with the mouse"
+      - run: |
+          set -e
+          # sk1-state [focus]: the skip link's state once its CSS transition has
+          # settled, optionally after focusing it from script (not the keyboard).
+          cat > "$AFT_WORK_DIR/sk1-state.js" <<'JS'
+          (async () => { const a = document.querySelector('a[href="#main-content"]');
+            if (__FOCUS__) a.focus();
+            await new Promise(requestAnimationFrame);
+            const settled = await Promise.race([Promise.all(a.getAnimations().map((x) => x.finished)).then(() => true), new Promise((r) => setTimeout(() => r(false), 2000))]);
+            if (!settled) return JSON.stringify({ error: 'the skip link transition did not settle in 2s' });
+            const r = a.getBoundingClientRect();
+            return JSON.stringify({ focused: document.activeElement === a, focusVisible: a.matches(':focus-visible'),
+              off: r.bottom <= 0 || r.right <= 0 || r.top >= innerHeight || r.left >= innerWidth,
+              on: r.top >= 0 && r.left >= 0 && r.bottom <= innerHeight && r.right <= innerWidth && r.height > 0,
+              top: r.top, bottom: r.bottom, active: document.activeElement?.tagName }); })()
+          JS
+          state() { sed "s/__FOCUS__/$1/" "$AFT_WORK_DIR/sk1-state.js" > "$AFT_WORK_DIR/sk1-state.run.js"
+            agent-browser --session "$AFT_SESSION" eval -b "$(base64 < "$AFT_WORK_DIR/sk1-state.run.js" | tr -d '\n')"; }
+          clicked="$(state false)"; echo "after click: $clicked"
+          python3 -c 'import json,sys; s=json.loads(json.loads(sys.argv[1])); assert "error" not in s, s
+          assert not s["focused"] and s["off"], "skip link shown or focused after a mouse click: %s" % s' "$clicked"
+          focused="$(state true)"; echo "after script focus: $focused"
+          python3 -c 'import json,sys; s=json.loads(json.loads(sys.argv[1])); assert "error" not in s, s
+          assert s["focused"], s
+          # Only :focus-visible may bring the link in: shown exactly when it matches.
+          assert s["on"] == s["focusVisible"] and s["off"] != s["focusVisible"], "skip link visibility does not follow :focus-visible: %s" % s' "$focused"
+        intent: "Check that, after the operator's mouse click, the skip link stays off-screen and unfocused, and that focusing it without the keyboard shows it only if the browser marks that focus visible"
+      - reload: true
+      - wait:
+          fn: >-
+            (() => { const a = document.querySelector('a[href="#main-content"]');
+              const sw = Array.from(document.querySelectorAll('[aria-label="Workspace selector"] button')).some((b) => /^Switch to /.test(b.getAttribute('aria-label') || b.textContent || ''));
+              if (!a || !sw) return false;
+              const r = a.getBoundingClientRect();
+              return document.activeElement === document.body && (r.bottom <= 0 || r.right <= 0 || r.top >= innerHeight || r.left >= innerWidth); })()
+        intent: "The operator waits until a fresh load again shows no skip link and nothing focused"
+      - press: Tab
+      - wait:
+          fn: >-
+            (() => { const a = document.querySelector('a[href="#main-content"]');
+              const r = a?.getBoundingClientRect();
+              return !!a && document.activeElement === a && a.matches(':focus-visible') &&
+                r.top >= 0 && r.left >= 0 && r.bottom <= innerHeight && r.right <= innerWidth && r.height > 0 &&
+                document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === a; })()
+        intent: "The operator waits until the keyboard user's first Tab focuses the skip link and shows it fully on-screen, on top"
+      - press: Enter
+      - wait:
+          fn: >-
+            location.hash === '#main-content'
+        intent: "The operator waits until Enter follows the skip link to the main content"
+      - press: Tab
+      - wait:
+          fn: >-
+            (() => { const a = document.querySelector('a[href="#main-content"]'), m = document.querySelector('main#main-content');
+              const r = a.getBoundingClientRect();
+              return m !== document.activeElement && m.contains(document.activeElement) &&
+                (r.bottom <= 0 || r.right <= 0 || r.top >= innerHeight || r.left >= innerWidth); })()
+        intent: "The operator waits until the next Tab lands inside the main content and the skip link is off-screen again"
