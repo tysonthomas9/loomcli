@@ -21,3 +21,19 @@
 .override input {
   min-width: 12rem;
 }
+.split {
+  position: relative;
+  display: inline-flex;
+  gap: 1px;
+}
+.menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  margin-top: 0.25rem;
+  background: var(--bg-color, #fff);
+  border: 1px solid var(--border-color, #ddd);
+}

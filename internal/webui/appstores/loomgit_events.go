@@ -3,6 +3,7 @@ package appstores
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/outbox"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/publish"
+	"github.com/tysonthomas9/loomcli/internal/stackstore"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/realtime"
 )
 
@@ -91,6 +93,9 @@ func runLoomGitEvents(ctx context.Context, hub *realtime.Hub, logger *slog.Logge
 	}
 }
 
+// reconcileApprovals retries Approve and create PR intents; tests replace it.
+var reconcileApprovals = publish.ReconcileApprovalPublicationsAt
+
 func dispatchLoomGitEvents(ctx context.Context, path string, sink loomGitEventSink) error {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return nil
@@ -106,5 +111,6 @@ func dispatchLoomGitEvents(ctx context.Context, path string, sink loomGitEventSi
 	if err := outbox.Dispatch(ctx, store, sink); err != nil {
 		return err
 	}
-	return publish.ReconcileEpicPublicationsAt(ctx, path)
+	epicErr := publish.ReconcileEpicPublicationsAt(ctx, path)
+	return errors.Join(epicErr, reconcileApprovals(ctx, path, stackstore.Declared()))
 }

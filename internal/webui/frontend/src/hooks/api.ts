@@ -20,6 +20,7 @@
 export * from "@/api";
 export {
   applyRevision,
+  createRevisionPR,
   getRevisionDiff,
   getTaskDiff,
   getTaskRevisions,

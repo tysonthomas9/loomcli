@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   applyRevision,
+  createRevisionPR,
   getTaskRevisions,
   submitRevisionVerdict,
   type ReviewRevision,
@@ -45,6 +46,7 @@ export function RevisionsSection({
   const [override, setOverride] = useState("");
   const [reason, setReason] = useState("");
   const [follow, setFollow] = useState<Record<string, string>>({});
+  const [menu, setMenu] = useState("");
 
   useEffect(() => {
     if (snapshot) {
@@ -79,18 +81,23 @@ export function RevisionsSection({
     revision: ReviewRevision,
     verdict: "approve" | "reject" | "override",
     detail = "",
+    approveOnly?: boolean,
   ) {
     const key = `${revision.change_id}:${revision.number}`;
     setBusy(key);
+    setMenu("");
     setError("");
     try {
-      const status = await submitRevisionVerdict(
-        workspaceId,
-        revision,
-        verdict,
-        detail,
-        lead,
-      );
+      const status = await (verdict === "approve"
+        ? submitRevisionVerdict(
+            workspaceId,
+            revision,
+            verdict,
+            detail,
+            lead,
+            Boolean(approveOnly),
+          )
+        : submitRevisionVerdict(workspaceId, revision, verdict, detail, lead));
       if (status) setFollow((prev) => ({ ...prev, [key]: status }));
       if (!controlled)
         setRevisions(await getTaskRevisions(workspaceId, taskId, lead));
@@ -100,6 +107,23 @@ export function RevisionsSection({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not record verdict");
     } finally {
+      setBusy("");
+    }
+  }
+
+  // Create PR for an approved change that is applied but has no PR yet.
+  async function createPR(revision: ReviewRevision) {
+    if (!lead) return;
+    const key = `${revision.change_id}:${revision.number}`;
+    setBusy(key);
+    setError("");
+    try {
+      await createRevisionPR(workspaceId, lead, revision.change_id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create the PR");
+    } finally {
+      // The PR, or why it is still missing, comes from the server.
+      setRevisions(await getTaskRevisions(workspaceId, taskId, lead));
       setBusy("");
     }
   }
@@ -175,6 +199,16 @@ export function RevisionsSection({
           follow[key] !== undefined
             ? follow[key] === "approved_waiting_for_working_area"
             : Boolean(revision.needs_working_area);
+        const prOpen = Boolean(revision.pr_number);
+        const approved =
+          revision.verdict === "approve" ||
+          revision.verdict === "override" ||
+          revision.verdict === "policy" ||
+          // A revision Apply derived onto a moved working area carries the approval.
+          revision.verdict === "carried";
+        // InWorkingArea: approved and applied with no PR yet (Approve only,
+        // or Approve and create PR that could not publish).
+        const canCreatePR = approved && revision.applied && !prOpen;
         return (
           <div className={styles.revision} key={key}>
             <div>
@@ -203,14 +237,72 @@ export function RevisionsSection({
               </div>
             )}
             {revision.applied && <div>Applied</div>}
+            {prOpen && (
+              <div data-testid="revision-pr">
+                PR{" "}
+                <a href={revision.pr_url} target="_blank" rel="noreferrer">
+                  #{revision.pr_number}
+                </a>{" "}
+                is open
+              </div>
+            )}
+            {!prOpen && revision.publish_reason && (
+              <div data-testid="revision-publish-status">
+                {revision.publish_status === "not_published"
+                  ? revision.publish_reason
+                  : `PR not opened yet: ${revision.publish_reason}`}
+              </div>
+            )}
+            {canCreatePR && (
+              <div className={styles.actions}>
+                <button
+                  type="button"
+                  data-testid="create-pr"
+                  disabled={Boolean(busy) || !lead}
+                  onClick={() => void createPR(revision)}
+                >
+                  Create PR
+                </button>
+              </div>
+            )}
             <div className={styles.actions}>
-              <button
-                type="button"
-                disabled={disabled || decided}
-                onClick={() => void decide(revision, "approve")}
-              >
-                Approve
-              </button>
+              <span className={styles.split}>
+                <button
+                  type="button"
+                  data-testid="approve-create-pr"
+                  disabled={disabled || decided}
+                  onClick={() => void decide(revision, "approve", "", false)}
+                >
+                  {prOpen ? "Approve" : "Approve and create PR"}
+                </button>
+                {/* No "Approve only" once the PR is open (D29). */}
+                {!prOpen && (
+                  <button
+                    type="button"
+                    aria-label="More approve options"
+                    aria-haspopup="menu"
+                    aria-expanded={menu === key}
+                    data-testid="approve-menu-toggle"
+                    disabled={disabled || decided}
+                    onClick={() => setMenu(menu === key ? "" : key)}
+                  >
+                    ▾
+                  </button>
+                )}
+                {menu === key && !prOpen && !decided && (
+                  <span role="menu" className={styles.menu}>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      data-testid="approve-only"
+                      disabled={disabled}
+                      onClick={() => void decide(revision, "approve", "", true)}
+                    >
+                      Approve only
+                    </button>
+                  </span>
+                )}
+              </span>
               <button
                 type="button"
                 disabled={disabled || decided}

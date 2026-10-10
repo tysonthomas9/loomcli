@@ -79,6 +79,9 @@ type Verdict struct {
 	HeadSHA, Kind, ActorKind, ActorID, Reason string
 	TargetLead                                string
 	SourceVerdictID                           int64
+	// Publish asks for the change's PR to open as soon as the approval is
+	// applied in TargetLead's working area (D29: Approve and create PR).
+	Publish bool
 }
 
 // WorkspaceRepo records the trunk independently of the lead's working branch.
