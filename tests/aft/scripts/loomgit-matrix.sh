@@ -507,7 +507,9 @@ approve-waits)
 
 stale)
   # stale <case> <slot> <blocker>: after the blocker was rejected, the dependent's
-  # revision is stale and the task offers a rebuild; it has no PR.
+  # revision is stale, says it rebuilds once the blocker has new code, and has no
+  # PR. There is nothing to rebuild on yet, so no Rebuild is offered (rebuild_on
+  # is set only when the blocker records a new revision; see rebuild-offer).
   slot="$1" blocker="$2"
   # A truthy stale flag or a status/reason saying stale; a "stale": false field does not count.
   is_stale() {
@@ -523,11 +525,25 @@ assert hit(v), v'
   }
   wait_until 30 "$slot is stale after $blocker was rejected: $(cat "$work/rev-$slot.json" 2> /dev/null | head -c 600)" is_stale
   [[ -z "$(pull_field "$slot" number)" ]] || fail "stale $slot has a PR"
+  json "$work/rev-$slot.json" 'r=str(v.get("lineage_reason") or ""); assert "new code" in r, v; assert not v.get("rebuild_on"), v'
+  open_task "$slot"
+  rebuild() { browser eval "[...document.querySelectorAll('button')].some(b => /rebuild/i.test(b.textContent) && !b.disabled)" | grep -q true; }
+  ! rebuild || fail "stale $slot offers a rebuild before $blocker has new code"
+  browser screenshot "$work/stale-$slot.png" > /dev/null
+  say "$slot is stale until $blocker has new code"
+  ;;
+
+rebuild-offer)
+  # rebuild-offer <case> <slot> <blocker>: once the rejected blocker records a new
+  # revision, the stale dependent names it in rebuild_on and offers Rebuild.
+  slot="$1" blocker="$2"
+  has_target() { revisions "$slot"; json "$work/rev-$slot.json" 'assert v.get("rebuild_on"), v'; }
+  wait_until 30 "$slot names a revision of $blocker to rebuild on: $(head -c 600 "$work/rev-$slot.json" 2> /dev/null)" has_target
   open_task "$slot"
   rebuild() { browser eval "[...document.querySelectorAll('button')].some(b => /rebuild/i.test(b.textContent) && !b.disabled)" | grep -q true; }
   wait_until 20 "task $slot offers a rebuild" rebuild
-  browser screenshot "$work/stale-$slot.png" > /dev/null
-  say "$slot is stale and offers a rebuild"
+  browser screenshot "$work/rebuild-offer-$slot.png" > /dev/null
+  say "$slot offers a rebuild on $blocker's new code"
   ;;
 
 native-unavailable)

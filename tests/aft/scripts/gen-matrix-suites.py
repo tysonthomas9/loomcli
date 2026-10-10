@@ -275,8 +275,10 @@ def variants(real=False):
     st = setup(c) + settings(c, "stack", "off", "off")
     st += run(f"chain {c} a b:a", "API client creates A and B (blocked by A) in one epic and starts it") + wait_rev(c, "a") + wait_rev(c, "b") + \
         reject_ui(c, "a") + run(f"reject {c} a", "A is open again with a reject verdict and no PR") + \
-        run(f"stale {c} b a", "B, built on the rejected A, is stale, has no PR and offers a rebuild")
-    out += case("D2 Rejecting a blocker makes its dependent stale", "Rejecting A marks B, which ran on A's revision, stale with a rebuild offer", st, needs=True)
+        run(f"stale {c} b a", "B, built on the rejected A, is stale until A has new code; it has no PR and no Rebuild yet") + \
+        run(f"rerun {c} a", "The epic runner runs A again") + wait_rev(c, "a") + \
+        run(f"rebuild-offer {c} b a", "With A's new revision recorded, B offers Rebuild on it")
+    out += case("D2 Rejecting a blocker makes its dependent stale", "Rejecting A marks B, which ran on A's revision, stale until A has new code; once A reruns, B offers a rebuild", st, needs=True)
 
     c = "d3"
     st = setup(c) + settings(c, "stack", "off", "off")
