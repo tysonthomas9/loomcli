@@ -140,26 +140,44 @@ func recordTaskApproval(ctx context.Context, store *review.Local, workspace stri
 }
 
 // checkTaskApproval refuses the whole approval before anything is recorded
-// when a revision is stale, a repo is left out, or several repos have no
-// working area to apply to: nothing could check them together, so none is
-// approved. One repo keeps its PR intent and publishes when it applies.
+// when a revision is stale, a repo is left out, or, for several repos, any
+// repo has no working area of the lead to apply to: nothing could check them
+// together, so none is approved. One repo keeps its PR intent and publishes
+// when it applies.
 func checkTaskApproval(ctx context.Context, store *review.Local, workspace, task string,
 	body taskApprovalRequest) (map[string]string, bool, error) {
 	repos, err := taskApprovalRepos(ctx, store, workspace, task, body)
 	if err != nil {
 		return nil, false, err
 	}
-	available, err := hasWorkingArea(ctx, store, workspace, body.Lead)
+	if len(body.Revisions) == 1 {
+		available, err := hasWorkingArea(ctx, store, workspace, body.Lead)
+		return repos, available, err
+	}
+	areas, err := workingAreaRepos(ctx, store, workspace, body.Lead)
 	if err != nil {
 		return nil, false, err
 	}
-	if !available && len(body.Revisions) > 1 {
-		first := repos[body.Revisions[0].ChangeID]
-		return nil, false, &approvalRefusal{Code: "no_working_area", Repo: first,
-			Message: first + ": " + body.Lead + " has no working area to apply to yet. No repo is approved; " +
-				"approve again once it has one."}
+	for _, r := range body.Revisions {
+		if repo := repos[r.ChangeID]; !areas[repo] {
+			return nil, false, &approvalRefusal{Code: "no_working_area", Repo: repo,
+				Message: repo + ": " + body.Lead + " has no working area for this repo to apply to yet. No repo is approved; " +
+					"approve again once it has one."}
+		}
 	}
-	return repos, available, nil
+	return repos, true, nil
+}
+
+// workingAreaRepos names the repos the lead has a working area for.
+var workingAreaRepos = func(ctx context.Context, store *review.Local, workspace, lead string) (map[string]bool, error) {
+	areas, err := store.WorkingAreas(ctx, workspace, lead)
+	repos := map[string]bool{}
+	for _, area := range areas {
+		if area.Path != "" {
+			repos[area.Repo] = true
+		}
+	}
+	return repos, err
 }
 
 func writeApprovalRefusal(w http.ResponseWriter, r *approvalRefusal) {

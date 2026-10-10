@@ -74,6 +74,11 @@ func TestTaskApprovalPublishesAllReposOrNone(t *testing.T) {
 	t.Cleanup(func() {
 		followApproved, hasWorkingArea, publishApproved = previousFollow, previousArea, previousPublish
 	})
+	previousAreas := workingAreaRepos
+	t.Cleanup(func() { workingAreaRepos = previousAreas })
+	workingAreaRepos = func(context.Context, *review.Local, string, string) (map[string]bool, error) {
+		return map[string]bool{"alpha": true, "beta": true}, nil
+	}
 	hasWorkingArea = func(context.Context, *review.Local, string, string) (bool, error) { return true, nil }
 	var followed apply.FollowResult
 	var followErr error
@@ -157,15 +162,15 @@ func TestTaskApprovalRefusesAStaleRevision(t *testing.T) {
 
 // TestTaskApprovalRefusesBeforeRecording pins the two whole-task refusals:
 // a request that leaves out a repo still without a PR, and several repos
-// while the lead has no working area. Neither records a verdict or a PR
-// intent, and both name the repo.
+// when the lead has no working area for one of them. Neither records a
+// verdict or a PR intent, and both name the repo.
 func TestTaskApprovalRefusesBeforeRecording(t *testing.T) {
 	revisions := freezeTwoRepoTask(t)
 	alpha, beta := revisions[0], revisions[1]
-	previousArea := hasWorkingArea
-	t.Cleanup(func() { hasWorkingArea = previousArea })
-	available := true
-	hasWorkingArea = func(context.Context, *review.Local, string, string) (bool, error) { return available, nil }
+	previousAreas := workingAreaRepos
+	t.Cleanup(func() { workingAreaRepos = previousAreas })
+	areas := map[string]bool{"alpha": true, "beta": true}
+	workingAreaRepos = func(context.Context, *review.Local, string, string) (map[string]bool, error) { return areas, nil }
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/revisions", handleTaskRevisions)
 	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/approval", func(w http.ResponseWriter, r *http.Request) {
@@ -200,13 +205,21 @@ func TestTaskApprovalRefusesBeforeRecording(t *testing.T) {
 	}
 	nothingRecorded()
 
-	available = false
+	// The lead has a working area for alpha but none for beta.
+	areas = map[string]bool{"alpha": true}
 	code, response := approve(alpha, beta)
-	if code != http.StatusConflict || response["error"] != "no_working_area" || response["repo"] != "alpha" {
-		t.Fatalf("no working area = %d %v", code, response)
+	if code != http.StatusConflict || response["error"] != "no_working_area" || response["repo"] != "beta" {
+		t.Fatalf("no working area for beta = %d %v", code, response)
 	}
 	if message, _ := response["message"].(string); !strings.Contains(message, "No repo is approved") {
 		t.Fatalf("message = %q", message)
+	}
+	nothingRecorded()
+
+	// The journal's own working areas: this lead has none.
+	workingAreaRepos = previousAreas
+	if code, response := approve(alpha, beta); code != http.StatusConflict || response["error"] != "no_working_area" || response["repo"] != "alpha" {
+		t.Fatalf("no recorded working area = %d %v", code, response)
 	}
 	nothingRecorded()
 }

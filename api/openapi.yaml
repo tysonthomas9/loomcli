@@ -3818,7 +3818,8 @@ paths:
             and `repo` and `message` name the repo that did not apply),
             stale_revision, missing_repo (the request leaves out a repo of the
             task still without a PR), no_working_area (several repos and the
-            lead has no working area; nothing is recorded), or publish_failed.
+            lead has no working area for one of them, named in `repo`; nothing
+            is recorded), or publish_failed.
           content:
             application/json:
               schema:
