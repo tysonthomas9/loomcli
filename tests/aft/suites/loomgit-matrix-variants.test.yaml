@@ -503,7 +503,7 @@ tests:
           fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
         intent: The Changes panel is mounted
       - wait:
-          text: matrix-x1-b.txt
+          text: matrix-x1-a.txt
         intent: The task's file is in the diff
       - expect:
           enabled:

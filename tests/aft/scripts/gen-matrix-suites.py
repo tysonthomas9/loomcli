@@ -59,18 +59,18 @@ def reject_ui(case, slot):
     ]
 
 
-def open_changes(case, slot):
+def open_changes(case, slot, writes=None):
     return run(f"open-task {case} {slot}", f"Human opens task {slot}") + [
         "      - click:", "          role: tab", "          name: Changes", "          exact: true",
         f"        intent: {json.dumps('Human opens the Changes tab of task ' + slot)}",
         "      - wait:", "          fn: \"!!document.querySelector('[data-testid=task-changes-tab]')\"",
         "        intent: The Changes panel is mounted",
-        "      - wait:", f"          text: matrix-{case}-{slot}.txt",
+        "      - wait:", f"          text: matrix-{case}-{writes or slot}.txt",
         f"        intent: The task's file is in the diff",
     ]
 
-def human_create_pr(case, slot, base):
-    return open_changes(case, slot) + [
+def human_create_pr(case, slot, base, writes=None):
+    return open_changes(case, slot, writes) + [
         "      - expect:", "          enabled:", "            testid: approve-create-pr",
         f"        intent: {json.dumps('Approve and create PR is offered for task ' + slot)}",
         "      - click:", "          testid: approve-create-pr",
@@ -290,7 +290,7 @@ def variants(real=False):
 
     c = "x1"
     st = setup(c) + settings(c, "stack", "off", "off")
-    st += build(c, [("a", "-", ""), ("b", "a", "", "a")], {"a": human_create_pr(c, "a", "main"), "b": human_create_pr(c, "b", "a")})
+    st += build(c, [("a", "-", ""), ("b", "a", "", "a")], {"a": human_create_pr(c, "a", "main"), "b": human_create_pr(c, "b", "a", writes="a")})
     st += human_merge(c, "b") + run(f"merge-state {c} b waiting 'merges after #A'", "B's Approve and merge waits for A") + \
         run(f"hand-push {c} a a 'changed outside Loom'", "Someone rewrites A's file on A's PR by hand") + run(f"checks {c} a green", "A's check is green") + \
         run(f"outside-merge {c} a", "Someone merges A on the forge, outside Loom") + \
