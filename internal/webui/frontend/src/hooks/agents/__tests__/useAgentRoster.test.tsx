@@ -7,6 +7,7 @@
 // the browser opens the stream (RR1).
 
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { flushSync } from "react-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Agent, AgentEvent } from "@/api/agentsv1";
@@ -269,6 +270,25 @@ describe("useAgentRoster", () => {
 
     rerender({ ws: "wsB" });
     expect([...result.current.roster.keys()]).toEqual([]);
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+    expect([...result.current.roster.keys()]).toEqual([]);
+  });
+
+  it("drops the previous workspace's List queued before a synchronous switch", async () => {
+    agents.set("a1", agent("a1"));
+    const release = holdFullLists();
+    otherWs.set("wsB", async () => new Response("{}", { status: 500 }));
+    const { result, rerender } = renderHook(({ ws }) => useAgentRoster(ws), {
+      initialProps: { ws: "wsA" },
+    });
+    await waitFor(() => expect(lists).toHaveLength(1));
+
+    // A's List lands and queues its update; the switch to B commits first.
+    await act(async () => {
+      release();
+      await new Promise((r) => setTimeout(r, 0));
+      flushSync(() => rerender({ ws: "wsB" }));
+    });
     await waitFor(() => expect(result.current.error).not.toBeNull());
     expect([...result.current.roster.keys()]).toEqual([]);
   });

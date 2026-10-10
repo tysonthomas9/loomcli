@@ -74,6 +74,20 @@ export const useRoster = (): Roster =>
 export const useRosterActivity = (): Activities =>
   useSyncExternalStore(subscribe, () => sharedActivity);
 
+// The roster, its activity and its error belong to one workspace.
+type Owned = {
+  ws: string;
+  roster: Roster;
+  activity: Activities;
+  error: string | null;
+};
+const fresh = (ws: string): Owned => ({
+  ws,
+  roster: new Map(),
+  activity: new Map(),
+  error: null,
+});
+
 const message = (err: unknown) =>
   err instanceof Error ? err.message : String(err);
 
@@ -91,20 +105,28 @@ export function useAgentRoster(
   roster: Roster;
   error: string | null;
 } {
-  const [roster, setRoster] = useState<Roster>(new Map());
-  const [activity, setActivity] = useState<Activities>(new Map());
-  const [error, setError] = useState<string | null>(null);
-
-  // A workspace switch clears the roster, and a List or stream callback for
-  // an earlier workspace never lands on the new one once it is committed
+  // A workspace switch starts fresh, and an update made for an earlier
+  // workspace changes nothing, even one queued before the switch committed
   // (RS1).
-  const [shownWs, setShownWs] = useState(workspaceId);
-  if (shownWs !== workspaceId) {
-    setShownWs(workspaceId);
-    setRoster(new Map());
-    setActivity(new Map());
-    setError(null);
-  }
+  const [owned, setOwned] = useState(() => fresh(workspaceId));
+  if (owned.ws !== workspaceId) setOwned(fresh(workspaceId));
+  const { roster, activity, error } = owned;
+  const [setRoster, setActivity, setError] = useMemo(() => {
+    const own =
+      <K extends "roster" | "activity" | "error">(k: K) =>
+      (v: Owned[K] | ((old: Owned[K]) => Owned[K])) =>
+        setOwned((o) => {
+          if (o.ws !== workspaceId) return o;
+          const next =
+            typeof v === "function"
+              ? (v as (old: Owned[K]) => Owned[K])(o[k])
+              : v;
+          return next === o[k] ? o : { ...o, [k]: next };
+        });
+    return [own("roster"), own("activity"), own("error")] as const;
+  }, [workspaceId]);
+  // A List's error, or a stream callback, for an earlier workspace is
+  // dropped once the switch commits.
   const currentWs = useRef(workspaceId);
   useLayoutEffect(() => {
     currentWs.current = workspaceId;
@@ -126,7 +148,6 @@ export function useAgentRoster(
       return listAll(workspaceId, q, open)
         .then(
           (agents) =>
-            stale() ||
             setRoster((r) => {
               const next = merge(r, agents);
               return next ? applyEvents(next, seen) : r;
@@ -137,7 +158,7 @@ export function useAgentRoster(
         )
         .finally(() => inflight.current.delete(seen));
     },
-    [workspaceId],
+    [workspaceId, setRoster],
   );
 
   // A full List replaces the roster, unless a later one already did.
@@ -160,7 +181,7 @@ export function useAgentRoster(
         () => n === sent.current && setError(null),
         (err) => n === sent.current && setError(message(err)),
       );
-  }, [list]);
+  }, [list, setError]);
 
   useEffect(() => {
     open.current = openId;
@@ -229,7 +250,16 @@ export function useAgentRoster(
     history.current = { ws: workspaceId, h: stream.history };
     void stream.connect();
     return () => stream.close();
-  }, [workspaceId, ids, purged, relist, list]);
+  }, [
+    workspaceId,
+    ids,
+    purged,
+    relist,
+    list,
+    setRoster,
+    setActivity,
+    setError,
+  ]);
 
   return { roster, error };
 }
