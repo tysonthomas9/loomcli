@@ -135,19 +135,15 @@ func followWithStore(ctx context.Context, store *journal.SQLite, cfg *config.Loo
 func followApprovals(ctx context.Context, store *journal.SQLite, cfg *config.LoomConfig,
 	pending []journal.PendingApproval, remaining map[string]journal.PendingApproval) (FollowResult, error) {
 	result := FollowResult{}
+	if err := spendStaleDependents(ctx, store, pending, remaining, &result); err != nil {
+		return result, err
+	}
 	for len(remaining) > 0 {
 		progress := false
 		waitingOnPredecessor := false
 		for _, approval := range pending {
 			selected, exists := remaining[approval.Change]
 			if !exists || selected.Revision != approval.Revision {
-				continue
-			}
-			if spent, err := spendStaleDependent(ctx, store, approval, &result); err != nil {
-				return result, err
-			} else if spent {
-				delete(remaining, approval.Change)
-				progress = true
 				continue
 			}
 			if _, blocked := remaining[approval.Predecessor]; blocked {
@@ -216,6 +212,26 @@ func latestApprovals(ctx context.Context, store *journal.SQLite, pending []journ
 		remaining[approval.Change] = approval
 	}
 	return remaining, nil
+}
+
+// spendStaleDependents settles, before anything applies, every remaining
+// approval of a stale dependent; its predecessor's state does not change
+// while the follow runs.
+func spendStaleDependents(ctx context.Context, store *journal.SQLite, pending []journal.PendingApproval,
+	remaining map[string]journal.PendingApproval, result *FollowResult) error {
+	for _, approval := range pending {
+		if selected, exists := remaining[approval.Change]; !exists || selected.Revision != approval.Revision {
+			continue
+		}
+		spent, err := spendStaleDependent(ctx, store, approval, result)
+		if err != nil {
+			return err
+		}
+		if spent {
+			delete(remaining, approval.Change)
+		}
+	}
+	return nil
 }
 
 // spendStaleDependent settles the approval of a dependent built on a

@@ -35,9 +35,13 @@ func refuseStaleApproval(ctx context.Context, store Store, r loomgit.Revision, k
 	return loomgit.NewError(loomgit.Stale, "approve is refused: "+state.Reason(predecessor), nil)
 }
 
-// addDependencyState fills in a dependent revision's predecessor, its stale
-// base, and an approval that waits for the predecessor's code.
-func (l *Local) addDependencyState(ctx context.Context, workspace, lead string, i *TaskRevision) error {
+// addDependencyState fills in, on a task's newest source revision, its
+// predecessor, its stale base, and an approval that waits for the
+// predecessor's code.
+func (l *Local) addDependencyState(ctx context.Context, workspace, lead, kind string, i *TaskRevision) error {
+	if i.Superseded || kind != "source" {
+		return nil
+	}
 	state, predecessor, found, err := l.store.DependentLineage(ctx, workspace, i.ChangeID)
 	if err != nil || !found {
 		return err
@@ -120,54 +124,71 @@ func (l *Local) Rebuild(ctx context.Context, workspace, task string, actor Actor
 	if actor.Kind != "human" || actor.ID == "" {
 		return RebuildResult{}, required("rebuild requires a human actor")
 	}
-	revisions, err := l.store.ListTaskRevisions(ctx, workspace, task)
+	newest, err := l.newestSource(ctx, workspace, task)
 	if err != nil {
 		return RebuildResult{}, err
 	}
-	var newest loomgit.Revision
-	for _, r := range revisions {
-		if r.Kind == "source" {
-			newest = r
-			break
-		}
-	}
-	if newest.Change == "" {
-		return RebuildResult{}, loomgit.NewError(loomgit.LineageUnresolved, "task has no revision to rebuild", nil)
-	}
-	state, predecessor, found, err := l.store.DependentLineage(ctx, workspace, newest.Change)
+	state, predecessor, err := l.rebuildable(ctx, newest)
 	if err != nil {
 		return RebuildResult{}, err
 	}
-	if !found || state.State != "stale" {
-		return RebuildResult{}, loomgit.NewError(loomgit.Conflict, "task is not built on a stale predecessor revision", nil)
-	}
-	if state.Available == 0 {
-		return RebuildResult{}, loomgit.NewError(loomgit.LineageUnresolved, state.Reason(predecessor), nil)
-	}
-	if applied, err := l.store.RevisionApplied(ctx, workspace, "", newest.Change, newest.Number); err != nil || applied {
-		if err != nil {
-			return RebuildResult{}, err
-		}
-		return RebuildResult{}, loomgit.NewError(loomgit.Conflict, "the revision is already applied; unapply it first", nil)
-	}
-	reason := fmt.Sprintf("rebuild on %s's new code", predecessor)
-	if err := l.store.SpendWaitingApprovals(ctx, workspace, newest.Change, newest.Number, state.Reason(predecessor)); err != nil {
+	kind, err := l.setAside(ctx, newest, state.Reason(predecessor), fmt.Sprintf("rebuild on %s's new code", predecessor), actor)
+	if err != nil {
 		return RebuildResult{}, err
-	}
-	kind := "reject"
-	if latest, err := l.store.LatestVerdict(ctx, newest); err == nil && latest.Kind == "reject" {
-		kind = "" // Already rejected: the task is open; only the pin moves.
-	} else if err != nil && !IsNotFound(err) {
-		return RebuildResult{}, err
-	}
-	if kind != "" {
-		if _, err := Submit(ctx, l.store, workspace, newest.Change, newest.Number, newest.HeadSHA, kind, reason, actor); err != nil {
-			return RebuildResult{}, err
-		}
 	}
 	if err := l.store.ClearLocalLineage(ctx, workspace, task, state.Pinned.Repo); err != nil {
 		return RebuildResult{}, err
 	}
 	return RebuildResult{Change: newest.Change, Revision: newest.Number, DependsOn: predecessor,
 		RebuildOn: state.Available, VerdictKind: kind}, nil
+}
+
+// newestSource is the task's newest source revision.
+func (l *Local) newestSource(ctx context.Context, workspace, task string) (loomgit.Revision, error) {
+	revisions, err := l.store.ListTaskRevisions(ctx, workspace, task)
+	if err != nil {
+		return loomgit.Revision{}, err
+	}
+	for _, r := range revisions {
+		if r.Kind == "source" {
+			return r, nil
+		}
+	}
+	return loomgit.Revision{}, loomgit.NewError(loomgit.LineageUnresolved, "task has no revision to rebuild", nil)
+}
+
+// rebuildable checks the revision is a stale dependent, not applied, whose
+// predecessor has a newer revision to build on.
+func (l *Local) rebuildable(ctx context.Context, newest loomgit.Revision) (journal.LineageState, string, error) {
+	state, predecessor, found, err := l.store.DependentLineage(ctx, newest.Workspace, newest.Change)
+	switch {
+	case err != nil:
+		return state, "", err
+	case !found || state.State != "stale":
+		return state, "", loomgit.NewError(loomgit.Conflict, "task is not built on a stale predecessor revision", nil)
+	case state.Available == 0:
+		return state, "", loomgit.NewError(loomgit.LineageUnresolved, state.Reason(predecessor), nil)
+	}
+	applied, err := l.store.RevisionApplied(ctx, newest.Workspace, "", newest.Change, newest.Number)
+	if err == nil && applied {
+		err = loomgit.NewError(loomgit.Conflict, "the revision is already applied; unapply it first", nil)
+	}
+	return state, predecessor, err
+}
+
+// setAside cancels the revision's approvals still waiting to apply and
+// rejects it, so its task reopens; it returns "" when it was already rejected.
+func (l *Local) setAside(ctx context.Context, r loomgit.Revision, spentReason, reason string, actor Actor) (string, error) {
+	if err := l.store.SpendWaitingApprovals(ctx, r.Workspace, r.Change, r.Number, spentReason); err != nil {
+		return "", err
+	}
+	latest, err := l.store.LatestVerdict(ctx, r)
+	if err != nil && !IsNotFound(err) {
+		return "", err
+	}
+	if err == nil && latest.Kind == "reject" {
+		return "", nil // Already rejected: the task is open; only the pin moves.
+	}
+	_, err = Submit(ctx, l.store, r.Workspace, r.Change, r.Number, r.HeadSHA, "reject", reason, actor)
+	return "reject", err
 }

@@ -181,10 +181,8 @@ func (l *Local) TaskRevisionsForLead(ctx context.Context, workspace, task, lead 
 		if err := l.addFeedbackState(ctx, workspace, &i, statusSource(r)); err != nil {
 			return nil, err
 		}
-		if !i.Superseded && r.Kind == "source" {
-			if err := l.addDependencyState(ctx, workspace, lead, &i); err != nil {
-				return nil, err
-			}
+		if err := l.addDependencyState(ctx, workspace, lead, r.Kind, &i); err != nil {
+			return nil, err
 		}
 		out = append(out, i)
 	}

@@ -143,7 +143,8 @@ func TestRejectedPredecessorMakesDependentStale(t *testing.T) {
 	}
 	result, err := followWithStore(ctx, f.store, cfg, "W", "L")
 	const waitReason = "built on T1's code, which was rejected: rebuild it once T1 has new code"
-	if err != nil || len(result.Spent) != 1 || result.Spent[0].Reason != waitReason || len(result.Applied) != 0 {
+	if err != nil || len(result.Spent) != 1 || result.Spent[0].Reason != waitReason || len(result.Applied) != 0 ||
+		len(result.Pending) != 0 {
 		t.Fatalf("stale dependent approval was not spent: %+v, %v", result, err)
 	}
 	got := revisionOf(t, f.dbPath, "T2")
@@ -202,6 +203,32 @@ func TestStaleDependentAllowsOverrideAndIgnoresPublishedStacks(t *testing.T) {
 	if err != nil || !found || state.State != "stale" {
 		t.Fatalf("lineage = %+v, %v, %v", state, found, err)
 	}
+	// A revision Loom derived (a restack) reports no base of its own; the
+	// task's source revision does.
+	derived, err := f.store.ReserveRevision(ctx, loomgit.Revision{Workspace: "W", Change: "C2", RequestID: "c2-restack",
+		Kind: "restack", Operation: "restack", Outcome: "completed", BaseSHA: f.base, TreeHash: f.base,
+		SourceHeadSHA: head, DerivedFromChange: "C2", DerivedFromNumber: number})
+	if err != nil {
+		t.Fatal(err)
+	}
+	derived.HeadSHA = head
+	if err := f.store.FinishRevision(ctx, derived); err != nil {
+		t.Fatal(err)
+	}
+	local, err := review.OpenLocalAt(f.dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = local.Close() }()
+	listed, err := local.TaskRevisionsForLead(ctx, "W", "T2", "L")
+	if err != nil || len(listed) != 2 {
+		t.Fatalf("revisions = %+v, %v", listed, err)
+	}
+	for _, r := range listed {
+		if want := map[bool]string{true: "stale", false: ""}[r.Number == number]; r.LineageState != want {
+			t.Fatalf("revision %d lineage = %q, want %q", r.Number, r.LineageState, want)
+		}
+	}
 	db := openDB(t, f.dbPath)
 	if _, err := db.ExecContext(ctx, `INSERT INTO change_publications(workspace,change_id,repo,branch,trunk,slug,head_sha,phase)
 		VALUES('W','C2','repo','b','main','s',?,'done')`, head); err != nil {
@@ -209,5 +236,48 @@ func TestStaleDependentAllowsOverrideAndIgnoresPublishedStacks(t *testing.T) {
 	}
 	if state, _, _, err := f.store.DependentLineage(ctx, "W", "C2"); err != nil || state.State != "current" {
 		t.Fatalf("published dependent lineage = %+v, %v", state, err)
+	}
+}
+
+// Rebuild of a dependent already rejected only moves its base; one whose
+// stale code is applied is refused until it is unapplied.
+func TestRebuildOfARejectedOrAppliedDependent(t *testing.T) {
+	f, _, number, head := dependentFixture(t)
+	ctx := context.Background()
+	if _, err := review.Submit(ctx, f.store, "W", "C1", 1, f.source, "reject", "no", reviewer); err != nil {
+		t.Fatal(err)
+	}
+	addRevision(t, f, "C1", f.base, "change-again")
+	local, err := review.OpenLocalAt(f.dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = local.Close() }()
+
+	db := openDB(t, f.dbPath)
+	if _, err := db.ExecContext(ctx, `INSERT INTO applied_layers(request_id,workspace,lead,change_id,revision,old_tip,new_tip,commits,dropped,phase)
+		VALUES('applied-c2','W','L','C2',?,'','','[]','[]','done')`, number); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := local.Rebuild(ctx, "W", "T2", reviewer); !hasCode(err, loomgit.Conflict) || !strings.Contains(err.Error(), "unapply it first") {
+		t.Fatalf("rebuild of applied stale code = %v, want refused", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE applied_layers SET phase='unapplied' WHERE request_id='applied-c2'`); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := review.Submit(ctx, f.store, "W", "C2", number, head, "reject", "built on the wrong code", reviewer); err != nil {
+		t.Fatal(err)
+	}
+	rebuilt, err := local.Rebuild(ctx, "W", "T2", reviewer)
+	if err != nil || rebuilt.VerdictKind != "" {
+		t.Fatalf("rebuild of a rejected dependent = %+v, %v; want no second verdict", rebuilt, err)
+	}
+	verdict, err := f.store.LatestVerdict(ctx, loomgit.Revision{Workspace: "W", Change: "C2", Number: number})
+	if err != nil || verdict.Reason != "built on the wrong code" {
+		t.Fatalf("latest verdict = %+v, %v; want the reviewer's reject", verdict, err)
+	}
+	if _, err := f.store.LocalLineage(ctx, "W", "T2", "repo"); !errors.Is(err, journal.ErrNotFound) {
+		t.Fatalf("rebuild kept the stale pin: %v", err)
 	}
 }
