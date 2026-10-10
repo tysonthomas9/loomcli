@@ -232,3 +232,50 @@ func TestCheckpointFailureRetried(t *testing.T) {
 		t.Fatal("turn/1 missing after the retry")
 	}
 }
+
+// TestBaselineFailureHoldsFirstPrompt: when the turn/0 capture fails as
+// Create ends, the first message is not prompted; the reconcile retry
+// captures turn/0 and only then hands it over.
+func TestBaselineFailureHoldsFirstPrompt(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	e.ws.setTree("at create")
+	var mu sync.Mutex
+	failing := true
+	e.ws.capture = func(string) error {
+		mu.Lock()
+		defer mu.Unlock()
+		if failing {
+			return errors.New("disk full")
+		}
+		return nil
+	}
+	s := e.service(ServiceConfig{})
+	clock := useTestClock(s)
+	runDispatcher(t, s)
+	req := leadReq("r1")
+	req.FirstMessage = "hello"
+	info, err := s.Create(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := info.AgentID
+	settled(t, s)
+	if a := s.get(t, id); turnsStarted(e, sessionOf(a)) != 0 || slotState(t, s, id, "create:r1") != loomstore.SlotWaiting {
+		t.Fatalf("turn/0 failed, yet turns = %d, first message %s; want 0, waiting", turnsStarted(e, sessionOf(a)), slotState(t, s, id, "create:r1"))
+	}
+	if _, ok := e.ws.checkpoint(checkpointRef(id, 0)); ok {
+		t.Fatal("turn/0 exists after a failed capture")
+	}
+	mu.Lock()
+	failing = false
+	mu.Unlock()
+	if clock.fire() == 0 {
+		t.Fatal("no retry queued")
+	}
+	drained(t, s, "first message handed after turn/0", func() bool { return len(handedReqs(t, s, id, "create:r1")) == 1 })
+	if a := s.get(t, id); turnsStarted(e, sessionOf(a)) != 1 {
+		t.Fatalf("turns = %d after the retry; want 1", turnsStarted(e, sessionOf(a)))
+	}
+	wantCheckpoints(t, e.ws, id, "at create")
+}
