@@ -45,7 +45,7 @@ func adoptNativeRestack(ctx context.Context, store *journal.SQLite, offer journa
 		result, restackErr := pull.AdoptRestackLocal(ctx, area.Path, offer.TrunkSHA, nil, heads,
 			"landing-restack:"+offer.Workspace+":"+offer.Change+":"+offer.Predecessor)
 		if restackErr != nil {
-			return recordRestackError(ctx, store, offer, publication.StackID, result.Paths, restackErr)
+			return recordNativeRestackError(ctx, store, runner, forge, offer, publication, layers, heads, result.Paths, restackErr)
 		}
 		*revision, err = store.SourceRevision(ctx, offer.Workspace, offer.Change)
 		if err != nil {
@@ -207,4 +207,86 @@ func updateNativePublicationRefs(ctx context.Context, runner *gitexec.Runner,
 		return fmt.Errorf("adopt native publication refs: %w", err)
 	}
 	return nil
+}
+
+// recordNativeRestackError records why adopting the provider's heads failed.
+// A provider head that does not sit on the new trunk usually means the
+// provider has not rebuilt the layer yet, so Loom keeps waiting. When the
+// provider also reports that PR as conflicting, it will not rebuild it: the
+// conflict is recorded on the stack, with the paths a read-only merge of the
+// layer onto its new base reports. Nothing is replayed or pushed, and the offer
+// stays open so a later provider rebuild is still adopted.
+func recordNativeRestackError(ctx context.Context, store *journal.SQLite, runner *gitexec.Runner,
+	forge landing.Forge, offer journal.RestackOffer, publication journal.Publication,
+	layers []loomgit.AppliedLayer, heads map[string]string, paths []string, cause error) error {
+	if !errors.Is(cause, loomgit.NewError(loomgit.StackNotLinear, "", nil)) {
+		return recordRestackError(ctx, store, offer, publication.StackID, paths, cause)
+	}
+	conflicted, err := nativeProviderConflict(ctx, store, runner, forge, offer, publication.Slug, layers, heads)
+	if err != nil || len(conflicted) == 0 {
+		return errors.Join(cause, err)
+	}
+	return recordRestackError(ctx, store, offer, publication.StackID, conflicted,
+		loomgit.NewError(loomgit.Conflict, "the provider cannot rebuild the stack on the new trunk", cause))
+}
+
+// nativeProviderConflict returns the conflicting paths of the first remaining
+// layer whose provider head does not descend from the layer below it, when
+// the provider reports that layer's PR as conflicting; otherwise nil.
+func nativeProviderConflict(ctx context.Context, store *journal.SQLite, runner *gitexec.Runner,
+	forge landing.Forge, offer journal.RestackOffer, slug string, layers []loomgit.AppliedLayer,
+	heads map[string]string) ([]string, error) {
+	statusForge, ok := forge.(interface {
+		PRStatuses(context.Context, string, string, string) (map[string]stackpublish.PRStatus, error)
+	})
+	if !ok {
+		return nil, nil
+	}
+	owner, repo, _ := strings.Cut(slug, "/")
+	cursor := offer.TrunkSHA
+	for _, layer := range layers {
+		head, found := heads[layer.Change]
+		if !found {
+			continue
+		}
+		if _, err := runner.Run(ctx, "merge-base", "--is-ancestor", cursor, head); err == nil {
+			cursor = head
+			continue
+		}
+		item, _, err := store.Publication(ctx, offer.Workspace, layer.Change)
+		if err != nil {
+			return nil, err
+		}
+		statuses, err := statusForge.PRStatuses(ctx, owner, repo, item.Branch)
+		if err != nil {
+			return nil, err
+		}
+		status, found := statuses[item.Branch]
+		if !found || status.Number != item.PRNumber || (status.Mergeable != "conflicting" && status.MergeState != "dirty") {
+			return nil, nil
+		}
+		return layerConflictPaths(ctx, runner, layer, cursor, head), nil
+	}
+	return nil, nil
+}
+
+// layerConflictPaths merges the layer's own changes onto base without writing
+// any ref and returns the conflicting paths, or the change ID when Git cannot
+// name them.
+func layerConflictPaths(ctx context.Context, runner *gitexec.Runner, layer loomgit.AppliedLayer, base, head string) []string {
+	_, err := runner.Run(ctx, "merge-tree", "--write-tree", "--merge-base="+layer.OldTip, "--name-only", "--no-messages", "-z", base, head)
+	var commandErr *gitexec.CommandError
+	if errors.As(err, &commandErr) {
+		var paths []string
+		for _, path := range strings.Split(commandErr.Stdout, "\x00")[1:] {
+			if path == "" {
+				break
+			}
+			paths = append(paths, path)
+		}
+		if len(paths) > 0 {
+			return paths
+		}
+	}
+	return []string{layer.Change}
 }

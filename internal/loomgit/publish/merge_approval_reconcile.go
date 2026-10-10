@@ -98,12 +98,12 @@ func tryMergeApproval(ctx context.Context, store *journal.SQLite, forge mergeApp
 // carryApprovalHead follows a rebuilt layer (D26): the approval moves to the
 // change's newest revision only if that revision's verdict was carried from
 // the approved head by a clean, patch-equivalent replay. Otherwise the task
-// asks for approval again. A rebuild still in progress, or one that needs
-// attention, waits.
+// asks for approval again, as it does when the rebuild conflicted. A rebuild
+// still in progress, or one holding working-area edits, waits.
 func carryApprovalHead(ctx context.Context, store *journal.SQLite, approval journal.MergeApproval,
 	publication journal.Publication) (journal.MergeApproval, string, string, error) {
-	if waiting, reason, err := restackPending(ctx, store, approval, publication); err != nil || waiting {
-		return approval, MergeApprovalWaiting, reason, err
+	if status, reason, err := restackPending(ctx, store, approval, publication); err != nil || status != "" {
+		return approval, status, reason, err
 	}
 	newest, err := newestRevision(ctx, store, approval.Workspace, approval.Change)
 	if err != nil || newest.HeadSHA == approval.Head {
@@ -121,7 +121,7 @@ func carryApprovalHead(ctx context.Context, store *journal.SQLite, approval jour
 		return approval, "", "", err
 	}
 	if !carried {
-		reason := "the rebuild after the PRs below merged was not clean; approve again"
+		reason := rebuildNotCleanReason
 		if newest.Kind == "source" {
 			// A review fix-up is decided by its feedback update first, which
 			// cancels this approval when it pushes the fix-up (D29 (6)).
@@ -166,34 +166,40 @@ func verdictCarriedFrom(ctx context.Context, store *journal.SQLite, revision loo
 	return false, err
 }
 
-// restackPending reports a rebuild of the change, after a PR below it merged,
-// that has not finished or needs attention.
+const rebuildNotCleanReason = "the rebuild after the PRs below merged was not clean; approve again"
+
+// restackPending returns the approval status and reason for a rebuild of the
+// change, after a PR below it merged, that has not finished or needs
+// attention, or "" when there is none. A conflicted rebuild can never carry
+// the approval, so it asks again; the stack keeps its resolve attention.
 func restackPending(ctx context.Context, store *journal.SQLite, approval journal.MergeApproval,
-	publication journal.Publication) (bool, string, error) {
+	publication journal.Publication) (string, string, error) {
 	if publication.StackID != "" {
 		state, err := store.StackState(ctx, approval.Workspace, publication.StackID)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return false, "", err
+			return "", "", err
 		}
-		if state.Status == "restack_conflict" || state.Status == "swap_held" {
-			return true, "the rebuild after the PRs below merged needs attention: " + state.Status, nil
-		}
-		if state.Status == "review_required" {
+		switch state.Status {
+		case "restack_conflict":
+			return MergeApprovalReapproval, rebuildNotCleanReason, nil
+		case "swap_held":
+			return MergeApprovalWaiting, "the rebuild after the PRs below merged needs attention: " + state.Status, nil
+		case "review_required":
 			// The rebuild finished, but a rebuilt layer needs a new verdict, so
 			// its restack offer stays open; the change's newest revision decides.
-			return false, "", nil
+			return "", "", nil
 		}
 	}
 	offers, err := store.RestackOffers(ctx, approval.Workspace, approval.Change)
 	if err != nil {
-		return false, "", err
+		return "", "", err
 	}
 	for _, offer := range offers {
 		if offer.DerivedRevision == 0 {
-			return true, "rebuilding after the PRs below merged", nil
+			return MergeApprovalWaiting, "rebuilding after the PRs below merged", nil
 		}
 	}
-	return false, "", nil
+	return "", "", nil
 }
 
 // mergeReadiness returns a status and reason that hold the merge back, or ""
