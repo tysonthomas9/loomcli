@@ -17,7 +17,7 @@ import {
   gitSync,
   gitCreatePR,
   queueMergeUpTo,
-  fetchMergeQueue,
+  fetchStacks,
   gitReset,
   gitResetPreview,
   gitUpdateTarget,
@@ -217,10 +217,10 @@ describe("git API functions", () => {
       );
     });
 
-    it("reads the workspace merge queue", async () => {
+    it("reads the workspace stacks", async () => {
       mockGet.mockResolvedValue([]);
-      await fetchMergeQueue("W");
-      expect(mockGet).toHaveBeenCalledWith("/api/workspaces/W/git/merge-queue");
+      await fetchStacks("W");
+      expect(mockGet).toHaveBeenCalledWith("/api/workspaces/W/git/stacks");
     });
   });
 

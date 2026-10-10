@@ -4,7 +4,8 @@ import type { GitPullRequest } from "@/api/workspace";
 import type { Issue } from "@/types";
 import {
   buildPullRequestRows,
-  groupKeyFor,
+  nextAction,
+  opensChanges,
   parseReviewPrParam,
   prReviewRef,
   prStateFromGithub,
@@ -49,7 +50,7 @@ describe("prStateFromGithub", () => {
         ...base,
         review_decision: "CHANGES_REQUESTED",
       }).label,
-    ).toBe("Changes");
+    ).toBe("Changes requested on GitHub");
   });
 });
 
@@ -168,20 +169,21 @@ describe("buildPullRequestRows (loom-first queue)", () => {
     expect(rows[0]?.pr?.number).toBe(3);
   });
 
-  it("groups loom-only and enriched rows by the workspace repo name", () => {
-    const loomOnly: Parameters<typeof groupKeyFor>[0] = {
-      issue: makeIssue({ repo: "loomcli" }),
-    };
-    const enriched: Parameters<typeof groupKeyFor>[0] = {
-      issue: makeIssue({ repo: "loomcli" }),
-      pr: ghPr(7, {
-        repo_name: "tysonthomas9/loomcli",
-        source_repo: "loomcli",
+  it("sends a Loom task to its Changes and a plan review to the review workspace", () => {
+    const plan = { issue: makeIssue({ id: "plan-1" }) };
+    const task = {
+      issue: makeIssue({
+        id: "task-3",
+        external_ref: "https://github.com/org/repo/pull/3",
       }),
+      pr: ghPr(3, { review_decision: "APPROVED" }),
     };
-
-    expect(groupKeyFor(loomOnly, "repo")).toBe("loomcli");
-    expect(groupKeyFor(enriched, "repo")).toBe("loomcli");
+    expect(opensChanges(plan)).toBe(false);
+    expect(nextAction(plan)).toBe("Review the plan");
+    expect(opensChanges(task)).toBe(true);
+    expect(nextAction(task)).toBe("Review the code");
+    // GitHub's review never reads as Loom's "Approved".
+    expect(rowState(task).label).toBe("Approved on GitHub");
   });
 
   it("excludes issues that are neither in review nor PR-linked", () => {

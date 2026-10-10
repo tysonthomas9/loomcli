@@ -3698,6 +3698,24 @@ paths:
                 items:
                   $ref: "#/components/schemas/QueuedMerge"
 
+  /api/workspaces/{ws}/git/stacks:
+    get:
+      operationId: listStacks
+      tags: [git]
+      summary: List the workspace's published stacks for the Pull Requests page
+      description: One card per stack, with its PRs bottom first and one state each. Both publishers (GitHub native and Loom's own) produce the same card.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Published stacks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/StackCard"
+
   /api/workspaces/{ws}/changes/{change}/merge-approval:
     parameters:
       - $ref: "#/components/parameters/WorkspaceId"
@@ -5071,6 +5089,37 @@ components:
         queued_by:
           type: string
           description: '"lead" for the lead, otherwise the human who asked.'
+    StackCard:
+      type: object
+      required: [stack_id, repo, backend, layers]
+      properties:
+        stack_id: {type: string}
+        repo:
+          type: string
+          description: The provider's owner/name.
+        backend:
+          type: string
+          description: native (GitHub native stacks) or loom (Loom's own publisher).
+        note:
+          type: string
+          description: A plain-words blocker or progress line for the stack, if any.
+        merge:
+          $ref: "#/components/schemas/QueuedMerge"
+        layers:
+          type: array
+          description: The stack's PRs, bottom first.
+          items:
+            $ref: "#/components/schemas/StackCardLayer"
+    StackCardLayer:
+      type: object
+      required: [change, pr_number, pr_url, state]
+      properties:
+        change: {type: string}
+        pr_number: {type: integer}
+        pr_url: {type: string}
+        state:
+          type: string
+          enum: [draft, needs_review, approved, checks_failing, ready, merging, merged, diverged]
     # ── Response Envelopes ──────────────────────────────────────────────
     ErrorResponse:
       type: object

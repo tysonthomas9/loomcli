@@ -90,10 +90,36 @@ export interface QueuedMerge {
   queued_by?: string;
 }
 
-export async function fetchMergeQueue(
-  workspaceId: string,
-): Promise<QueuedMerge[]> {
-  return get<QueuedMerge[]>(wsUrl(workspaceId, "/git/merge-queue"));
+/** One PR row of a stack card; state is the row's one pill. */
+export interface StackCardLayer {
+  change: string;
+  pr_number: number;
+  pr_url: string;
+  state:
+    | "draft"
+    | "needs_review"
+    | "approved"
+    | "checks_failing"
+    | "ready"
+    | "merging"
+    | "merged"
+    | "diverged";
+}
+
+/** A published stack on the Pull Requests page, PRs bottom first (D37). */
+export interface StackCard {
+  stack_id: string;
+  /** Provider owner/name. */
+  repo: string;
+  /** "native" (GitHub native stacks) or "loom" (Loom's own publisher). */
+  backend: string;
+  note?: string;
+  merge?: QueuedMerge;
+  layers: StackCardLayer[];
+}
+
+export async function fetchStacks(workspaceId: string): Promise<StackCard[]> {
+  return get<StackCard[]>(wsUrl(workspaceId, "/git/stacks"));
 }
 
 export interface GitSettings {

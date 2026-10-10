@@ -1883,6 +1883,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/git/stacks": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the workspace's published stacks for the Pull Requests page
+     * @description One card per stack, with its PRs bottom first and one state each. Both publishers (GitHub native and Loom's own) produce the same card.
+     */
+    get: operations["listStacks"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/changes/{change}/merge-approval": {
     parameters: {
       query?: never;
@@ -2617,6 +2637,33 @@ export interface components {
       reason?: string;
       /** @description "lead" for the lead, otherwise the human who asked. */
       queued_by?: string;
+    };
+    StackCard: {
+      stack_id: string;
+      /** @description The provider's owner/name. */
+      repo: string;
+      /** @description native (GitHub native stacks) or loom (Loom's own publisher). */
+      backend: string;
+      /** @description A plain-words blocker or progress line for the stack, if any. */
+      note?: string;
+      merge?: components["schemas"]["QueuedMerge"];
+      /** @description The stack's PRs, bottom first. */
+      layers: components["schemas"]["StackCardLayer"][];
+    };
+    StackCardLayer: {
+      change: string;
+      pr_number: number;
+      pr_url: string;
+      /** @enum {string} */
+      state:
+        | "draft"
+        | "needs_review"
+        | "approved"
+        | "checks_failing"
+        | "ready"
+        | "merging"
+        | "merged"
+        | "diverged";
     };
     ErrorResponse: {
       /** @constant */
@@ -8172,6 +8219,29 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["QueuedMerge"][];
+        };
+      };
+    };
+  };
+  listStacks: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Published stacks */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["StackCard"][];
         };
       };
     };

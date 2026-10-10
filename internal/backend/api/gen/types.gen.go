@@ -1028,6 +1028,42 @@ func (e SessionHistoryRecordStatus) Valid() bool {
 	}
 }
 
+// Defines values for StackCardLayerState.
+const (
+	Approved      StackCardLayerState = "approved"
+	ChecksFailing StackCardLayerState = "checks_failing"
+	Diverged      StackCardLayerState = "diverged"
+	Draft         StackCardLayerState = "draft"
+	Merged        StackCardLayerState = "merged"
+	Merging       StackCardLayerState = "merging"
+	NeedsReview   StackCardLayerState = "needs_review"
+	Ready         StackCardLayerState = "ready"
+)
+
+// Valid indicates whether the value is a known member of the StackCardLayerState enum.
+func (e StackCardLayerState) Valid() bool {
+	switch e {
+	case Approved:
+		return true
+	case ChecksFailing:
+		return true
+	case Diverged:
+		return true
+	case Draft:
+		return true
+	case Merged:
+		return true
+	case Merging:
+		return true
+	case NeedsReview:
+		return true
+	case Ready:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TabMetadataReplacedReason.
 const (
 	ServerRestart TabMetadataReplacedReason = "server_restart"
@@ -3296,6 +3332,34 @@ type SessionResponse struct {
 	Status           string     `json:"status"`
 	TaskId           string     `json:"task_id"`
 }
+
+// StackCard defines model for StackCard.
+type StackCard struct {
+	// Backend native (GitHub native stacks) or loom (Loom's own publisher).
+	Backend string `json:"backend"`
+
+	// Layers The stack's PRs, bottom first.
+	Layers []StackCardLayer `json:"layers"`
+	Merge  *QueuedMerge     `json:"merge,omitempty"`
+
+	// Note A plain-words blocker or progress line for the stack, if any.
+	Note *string `json:"note,omitempty"`
+
+	// Repo The provider's owner/name.
+	Repo    string `json:"repo"`
+	StackId string `json:"stack_id"`
+}
+
+// StackCardLayer defines model for StackCardLayer.
+type StackCardLayer struct {
+	Change   string              `json:"change"`
+	PrNumber int                 `json:"pr_number"`
+	PrUrl    string              `json:"pr_url"`
+	State    StackCardLayerState `json:"state"`
+}
+
+// StackCardLayerState defines model for StackCardLayer.State.
+type StackCardLayerState string
 
 // StaleDetectorStatus defines model for StaleDetectorStatus.
 type StaleDetectorStatus struct {

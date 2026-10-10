@@ -1,0 +1,178 @@
+.stacks {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0 0 16px;
+  max-height: 50%;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.card {
+  padding: 12px 16px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+}
+
+.cardHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cardTitle {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.cardSubtitle {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.publisher {
+  margin-left: 8px;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+}
+
+.count {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.error {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--color-danger);
+}
+
+.history {
+  margin: 10px 0 0;
+  padding: 0;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.history:hover {
+  color: var(--color-text-primary);
+}
+
+.rows {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.position {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+}
+
+.position[data-merged] {
+  color: var(--color-success);
+  border-color: var(--color-success);
+}
+
+.rowMain {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.rowTitle {
+  overflow: hidden;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  text-decoration: none;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rowTitle:hover {
+  text-decoration: underline;
+}
+
+.prLink {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  text-decoration: none;
+}
+
+.prLink:hover {
+  color: var(--color-primary);
+}
+
+.mergeButton {
+  padding: 3px 10px;
+  font-size: 12px;
+  color: var(--color-primary);
+  background: none;
+  border: 1px solid var(--color-primary);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.mergeButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.pill {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-active);
+  border-radius: 6px;
+}
+
+.pill[data-state="ready"],
+.pill[data-state="approved"],
+.pill[data-state="merged"] {
+  color: var(--color-success);
+  background: var(--color-success-bg);
+}
+
+.pill[data-state="needs_review"],
+.pill[data-state="merging"] {
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+}
+
+.pill[data-state="checks_failing"],
+.pill[data-state="diverged"] {
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+}
