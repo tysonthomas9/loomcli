@@ -1,7 +1,6 @@
 package git
 
 import (
-	"fmt"
 	"os"
 	"strings"
 
@@ -57,15 +56,6 @@ func resolveCommandActor(lead string) commandActor {
 		user = "local-user"
 	}
 	return commandActor{Actor: review.Actor{Kind: "human", ID: user}}
-}
-
-// requireHumanCommand refuses a command only a human may run from an agent session.
-func requireHumanCommand(what string) (review.Actor, error) {
-	actor := resolveCommandActor("")
-	if actor.Kind != "human" {
-		return review.Actor{}, fmt.Errorf("%s refused: %s is set, so this looks like an agent session; a human must confirm", what, actor.Marker)
-	}
-	return actor.Actor, nil
 }
 
 func firstSet(names ...string) string {

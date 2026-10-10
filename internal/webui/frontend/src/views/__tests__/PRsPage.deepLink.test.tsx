@@ -34,7 +34,10 @@ vi.mock("@/contexts/WorkspaceViewContext", async (importOriginal) => {
 
 vi.mock("@/hooks/workspace", () => ({
   usePullRequests: () => pullRequestsMock,
+  useWorkspaceContext: () => ({ workspaceId: "demo" }),
 }));
+
+vi.mock("@/components/MergeQueue", () => ({ MergeQueue: () => null }));
 
 vi.mock("../PRReviewWorkspace", () => ({
   PRReviewWorkspace: (props: {

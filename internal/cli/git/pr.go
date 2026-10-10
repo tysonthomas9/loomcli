@@ -1,11 +1,9 @@
 package git
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"os/user"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -19,14 +17,10 @@ var prWorkspace string
 var prStackWorkspace string
 var prStackResolver = cli.NewResolver
 var prStackPublish = publish.PublishStackLocal
-var prMergePreview = publish.MergeStackPreviewLocal
-var prMergeRequest = publish.MergeStackLocal
-var prRequestMerge = publish.RequestMergeLocal
-var prMergeRequests = publish.MergeRequestsLocal
-var prConfirmMerge = publish.ConfirmMergeRequestLocal
 
-// agentEnvMarkers are set in every Loom agent session. A human-only merge
-// confirmation refuses them; this is advisory in local mode (D28).
+// agentEnvMarkers are set in every Loom agent session; a command run with one
+// is the lead's unless a task-agent marker is also set (D42). Advisory in
+// local mode (D28).
 var agentEnvMarkers = []string{"LOOM_AGENT_NAME", "LOOM_ORCHESTRATOR_SESSION_ID", "LOOM_AGENT_TERMINAL_ID"}
 var deliveryModeCmd *cobra.Command
 
@@ -47,13 +41,6 @@ func init() {
 	cli.RegisterCommand(prCmd)
 	prStackCmd.Flags().StringVarP(&prStackWorkspace, "workspace", "W", "", "Workspace to operate on")
 	cli.RegisterCommand(prStackCmd)
-	mergeUpToCmd.Flags().StringVarP(&prStackWorkspace, "workspace", "W", "", "Workspace to operate on")
-	mergeUpToCmd.Flags().Bool("status", false, "Show the recorded merge state without requesting a merge")
-	cli.RegisterCommand(mergeUpToCmd)
-	requestMergeCmd.Flags().StringVarP(&prStackWorkspace, "workspace", "W", "", "Workspace to operate on")
-	cli.RegisterCommand(requestMergeCmd)
-	confirmMergeCmd.Flags().StringVarP(&prStackWorkspace, "workspace", "W", "", "Workspace to operate on")
-	cli.RegisterCommand(confirmMergeCmd)
 	deliveryModeCmd = &cobra.Command{
 		Use:     "delivery-mode [stack|trunk]",
 		Short:   "Show or set the workspace's Git delivery mode",
@@ -131,157 +118,6 @@ func runLeadMayMerge(cmd *cobra.Command, args []string) error {
 	}
 	_, err = fmt.Fprintln(cmd.OutOrStdout(), policy.Value)
 	return err
-}
-
-var mergeUpToCmd = &cobra.Command{
-	Use:     "merge-up-to <stack> <lead> <layer>",
-	Short:   "Request a confirmed merge through a chosen stack layer",
-	GroupID: "git",
-	Args:    cobra.ExactArgs(3),
-	RunE:    runMergeUpTo,
-}
-
-func runMergeUpTo(cmd *cobra.Command, args []string) error {
-	resolver, err := resolvePRStackWorkspace()
-	if err != nil {
-		return err
-	}
-	workspace := resolver.Config.Workspaces[resolver.WorkspaceName()]
-	view, err := prMergePreview(cmd.Context(), workspace.ID, args[1], args[0], args[2])
-	if err != nil {
-		return err
-	}
-	for _, layer := range view.Layers {
-		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s %s %s %s\n", layer.Change, layer.Head, layer.State, layer.PRURL); err != nil {
-			return err
-		}
-	}
-	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "merge: %s %s\n", view.Phase, view.Reason); err != nil {
-		return err
-	}
-	statusOnly, err := cmd.Flags().GetBool("status")
-	if err != nil || statusOnly {
-		return err
-	}
-	human, err := humanMergeActor()
-	if err != nil {
-		return err
-	}
-	if err := confirmMergeUpTo(cmd, args[2]); err != nil {
-		return err
-	}
-	heads := make([]string, len(view.Layers))
-	for index, layer := range view.Layers {
-		heads[index] = layer.Head
-	}
-	result, err := prMergeRequest(cmd.Context(), workspace.ID, args[1], args[0], args[2], heads, human)
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(cmd.OutOrStdout(), "merge request: %s\n", result.Phase)
-	return err
-}
-
-var requestMergeCmd = &cobra.Command{
-	Use:     "request-merge <stack> <lead> <layer>",
-	Short:   "Ask a human to confirm merging a stack through a chosen layer",
-	GroupID: "git",
-	Long: `Record a merge request pinned to the stack's current heads. Nothing merges
-until a human confirms it in the UI or with 'loom confirm-merge' within 30 minutes.`,
-	Args: cobra.ExactArgs(3),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		resolver, err := resolvePRStackWorkspace()
-		if err != nil {
-			return err
-		}
-		// D42: the request records whoever runs it; a task agent is refused.
-		actor := resolveCommandActor(args[1])
-		requester := publish.MergeActor{Kind: actor.Kind, ID: actor.ID}
-		workspace := resolver.Config.Workspaces[resolver.WorkspaceName()]
-		request, err := prRequestMerge(cmd.Context(), workspace.ID, args[1], args[0], args[2], requester)
-		if err != nil {
-			return err
-		}
-		return printMergeRequest(cmd, request)
-	},
-}
-
-var confirmMergeCmd = &cobra.Command{
-	Use:     "confirm-merge <lead> <request-id>",
-	Short:   "Confirm a lead's merge request for its exact heads",
-	GroupID: "git",
-	Args:    cobra.ExactArgs(2),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		human, err := humanMergeActor()
-		if err != nil {
-			return err
-		}
-		resolver, err := resolvePRStackWorkspace()
-		if err != nil {
-			return err
-		}
-		workspace := resolver.Config.Workspaces[resolver.WorkspaceName()]
-		requests, err := prMergeRequests(cmd.Context(), workspace.ID, args[0])
-		if err != nil {
-			return err
-		}
-		for _, request := range requests {
-			if request.ID != args[1] {
-				continue
-			}
-			if err := printMergeRequest(cmd, request); err != nil {
-				return err
-			}
-			if err := confirmMergeUpTo(cmd, request.Target); err != nil {
-				return err
-			}
-			result, err := prConfirmMerge(cmd.Context(), workspace.ID, args[0], request.ID, human)
-			if err != nil {
-				return err
-			}
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "merge request: %s\n", result.Phase)
-			return err
-		}
-		return fmt.Errorf("merge request %s not found for lead %s", args[1], args[0])
-	},
-}
-
-func printMergeRequest(cmd *cobra.Command, request publish.MergeRequestView) error {
-	out := cmd.OutOrStdout()
-	if _, err := fmt.Fprintf(out, "merge request %s: %s up to %s, %s by %s %s, expires %s\n", request.ID, request.StackID,
-		request.Target, request.Status, request.RequestedKind, request.RequestedBy, request.ExpiresAt.Format("15:04:05Z07:00")); err != nil {
-		return err
-	}
-	for _, layer := range request.Layers {
-		if _, err := fmt.Fprintf(out, "%s %s checks=%s review=%s %s\n", layer.Change, layer.Head, layer.Checks, layer.Review, layer.PRURL); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// humanMergeActor refuses agent sessions (the lead's or a task agent's);
-// local mode trusts the OS user (D28).
-func humanMergeActor() (publish.MergeActor, error) {
-	actor, err := requireHumanCommand("merge confirmation")
-	if err != nil {
-		return publish.MergeActor{}, err
-	}
-	return publish.MergeActor{Kind: actor.Kind, ID: actor.ID}, nil
-}
-
-func confirmMergeUpTo(cmd *cobra.Command, target string) error {
-	if _, err := fmt.Fprintf(cmd.OutOrStdout(), "Type 'merge %s' to confirm these exact heads: ", target); err != nil {
-		return err
-	}
-	line, err := bufio.NewReader(cmd.InOrStdin()).ReadString('\n')
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(line) != "merge "+target {
-		return fmt.Errorf("merge not confirmed")
-	}
-	return nil
 }
 
 var prStackCmd = &cobra.Command{

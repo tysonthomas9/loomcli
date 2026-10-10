@@ -247,7 +247,7 @@ func ReconcileMergeApprovals(ctx context.Context) error {
 }
 
 // PublishedStack is one Loom Git stack of PRs, as the user can address it with
-// loom git merge-up-to. A cross-repo lead has one per repository.
+// loom merge. A cross-repo lead has one per repository.
 type PublishedStack struct {
 	StackID string                `json:"stack_id"`
 	Repo    string                `json:"repo"`

@@ -9,96 +9,64 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/publish"
-	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
-func TestMergeUpToHTTPPassesExactConfirmedHeads(t *testing.T) {
-	oldPreview, oldRequest := mergePreview, mergeRequest
-	t.Cleanup(func() { mergePreview, mergeRequest = oldPreview, oldRequest })
-	mergePreview = func(_ context.Context, workspace, lead, stack, target string) (publish.MergeStackView, error) {
-		if workspace != "W" || lead != "L" || stack != "feature" || target != "C" {
-			t.Fatalf("preview args %s %s %s %s", workspace, lead, stack, target)
-		}
-		return publish.MergeStackView{StackID: stack, Target: target, Layers: []publish.MergeLayerView{{Change: "A", Head: "a"}, {Change: "B", Head: "b"}, {Change: "C", Head: "c"}, {Change: "D", Head: "d"}}}, nil
-	}
-	called := false
-	mergeRequest = func(_ context.Context, workspace, lead, stack, target string, heads []string, actor publish.MergeActor) (publish.MergeStackView, error) {
-		called = true
-		if workspace != "W" || lead != "L" || stack != "feature" || target != "C" || strings.Join(heads, ",") != "a,b,c,d" ||
-			actor != (publish.MergeActor{Kind: "human", ID: "local-user"}) {
-			t.Fatalf("request args %s %s %s %s %v", workspace, lead, stack, target, heads)
-		}
-		return publish.MergeStackView{Phase: "ready"}, nil
-	}
-	request := httptest.NewRequest(http.MethodGet, "/?stack_id=feature&target=C", nil)
-	request.SetPathValue("name", "L")
-	request = request.WithContext(middleware.WithWorkspace(request.Context(), "W"))
-	response := httptest.NewRecorder()
-	handleMergeUpTo(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"change":"D"`) {
-		t.Fatalf("preview %d %s", response.Code, response.Body.String())
-	}
-	request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"stack_id":"feature","target":"C","heads":["a","b","c","d"],"actor":{"kind":"human","id":"local-user"}}`))
-	request.SetPathValue("name", "L")
-	request = request.WithContext(middleware.WithWorkspace(request.Context(), "W"))
-	response = httptest.NewRecorder()
-	handleMergeUpTo(response, request)
-	if response.Code != http.StatusOK || !called {
-		t.Fatalf("request %d %s called=%v", response.Code, response.Body.String(), called)
-	}
-}
-
-func serveMergeRequest(method, path, body string) *httptest.ResponseRecorder {
+func serveMergeQueue(method, path, body string) *httptest.ResponseRecorder {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/workspaces/{ws}/agents/{name}/git/merge-requests", handleMergeRequests)
-	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/merge-requests", handleMergeRequests)
-	mux.HandleFunc("POST /api/workspaces/{ws}/agents/{name}/git/merge-requests/{id}/confirm", handleConfirmMergeRequest)
+	(&Module{}).Register(mux)
 	request := httptest.NewRequest(method, path, strings.NewReader(body))
-	request = request.WithContext(middleware.WithWorkspace(request.Context(), "W"))
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, request)
 	return response
 }
 
-func TestMergeRequestHTTPCreatesListsAndConfirms(t *testing.T) {
-	oldRequest, oldList, oldConfirm := requestMerge, listMergeRequests, confirmMergeRequest
-	t.Cleanup(func() { requestMerge, listMergeRequests, confirmMergeRequest = oldRequest, oldList, oldConfirm })
-	var calls []string
-	requestMerge = func(_ context.Context, workspace, lead, stack, target string, actor publish.MergeActor) (publish.MergeRequestView, error) {
-		calls = append(calls, "request "+workspace+" "+lead+" "+stack+" "+target+" "+actor.Kind+":"+actor.ID)
-		return publish.MergeRequestView{ID: "R1", Status: "pending"}, nil
-	}
-	listMergeRequests = func(_ context.Context, workspace, lead string) ([]publish.MergeRequestView, error) {
-		calls = append(calls, "list "+workspace+" "+lead)
-		return []publish.MergeRequestView{{ID: "R1", Status: "pending"}}, nil
-	}
-	confirmMergeRequest = func(_ context.Context, workspace, lead, id string, actor publish.MergeActor) (publish.MergeStackView, error) {
-		calls = append(calls, "confirm "+workspace+" "+lead+" "+id+" "+actor.Kind+":"+actor.ID)
-		if actor.Kind != "human" {
-			return publish.MergeStackView{}, loomgit.NewError(loomgit.MergeNotAuthorized, "a merge request can only be confirmed by a human", nil)
-		}
-		return publish.MergeStackView{Phase: "ready"}, nil
-	}
-	base := "/api/workspaces/W/agents/L/git/merge-requests"
-	if response := serveMergeRequest(http.MethodPost, base, `{"stack_id":"feature","target":"C","actor":{"kind":"lead","id":"L"}}`); response.Code != http.StatusOK ||
-		!strings.Contains(response.Body.String(), `"id":"R1"`) {
-		t.Fatalf("create %d %s", response.Code, response.Body.String())
-	}
-	if response := serveMergeRequest(http.MethodGet, base, ""); response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"status":"pending"`) {
-		t.Fatalf("list %d %s", response.Code, response.Body.String())
-	}
-	if response := serveMergeRequest(http.MethodPost, base+"/R1/confirm", `{"actor":{"kind":"lead","id":"L"}}`); response.Code != http.StatusConflict {
-		t.Fatalf("agent confirm %d %s", response.Code, response.Body.String())
-	}
-	oldHuman := localHumanID
+func TestMergeUpToQueuesForTheReportedActor(t *testing.T) {
+	oldQueue, oldHuman := queueMergeUpTo, localHumanID
+	t.Cleanup(func() { queueMergeUpTo, localHumanID = oldQueue, oldHuman })
 	localHumanID = func() string { return "Tyson" }
-	t.Cleanup(func() { localHumanID = oldHuman })
-	if response := serveMergeRequest(http.MethodPost, base+"/R1/confirm", `{"actor":{"kind":"human"}}`); response.Code != http.StatusOK ||
-		!strings.Contains(response.Body.String(), `"phase":"ready"`) {
-		t.Fatalf("human confirm %d %s", response.Code, response.Body.String())
+	var calls []string
+	queueMergeUpTo = func(_ context.Context, workspace, change string, actor publish.MergeActor) (publish.MergeStackView, error) {
+		calls = append(calls, workspace+" "+change+" "+actor.Kind+":"+actor.ID)
+		if actor.Kind == "lead" {
+			return publish.MergeStackView{}, loomgit.NewError(loomgit.MergeNotAuthorized, publish.LeadMayMergeOff, nil)
+		}
+		return publish.MergeStackView{StackID: "feature", Target: change, Phase: "ready"}, nil
 	}
-	want := "request W L feature C lead:L|list W L|confirm W L R1 lead:L|confirm W L R1 human:Tyson"
-	if strings.Join(calls, "|") != want {
+	path := "/api/workspaces/W/changes/C/merge-up-to"
+	if response := serveMergeQueue(http.MethodPost, path, `{"actor":{"kind":"human"}}`); response.Code != http.StatusOK ||
+		!strings.Contains(response.Body.String(), `"phase":"ready"`) {
+		t.Fatalf("human %d %s", response.Code, response.Body.String())
+	}
+	if response := serveMergeQueue(http.MethodPost, path, `{"actor":{"kind":"lead","id":"L"}}`); response.Code != http.StatusConflict ||
+		!strings.Contains(response.Body.String(), "Lead may merge is off") {
+		t.Fatalf("lead %d %s", response.Code, response.Body.String())
+	}
+	if response := serveMergeQueue(http.MethodPost, path, `not json`); response.Code != http.StatusBadRequest {
+		t.Fatalf("bad body %d", response.Code)
+	}
+	if strings.Join(calls, "|") != "W C human:Tyson|W C lead:L" {
 		t.Fatalf("calls=%v", calls)
+	}
+}
+
+func TestMergeQueueListsTheWorkspaceQueue(t *testing.T) {
+	old := mergeQueue
+	t.Cleanup(func() { mergeQueue = old })
+	mergeQueue = func(_ context.Context, workspace string) ([]publish.QueuedMerge, error) {
+		return []publish.QueuedMerge{{StackID: "feature-" + workspace, Target: "C", Phase: "ready", QueuedBy: "lead"}}, nil
+	}
+	response := serveMergeQueue(http.MethodGet, "/api/workspaces/W/git/merge-queue", "")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"stack_id":"feature-W"`) ||
+		!strings.Contains(response.Body.String(), `"queued_by":"lead"`) {
+		t.Fatalf("queue %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestOldMergeRequestRoutesAreGone(t *testing.T) {
+	for _, path := range []string{"/api/workspaces/W/agents/L/git/merge-requests", "/api/workspaces/W/agents/L/git/merge-requests/R1/confirm",
+		"/api/workspaces/W/agents/L/git/merge-up-to"} {
+		if response := serveMergeQueue(http.MethodPost, path, `{}`); response.Code != http.StatusNotFound && response.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("%s still served: %d", path, response.Code)
+		}
 	}
 }

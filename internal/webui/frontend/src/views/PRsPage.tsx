@@ -19,8 +19,9 @@ import { useSearchParams } from "react-router-dom";
 
 import type { GitPullRequest } from "@/api/workspace";
 import type { Issue } from "@/types";
+import { MergeQueue } from "@/components/MergeQueue";
 import { useWorkspaceViewData } from "@/contexts/WorkspaceViewContext";
-import { usePullRequests } from "@/hooks/workspace";
+import { usePullRequests, useWorkspaceContext } from "@/hooks/workspace";
 import { getReviewType, isPRUrl, prKeyFromRef } from "@/utils/issue";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
 
@@ -237,6 +238,7 @@ function Avatar({ name }: { name: string }): JSX.Element {
 
 export function PRsPage(): JSX.Element {
   const { issues } = useWorkspaceViewData();
+  const { workspaceId } = useWorkspaceContext();
   const { pullRequests, warnings, loading, error } = usePullRequests({
     state: "all",
   });
@@ -541,6 +543,8 @@ export function PRsPage(): JSX.Element {
           {githubWarning}
         </p>
       )}
+
+      <MergeQueue workspaceId={workspaceId} />
 
       {!loading && rows.length === 0 ? (
         <div className={styles.empty}>

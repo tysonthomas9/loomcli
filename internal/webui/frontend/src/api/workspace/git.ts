@@ -62,32 +62,38 @@ export interface MergeStackView {
 // The local server names the human as its OS user; human-only is advisory (D28).
 const LOCAL_HUMAN = { kind: "human" } as const;
 
-export async function gitMergePreview(
+/**
+ * Queue "merge up to here" for a change's PR as the local human (D38): the PR
+ * and every approved PR below it merge bottom up. The lead's `loom merge`
+ * joins the same queue.
+ */
+export async function queueMergeUpTo(
   workspaceId: string,
-  agentName: string,
-  stackId: string,
-  target: string,
+  change: string,
 ): Promise<MergeStackView> {
-  const query = new URLSearchParams({ stack_id: stackId, target });
-  return get<MergeStackView>(
-    `${agentGitUrl(workspaceId, agentName, "merge-up-to")}?${query}`,
+  return post<MergeStackView>(
+    wsUrl(workspaceId, `/changes/${encodeURIComponent(change)}/merge-up-to`),
+    { actor: LOCAL_HUMAN },
   );
 }
 
-export async function gitMergeUpTo(
+/** A stack's queued, running or blocked merge. */
+export interface QueuedMerge {
+  stack_id: string;
+  target: string;
+  pr_number?: number;
+  pr_url?: string;
+  backend: string;
+  phase: string;
+  reason?: string;
+  /** "lead" for the lead, otherwise the human who asked. */
+  queued_by?: string;
+}
+
+export async function fetchMergeQueue(
   workspaceId: string,
-  agentName: string,
-  preview: MergeStackView,
-): Promise<MergeStackView> {
-  return post<MergeStackView>(
-    agentGitUrl(workspaceId, agentName, "merge-up-to"),
-    {
-      stack_id: preview.stack_id,
-      target: preview.target,
-      heads: preview.layers.map((layer) => layer.head),
-      actor: LOCAL_HUMAN,
-    },
-  );
+): Promise<QueuedMerge[]> {
+  return get<QueuedMerge[]>(wsUrl(workspaceId, "/git/merge-queue"));
 }
 
 export interface GitSettings {
@@ -109,50 +115,6 @@ export async function updateGitSettings(
   return put<{ settings: GitSettings; warning: string }>(
     wsUrl(workspaceId, "/git/settings"),
     { ...change, actor: LOCAL_HUMAN },
-  );
-}
-
-export interface MergeRequestView {
-  id: string;
-  stack_id: string;
-  target: string;
-  lead: string;
-  status: "pending" | "confirmed" | "stale" | "expired";
-  requested_kind: string;
-  requested_by: string;
-  confirmed_by?: string;
-  expires_at: string;
-  audit?: string;
-  layers: Array<{
-    change: string;
-    head: string;
-    pr_url: string;
-    checks: string;
-    review: string;
-  }>;
-}
-
-export async function gitMergeRequests(
-  workspaceId: string,
-  agentName: string,
-): Promise<MergeRequestView[]> {
-  return get<MergeRequestView[]>(
-    agentGitUrl(workspaceId, agentName, "merge-requests"),
-  );
-}
-
-export async function gitConfirmMergeRequest(
-  workspaceId: string,
-  agentName: string,
-  requestId: string,
-): Promise<MergeStackView> {
-  return post<MergeStackView>(
-    agentGitUrl(
-      workspaceId,
-      agentName,
-      `merge-requests/${encodeURIComponent(requestId)}/confirm`,
-    ),
-    { actor: LOCAL_HUMAN },
   );
 }
 

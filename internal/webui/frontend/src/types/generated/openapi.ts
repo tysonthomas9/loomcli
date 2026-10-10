@@ -1420,59 +1420,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/workspaces/{ws}/agents/{name}/git/merge-up-to": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** Preview a recorded stack merge and its per-layer progress */
-    get: operations["gitMergePreview"];
-    put?: never;
-    /** Create a human-confirmed merge request for exact stack heads */
-    post: operations["gitMergeUpTo"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/workspaces/{ws}/agents/{name}/git/merge-requests": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /** List a lead's merge requests, newest first */
-    get: operations["gitMergeRequests"];
-    put?: never;
-    /** Record a merge request pinned to the stack's current heads; never merges */
-    post: operations["gitRequestMerge"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/workspaces/{ws}/agents/{name}/git/merge-requests/{id}/confirm": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Confirm a pending merge request as a human (advisory in local mode) */
-    post: operations["gitConfirmMergeRequest"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/workspaces/{ws}/agents/{name}/git/reset-preview": {
     parameters: {
       query?: never;
@@ -1862,6 +1809,53 @@ export interface paths {
     put?: never;
     /** Record a verdict for an exact revision head */
     post: operations["submitRevisionVerdict"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/changes/{change}/merge-up-to": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        change: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Queue "merge up to here" for a change's PR
+     * @description The one merge queue (D38). Queues a merge of the change's PR and every
+     *     approved PR below it in its stack, bottom up; Reconcile lands them. The
+     *     Pull Requests page's Merge up to here button sends a human actor and the
+     *     lead's `loom merge <task>` a lead actor. A lead is refused with 409
+     *     "Lead may merge is off" while that setting is off, and nothing is queued.
+     *     Asking again for the queued target returns its progress; another target
+     *     is refused with 409 until the running merge finishes.
+     */
+    post: operations["queueMergeUpTo"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/git/merge-queue": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the workspace's queued, running and blocked stack merges */
+    get: operations["getMergeQueue"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -2591,26 +2585,17 @@ export interface components {
       /** @description Omitted for a human in the local UI; the server uses its OS user (advisory, D28). */
       id?: string;
     };
-    MergeRequestView: {
-      id: string;
+    QueuedMerge: {
       stack_id: string;
       target: string;
-      lead: string;
-      /** @enum {string} */
-      status: "pending" | "confirmed" | "stale" | "expired";
-      requested_kind: string;
-      requested_by: string;
-      confirmed_by?: string;
-      /** Format: date-time */
-      expires_at: string;
-      audit?: string;
-      layers: {
-        change: string;
-        head: string;
-        pr_url: string;
-        checks: string;
-        review: string;
-      }[];
+      pr_number?: number;
+      pr_url?: string;
+      backend: string;
+      /** @description ready (queued, waiting for green), dispatching/sent/landing/restacking (merging) or blocked. */
+      phase: string;
+      reason?: string;
+      /** @description "lead" for the lead, otherwise the human who asked. */
+      queued_by?: string;
     };
     ErrorResponse: {
       /** @constant */
@@ -7001,7 +6986,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description PR created. In stack mode `stack_id` names the Loom Git stack the PR joined (one per repository for a cross-repo lead), for `loom git merge-up-to`. */
+      /** @description PR created. In stack mode `stack_id` names the Loom Git stack the PR joined (one per repository for a cross-repo lead), for `loom merge`. */
       200: {
         headers: {
           [name: string]: unknown;
@@ -7014,158 +6999,6 @@ export interface operations {
             no_commits?: boolean;
             stack_id?: string;
           };
-        };
-      };
-    };
-  };
-  gitMergePreview: {
-    parameters: {
-      query: {
-        stack_id: string;
-        target: string;
-      };
-      header?: never;
-      path: {
-        /** @description Workspace identifier */
-        ws: components["parameters"]["WorkspaceId"];
-        /** @description Agent worktree name */
-        name: components["parameters"]["AgentName"];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Stack merge state */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["MergeStackView"];
-        };
-      };
-    };
-  };
-  gitMergeUpTo: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Workspace identifier */
-        ws: components["parameters"]["WorkspaceId"];
-        /** @description Agent worktree name */
-        name: components["parameters"]["AgentName"];
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": {
-          stack_id: string;
-          target: string;
-          heads: string[];
-          actor: components["schemas"]["MergeActor"];
-        };
-      };
-    };
-    responses: {
-      /** @description Merge request recorded */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["MergeStackView"];
-        };
-      };
-    };
-  };
-  gitMergeRequests: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Workspace identifier */
-        ws: components["parameters"]["WorkspaceId"];
-        /** @description Agent worktree name */
-        name: components["parameters"]["AgentName"];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Merge requests */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["MergeRequestView"][];
-        };
-      };
-    };
-  };
-  gitRequestMerge: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Workspace identifier */
-        ws: components["parameters"]["WorkspaceId"];
-        /** @description Agent worktree name */
-        name: components["parameters"]["AgentName"];
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": {
-          stack_id: string;
-          target: string;
-          actor: components["schemas"]["MergeActor"];
-        };
-      };
-    };
-    responses: {
-      /** @description Pending merge request */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["MergeRequestView"];
-        };
-      };
-    };
-  };
-  gitConfirmMergeRequest: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Workspace identifier */
-        ws: components["parameters"]["WorkspaceId"];
-        /** @description Agent worktree name */
-        name: components["parameters"]["AgentName"];
-        id: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": {
-          actor: components["schemas"]["MergeActor"];
-        };
-      };
-    };
-    responses: {
-      /** @description Merge started */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["MergeStackView"];
         };
       };
     };
@@ -8164,6 +7997,68 @@ export interface operations {
         };
         content: {
           "application/json": Record<string, never>;
+        };
+      };
+    };
+  };
+  queueMergeUpTo: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        change: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          actor: components["schemas"]["MergeActor"];
+        };
+      };
+    };
+    responses: {
+      /** @description Merge queued (or already queued) */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MergeStackView"];
+        };
+      };
+      /** @description Refused and nothing queued, for example "Lead may merge is off". */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getMergeQueue: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description One entry per stack with an unfinished merge */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["QueuedMerge"][];
         };
       };
     };

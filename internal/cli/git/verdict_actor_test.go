@@ -244,35 +244,6 @@ func TestRejectRecordsWhoeverRunsIt(t *testing.T) {
 	}
 }
 
-func TestRequestMergeFromTaskAgentRecordsTheAgent(t *testing.T) {
-	stubMergeRequestCommands(t)
-	old := verdictEnv
-	t.Cleanup(func() { verdictEnv = old })
-	setVerdictEnv(taskAgentEnv())
-	var got publish.MergeActor
-	prRequestMerge = func(_ context.Context, _, _, _, _ string, requester publish.MergeActor) (publish.MergeRequestView, error) {
-		got = requester
-		return publish.MergeRequestView{}, nil
-	}
-	cmd := *requestMergeCmd
-	cmd.SetOut(&bytes.Buffer{})
-	if err := cmd.RunE(&cmd, []string{"feature", "L", "C"}); err != nil {
-		t.Fatal(err)
-	}
-	if got.Kind != "agent" || got.ID != "worker-1" {
-		t.Fatalf("task agent merge request recorded as %+v", got)
-	}
-}
-
-func TestConfirmMergeRefusesTaskAgent(t *testing.T) {
-	old := verdictEnv
-	t.Cleanup(func() { verdictEnv = old })
-	setVerdictEnv(map[string]string{"USER": "tyson", "LOOM_TASK_RUN_ID": "run-1"})
-	if _, err := humanMergeActor(); err == nil || !strings.Contains(err.Error(), "LOOM_TASK_RUN_ID") {
-		t.Fatalf("task agent confirmed a merge: %v", err)
-	}
-}
-
 func TestApproveDryRunRecordsNothing(t *testing.T) {
 	stubApprovePublish(t, func(context.Context, string, string) ([]publish.ApprovalOutcome, error) { return nil, nil })
 	calls := captureApprovals(t)
