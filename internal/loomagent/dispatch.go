@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"log/slog"
 	"slices"
 	"time"
 
@@ -48,9 +49,15 @@ func (s *Service) Dispatch(ctx context.Context, agentID string) error {
 
 // wake dispatches for a caller that already accepted its own change. A
 // harness failure leaves the message in line and shows Attention
-// harness_unavailable; the next wake retries.
+// harness_unavailable; the next wake retries. A failed checkpoint leaves it
+// in line too, for the reconcile queue to retry.
 func (s *Service) wake(ctx context.Context, a loomstore.Agent) (loomstore.Agent, error) {
 	a, err := s.dispatch(ctx, a)
+	if isCheckpointFailed(err) {
+		slog.Warn("loomagent: checkpoint failed; the next turn waits for it", "agent", a.AgentID, "error", err)
+		s.retryLater(a.AgentID)
+		return a, nil
+	}
 	var e *Error
 	if errors.As(err, &e) && (e.Code == CodeHarnessUnavailable || e.Code == CodeHarnessError) {
 		cur, rerr := s.live(ctx, a.AgentID)
@@ -80,6 +87,9 @@ func takes(a loomstore.Agent) bool {
 // dispatch is Dispatch with the agent lock held.
 func (s *Service) dispatch(ctx context.Context, a loomstore.Agent) (loomstore.Agent, error) {
 	if err := s.deliverCompletions(ctx, a); err != nil {
+		return a, err
+	}
+	if err := s.checkpoint(ctx, a); err != nil { // the next turn waits for the last one's ref
 		return a, err
 	}
 	if !takes(a) {

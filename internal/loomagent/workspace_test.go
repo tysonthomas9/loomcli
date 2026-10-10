@@ -40,7 +40,45 @@ type fakeWorkspace struct {
 	ensured []WorkspaceSpec
 	path    string // every Ensure's path; "" is /wt/<key>
 	mu      sync.Mutex
-	failing error // every Ensure fails with it, as with its base ref gone; under mu
+	failing error                  // every Ensure fails with it, as with its base ref gone; under mu
+	tree    string                 // the working copy's content a capture saves; under mu
+	refs    map[string]string      // each checkpoint ref: the tree it saved; under mu
+	capture func(ref string) error // runs before each new capture, outside mu; an error fails it
+}
+
+// setTree sets the working copy's content the next capture saves.
+func (f *fakeWorkspace) setTree(tree string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.tree = tree
+}
+
+// checkpoint is ref's saved tree, and whether ref exists.
+func (f *fakeWorkspace) checkpoint(ref string) (string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	tree, ok := f.refs[ref]
+	return tree, ok
+}
+
+func (f *fakeWorkspace) Checkpoint(_ context.Context, _ WorkspaceSpec, ref string) error {
+	if _, ok := f.checkpoint(ref); ok {
+		return nil
+	}
+	if f.capture != nil {
+		if err := f.capture(ref); err != nil {
+			return err
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.refs == nil {
+		f.refs = map[string]string{}
+	}
+	if _, ok := f.refs[ref]; !ok {
+		f.refs[ref] = f.tree
+	}
+	return nil
 }
 
 // setEnsureErr makes every Ensure fail with err; nil restores it.

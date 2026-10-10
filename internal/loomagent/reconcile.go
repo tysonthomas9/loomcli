@@ -122,7 +122,9 @@ func (s *Service) reconcileAgent(ctx context.Context, agentID string) (err error
 	case a.DeletedAt != nil:
 	case !owes(a, false):
 		serr := s.settle(ctx, agentID)
-		s.failed(ctx, agentID, AttentionHarnessUnavailable, serr)
+		if !isCheckpointFailed(serr) { // not the harness's: retried with no Attention
+			s.failed(ctx, agentID, AttentionHarnessUnavailable, serr)
+		}
 		if !isPermanent(serr) {
 			err = errors.Join(err, serr)
 		}

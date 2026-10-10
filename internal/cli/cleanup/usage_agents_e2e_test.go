@@ -29,6 +29,8 @@ func (e2eWorkspace) CheckBase(context.Context, string, string) error { return ni
 
 func (e2eWorkspace) Remove(context.Context, loomagent.WorkspaceSpec) error { return nil }
 
+func (e2eWorkspace) Checkpoint(context.Context, loomagent.WorkspaceSpec, string) error { return nil }
+
 func (e2eWorkspace) Publish(context.Context, loomagent.PublishRequest) (loomagent.PublishResult, error) {
 	return loomagent.PublishResult{}, nil
 }
