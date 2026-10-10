@@ -236,4 +236,26 @@ CREATE TABLE IF NOT EXISTS agent_update_requests (
   PRIMARY KEY (agent_id, request_id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS agent_update_requests_switching ON agent_update_requests(agent_id) WHERE status = 'switching';
+`, `
+-- OR10: an agent's watch on one PR of its repo. viewer is the host GitHub
+-- login the watch last read as; the cursors are what the agent was last
+-- told about (head SHA, check runs, comments), last_told its text, and
+-- wake_count the wakes since check or conflict news.
+CREATE TABLE IF NOT EXISTS pr_watches (
+  agent_id        TEXT NOT NULL,
+  workspace_id    TEXT NOT NULL,
+  owner           TEXT NOT NULL,
+  repo            TEXT NOT NULL,
+  number          INTEGER NOT NULL,
+  viewer          TEXT NOT NULL,
+  head_sha        TEXT NOT NULL,
+  checks_cursor   TEXT NOT NULL,
+  comments_cursor TEXT NOT NULL,
+  wake_count      INTEGER NOT NULL DEFAULT 0,
+  last_told       TEXT NOT NULL DEFAULT '',
+  created_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL,
+  PRIMARY KEY (agent_id, owner, repo, number)
+);
+CREATE INDEX IF NOT EXISTS pr_watches_workspace ON pr_watches(workspace_id);
 `}

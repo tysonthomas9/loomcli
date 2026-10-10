@@ -10,6 +10,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/connector/providers"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/loomagent"
+	"github.com/tysonthomas9/loomcli/internal/loomstore"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -73,17 +74,9 @@ func (h *Handler) githubRead(w http.ResponseWriter, r *http.Request, s *loomagen
 	if _, err := envelope(w, r, &in); err != nil {
 		return 0, nil, err
 	}
-	c := actor(r)
-	if c.Kind != "agent" {
-		return 0, nil, &loomagent.Error{Code: CodeGitHubDenied, Message: "github_read is for agents' bridges"}
-	}
-	a, err := s.Get(r.Context(), c.ID)
+	c, repo, err := h.githubAgent(r, s)
 	if err != nil {
 		return 0, nil, err
-	}
-	p, err := h.presets.Get(r.Context(), a.Agent.Preset)
-	if err != nil || !slices.Contains(p.Tools, "github_read") {
-		return 0, nil, &loomagent.Error{Code: CodeGitHubDenied, Message: "this agent has no github_read tool"}
 	}
 	if h.github == nil {
 		return 0, nil, &loomagent.Error{Code: CodeGitHubUnavailable, Message: "GitHub is not configured on this Loom host (no GitHub token in its settings), so github_read is unavailable"}
@@ -92,7 +85,7 @@ func (h *Handler) githubRead(w http.ResponseWriter, r *http.Request, s *loomagen
 	raw, _ := json.Marshal(in)
 	_ = json.Unmarshal(raw, &args)
 	delete(args, "op")
-	body, err := h.github(r.Context(), middleware.WorkspaceFromContext(r.Context()), c.ID, a.Agent.Repo, in.Op, args)
+	body, err := h.github(r.Context(), middleware.WorkspaceFromContext(r.Context()), c, repo, in.Op, args)
 	if err != nil {
 		return 0, nil, githubError(err)
 	}
@@ -102,6 +95,95 @@ func (h *Handler) githubRead(w http.ResponseWriter, r *http.Request, s *loomagen
 	out.Text, _ = body["text"].(string)
 	out.Truncated, _ = body["truncated"].(bool)
 	out.Next, _ = body["next"].(string)
+	return http.StatusOK, out, nil
+}
+
+// githubAgent is the calling agent and its repo, when it is an agent with
+// the github_read tool.
+func (h *Handler) githubAgent(r *http.Request, s *loomagent.Service) (agentID, repo string, err error) {
+	c := actor(r)
+	if c.Kind != "agent" {
+		return "", "", &loomagent.Error{Code: CodeGitHubDenied, Message: "github_read is for agents' bridges"}
+	}
+	a, err := s.Get(r.Context(), c.ID)
+	if err != nil {
+		return "", "", err
+	}
+	p, err := h.presets.Get(r.Context(), a.Agent.Preset)
+	if err != nil || !slices.Contains(p.Tools, "github_read") {
+		return "", "", &loomagent.Error{Code: CodeGitHubDenied, Message: "this agent has no github_read tool"}
+	}
+	return c.ID, a.Agent.Repo, nil
+}
+
+// PRWatcher saves and removes an agent's watch on a PR of its own repo
+// (OR10), reading GitHub through the host GitHub connector as the host's
+// viewer; serve's prwatch.Service implements it.
+type PRWatcher interface {
+	Watch(ctx context.Context, ws, agentID, repoPath string, number int) (loomstore.PRWatch, bool, error)
+	Unwatch(ctx context.Context, ws, agentID, repoPath string, number int) (bool, error)
+}
+
+// WithPRWatch sets the PR watcher github/watch uses; nil refuses it.
+func (h *Handler) WithPRWatch(w PRWatcher) *Handler {
+	h.prWatch = w
+	return h
+}
+
+// GitHubWatchBody names a PR of the calling agent's repo.
+type GitHubWatchBody struct {
+	Number int `json:"number" jsonschema:"the PR number"`
+}
+
+// GitHubWatchResult is the watch github/watch saved, or whether
+// github/unwatch removed one.
+type GitHubWatchResult struct {
+	Owner   string `json:"owner,omitempty"`
+	Repo    string `json:"repo,omitempty"`
+	Number  int    `json:"number"`
+	Viewer  string `json:"viewer,omitempty"`
+	Created bool   `json:"created,omitempty"`
+	Removed bool   `json:"removed,omitempty"`
+}
+
+// githubWatch serves POST github/watch: the calling agent watches a PR of
+// its own repo.
+func (h *Handler) githubWatch(w http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
+	return h.githubWatchRoute(w, r, s, true)
+}
+
+// githubUnwatch serves POST github/unwatch.
+func (h *Handler) githubUnwatch(w http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
+	return h.githubWatchRoute(w, r, s, false)
+}
+
+func (h *Handler) githubWatchRoute(w http.ResponseWriter, r *http.Request, s *loomagent.Service, watch bool) (int, any, error) {
+	var in GitHubWatchBody
+	if _, err := envelope(w, r, &in); err != nil {
+		return 0, nil, err
+	}
+	agentID, repo, err := h.githubAgent(r, s)
+	if err != nil {
+		return 0, nil, err
+	}
+	if h.prWatch == nil {
+		return 0, nil, &loomagent.Error{Code: CodeGitHubUnavailable, Message: "PR watches are unavailable on this Loom host (no host GitHub connector)"}
+	}
+	if in.Number <= 0 {
+		return 0, nil, &loomagent.Error{Code: CodeGitHubInvalid, Message: "number must be a PR number"}
+	}
+	ws, out := middleware.WorkspaceFromContext(r.Context()), GitHubWatchResult{Number: in.Number}
+	if !watch {
+		if out.Removed, err = h.prWatch.Unwatch(r.Context(), ws, agentID, repo, in.Number); err != nil {
+			return 0, nil, githubError(err)
+		}
+		return http.StatusOK, out, nil
+	}
+	pw, created, err := h.prWatch.Watch(r.Context(), ws, agentID, repo, in.Number)
+	if err != nil {
+		return 0, nil, githubError(err)
+	}
+	out.Owner, out.Repo, out.Viewer, out.Created = pw.Owner, pw.Repo, pw.Viewer, created
 	return http.StatusOK, out, nil
 }
 
