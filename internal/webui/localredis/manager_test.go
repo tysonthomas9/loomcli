@@ -397,3 +397,25 @@ func TestDumpContext_StopsWithCallerContext(t *testing.T) {
 		t.Fatalf("snapshot not written: %v", err)
 	}
 }
+
+func TestDumpContext_GivesUpWaitingForAnotherDump(t *testing.T) {
+	m, err := NewManager(filepath.Join(t.TempDir(), "snapshot.json"), false, nil)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	defer m.Close()
+	m.dumpSem <- struct{}{} // another sweep is running
+	defer func() { <-m.dumpSem }()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- m.DumpContext(ctx) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("DumpContext succeeded while another dump held the lock")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("DumpContext ignored its deadline while waiting for another dump")
+	}
+}

@@ -30,4 +30,11 @@ func TestFlushAfterCreate(t *testing.T) {
 	if w := service.GetCreateWarnings(ctx); len(w) != 1 {
 		t.Fatalf("want one warning for the failed flush, got %v", w)
 	}
+
+	expired, cancel := context.WithCancel(service.WithCreateWarnings(context.Background()))
+	cancel()
+	timedOut := flushAfterCreate(create, func(ctx context.Context) error { return ctx.Err() })
+	if _, err := timedOut(expired, service.WorkspaceCreateRequest{}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("want the request's context error from an expired flush, got %v", err)
+	}
 }

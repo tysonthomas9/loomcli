@@ -676,7 +676,9 @@ func flushAfterCreate(create service.WorkspaceCreateFn, flush func(context.Conte
 	return func(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
 		res, err := create(ctx, req)
 		if err == nil {
-			if ferr := flush(ctx); ferr != nil {
+			if ferr := flush(ctx); ferr != nil && ctx.Err() != nil {
+				return res, ctx.Err()
+			} else if ferr != nil {
 				slog.Warn("workspace created but not yet flushed to disk", "workspace", res.WorkspaceID, "err", ferr)
 				service.AddCreateWarning(ctx, "workspace created but not yet saved to disk; a crash in the next 30s may lose it: "+ferr.Error())
 			}
