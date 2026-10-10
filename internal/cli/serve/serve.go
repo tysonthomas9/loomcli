@@ -35,6 +35,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui"
 	webuiapp "github.com/tysonthomas9/loomcli/internal/webui/app"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
+	"github.com/tysonthomas9/loomcli/internal/webui/service"
 )
 
 // envLoomFleetMode is the env var that toggles --fleet-mode when no flag is
@@ -658,8 +659,29 @@ func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, sto
 	}
 	applyFleetConfig(&cfg, fs)
 	applyWorkspaceConfig(&cfg)
+	if storeHandle != nil {
+		cfg.WorkspaceCreateFn = flushAfterCreate(cfg.WorkspaceCreateFn, storeHandle.Flush)
+	}
 	applyCORSConfig(&cfg)
 	return cfg
+}
+
+// flushAfterCreate makes a created workspace durable before the API returns.
+// The embedded store otherwise reaches disk only on its periodic snapshot or a
+// clean shutdown, so a hard kill right after the create lost the workspace.
+func flushAfterCreate(create service.WorkspaceCreateFn, flush func() error) service.WorkspaceCreateFn {
+	if create == nil {
+		return nil
+	}
+	return func(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
+		res, err := create(ctx, req)
+		if err == nil {
+			if ferr := flush(); ferr != nil {
+				slog.Warn("workspace created but not yet flushed to disk", "workspace", res.WorkspaceID, "err", ferr)
+			}
+		}
+		return res, err
+	}
 }
 
 func buildCoreServerConfig(monitorHandlers webui.MonitorHandlers, gitOps *opsimpl.GitOpsImpl, backend string) webui.ServerConfig {

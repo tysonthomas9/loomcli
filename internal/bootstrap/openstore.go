@@ -53,6 +53,15 @@ func (h *StoreHandle) URL() string {
 	return os.Getenv(EnvFleetDBURL)
 }
 
+// Flush writes an owned embedded store's in-memory keyspace to disk now
+// instead of at the next periodic snapshot. No-op otherwise.
+func (h *StoreHandle) Flush() error {
+	if h == nil || h.embedded == nil || h.embedded.redisMgr == nil {
+		return nil
+	}
+	return h.embedded.redisMgr.Dump()
+}
+
 // Close shuts down the store and any subprocess it owns. Idempotent.
 func (h *StoreHandle) Close() error {
 	var firstErr error

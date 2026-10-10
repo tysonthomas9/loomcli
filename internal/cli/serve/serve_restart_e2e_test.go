@@ -21,6 +21,16 @@ import (
 // starts again on the same LOOM_CONFIG_DIR. Needs fleet-db (FLEET_DB_BIN or
 // PATH).
 func TestE2E_ServeRestartKeepsWorkspaceRegistrations(t *testing.T) {
+	testServeRestartKeepsWorkspace(t, syscall.SIGTERM)
+}
+
+// The same holds when serve is SIGKILLed right after the create returns: no
+// shutdown hook runs, so the create itself must have reached disk.
+func TestE2E_ServeCrashKeepsWorkspaceRegistrations(t *testing.T) {
+	testServeRestartKeepsWorkspace(t, syscall.SIGKILL)
+}
+
+func testServeRestartKeepsWorkspace(t *testing.T, sig syscall.Signal) {
 	fleetDB := os.Getenv("FLEET_DB_BIN")
 	if fleetDB == "" {
 		var err error
@@ -86,8 +96,8 @@ func TestE2E_ServeRestartKeepsWorkspaceRegistrations(t *testing.T) {
 		t.Fatalf("workspace not listed before the restart: %s", got)
 	}
 
-	_ = first.Process.Signal(syscall.SIGTERM)
-	if err := first.Wait(); err != nil {
+	_ = first.Process.Signal(sig)
+	if err := first.Wait(); err != nil && sig == syscall.SIGTERM {
 		t.Fatalf("loom serve did not exit cleanly on SIGTERM: %v", err)
 	}
 

@@ -116,6 +116,9 @@ type Manager struct {
 	started   bool
 	mu        sync.Mutex
 	closeOnce sync.Once
+	// dumpMu serializes whole sweeps so a manual Dump and the periodic one
+	// cannot interleave file writes or land an older sweep last.
+	dumpMu sync.Mutex
 
 	// lastDumpHash is the SHA-256 of the most recently written snapshot
 	// payload. Subsequent Dump calls compare against this to skip
@@ -258,6 +261,8 @@ func (m *Manager) Dump() error {
 // because a verified-unchanged keyspace is just as durable as a
 // rewritten one.
 func (m *Manager) dump(ctx context.Context) error {
+	m.dumpMu.Lock()
+	defer m.dumpMu.Unlock()
 	if err := m.dumpOnce(ctx); err != nil {
 		snapshotFailuresTotal.Inc()
 		return err
