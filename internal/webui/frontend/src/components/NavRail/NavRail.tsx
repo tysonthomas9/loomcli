@@ -377,10 +377,17 @@ export function NavRail({
   useEffect(() => {
     const side = refocusChevron.current;
     refocusChevron.current = null;
-    if (side === "left" || side === "right")
-      (side === "left" ? leftChevronRef : rightChevronRef).current?.focus();
+    if (!side) return;
+    // The other chevron, or a shown workspace when there is none (the slot
+    // narrowed to hints, or widened until everything fits).
+    const chevron = {
+      left: leftChevronRef,
+      right: rightChevronRef,
+      item: null,
+    }[side]?.current;
+    if (chevron) return chevron.focus();
     const s = switcherRef.current;
-    if (side !== "item" || !s) return;
+    if (!s) return;
     const w = s.getBoundingClientRect();
     Array.from(s.querySelectorAll("button"))
       .find((b) => {

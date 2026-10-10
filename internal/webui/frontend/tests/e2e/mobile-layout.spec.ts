@@ -561,6 +561,24 @@ test("switcher at 557px: scrolling away a focused chevron keeps focus", async ({
   ).toBeFocused();
 });
 
+// MB1c: widening until every workspace fits removes both chevrons; the
+// keyboard lands on a workspace, not the document.
+test("switcher: widening until all fit keeps focus in the switcher", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 557, height: 844 });
+  await open(page);
+  const rail = page.locator('nav[aria-label="Primary"]');
+  const switcher = rail.getByRole("region", { name: "Workspace selector" });
+  await switcher.evaluate((s) => s.scrollTo({ left: 0 }));
+  await rail.getByRole("button", { name: "Scroll workspaces right" }).focus();
+  await page.setViewportSize({ width: 768, height: 844 });
+  await expect(
+    rail.getByRole("button", { name: /^Scroll workspaces / }),
+  ).toHaveCount(0);
+  await expect(switcher.locator("button:focus")).toHaveCount(1);
+});
+
 // MOB2: on a phone the sidebar is hidden, so the bottom rail's Agents button
 // opens the same agent list as a drawer (MOB2_SHOTS=<dir> saves screenshots).
 const other = { ...agent, agent_id: "a2", name: "docs-writer" };
