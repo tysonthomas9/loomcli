@@ -281,6 +281,13 @@ func TestDropCheckpointsOnlyOneAgent(t *testing.T) {
 	if err := w.DropCheckpoints(ctx, filepath.Join(t.TempDir(), "gone"), "refs/loom/checkpoints/agt_1/"); err != nil {
 		t.Fatalf("drop in a missing repo: %v", err)
 	}
+	sub := filepath.Join(s.Repo, "clone-without-git")
+	if err := os.Mkdir(sub, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.DropCheckpoints(ctx, sub, "refs/loom/checkpoints/agt_1/"); err != nil || tree(t, path, turn1) == "" {
+		t.Fatalf("drop in a clone without .git = %v; it must not reach the enclosing repo's refs", err)
+	}
 	if _, err := w.CheckpointDiff(ctx, s.Repo, "refs/heads/main", turn1); err == nil {
 		t.Fatal("CheckpointDiff accepted a branch")
 	}
