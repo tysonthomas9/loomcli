@@ -50,11 +50,11 @@ func ReapOrphanedCodexAppServers() []int {
 }
 
 func reapOrphanedCodexAppServers(leadsBaseDir string) []int {
-	out, err := exec.Command("ps", "-axww", "-o", "pid=,ppid=,pgid=,command=").Output()
+	out, err := listProcesses()
 	if err != nil {
 		return nil
 	}
-	orphans := orphanedCodexAppServers(string(out), leadsBaseDir)
+	orphans := orphanedCodexAppServers(out, leadsBaseDir)
 	for _, p := range orphans {
 		if p.pgid == p.pid {
 			_ = signalProcessGroup(p.pid, syscall.SIGTERM)
