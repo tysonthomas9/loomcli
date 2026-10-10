@@ -188,7 +188,10 @@ def pill():
                 browser("hover", sel)
                 time.sleep(0.15)
                 m = evaluate(PILL % row)
-                on_screen = all(m[k] and m[k]["top"] >= 0 and m[k]["bottom"] <= m["vh"] for k in ("bubble", "pill", "copy"))
+                # A tall bubble may run past the bottom; its top, the pill and
+                # the copy button must show.
+                on_screen = all(m[k] and m[k]["top"] >= 0 and m[k]["bottom"] <= m["vh"] for k in ("pill", "copy")) and \
+                    m["bubble"]["top"] >= 0 and m["bubble"]["top"] < m["vh"]
                 if m["shown"] and on_screen:
                     break
             else:
