@@ -114,8 +114,14 @@ function holdFullLists(): () => void {
   };
 }
 
+// A workspace's own List answer, in place of the shared agents (RS1).
+const otherWs = new Map<string, () => Promise<Response>>();
+
 async function fakeFetch(input: string) {
   const url = new URL(input, "http://localhost");
+  const ws = url.pathname.split("/")[3];
+  if (url.pathname.endsWith("/v1/agents") && otherWs.has(ws))
+    return otherWs.get(ws)!();
   if (url.pathname.endsWith("/events/token")) return json({ token: "tok" });
   if (url.pathname.endsWith("/v1/agents")) {
     lists.push(url);
@@ -140,6 +146,7 @@ beforeEach(() => {
   log.clear();
   lists = [];
   holdFull = null;
+  otherWs.clear();
   FakeEventSource.all = [];
   vi.stubGlobal("fetch", vi.fn(fakeFetch));
   vi.stubGlobal("EventSource", FakeEventSource);
@@ -230,5 +237,39 @@ describe("useAgentRoster", () => {
     renderHook(() => useAgentRoster("ws1"));
     await waitFor(() => expect(openStream()?.agents).toEqual(["lead"]));
     expect(openStream()!.url.searchParams.get("after")).toBe("lead:5");
+  });
+
+  it("ignores a List for the previous workspace that lands after a switch", async () => {
+    agents.set("a1", agent("a1"));
+    const release = holdFullLists();
+    let answerB = (_: Response) => {};
+    otherWs.set("wsB", () => new Promise((r) => (answerB = r)));
+    const { result, rerender } = renderHook(({ ws }) => useAgentRoster(ws), {
+      initialProps: { ws: "wsA" },
+    });
+    await waitFor(() => expect(lists).toHaveLength(1));
+
+    rerender({ ws: "wsB" });
+    await act(async () => release());
+    expect([...result.current.roster.keys()]).toEqual([]);
+
+    await act(async () => answerB(json({ agents: [agent("b1")], next: "" })));
+    expect([...result.current.roster.keys()]).toEqual(["b1"]);
+  });
+
+  it("never shows the previous workspace's agents when the new List fails", async () => {
+    agents.set("a1", agent("a1"));
+    otherWs.set("wsB", async () => new Response("{}", { status: 500 }));
+    const { result, rerender } = renderHook(({ ws }) => useAgentRoster(ws), {
+      initialProps: { ws: "wsA" },
+    });
+    await waitFor(() =>
+      expect([...result.current.roster.keys()]).toEqual(["a1"]),
+    );
+
+    rerender({ ws: "wsB" });
+    expect([...result.current.roster.keys()]).toEqual([]);
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+    expect([...result.current.roster.keys()]).toEqual([]);
   });
 });

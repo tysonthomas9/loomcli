@@ -94,6 +94,18 @@ export function useAgentRoster(
   const [activity, setActivity] = useState<Activities>(new Map());
   const [error, setError] = useState<string | null>(null);
 
+  // A workspace switch clears the roster, and a List for an earlier
+  // workspace never lands on the new one (RS1).
+  const [shownWs, setShownWs] = useState(workspaceId);
+  if (shownWs !== workspaceId) {
+    setShownWs(workspaceId);
+    setRoster(new Map());
+    setActivity(new Map());
+    setError(null);
+  }
+  const currentWs = useRef(workspaceId);
+  currentWs.current = workspaceId;
+
   // Each List in flight collects the stream's events that arrive while it
   // runs, and its result is the List with those events applied on top: a
   // List read before a replayed or live change never undoes it (RR1).
@@ -106,12 +118,18 @@ export function useAgentRoster(
     ) => {
       const seen: AgentEvent[] = [];
       inflight.current.add(seen);
+      const stale = () => currentWs.current !== workspaceId;
       return listAll(workspaceId, q, open)
-        .then((agents) =>
-          setRoster((r) => {
-            const next = merge(r, agents);
-            return next ? applyEvents(next, seen) : r;
-          }),
+        .then(
+          (agents) =>
+            stale() ||
+            setRoster((r) => {
+              const next = merge(r, agents);
+              return next ? applyEvents(next, seen) : r;
+            }),
+          (err) => {
+            if (!stale()) throw err;
+          },
         )
         .finally(() => inflight.current.delete(seen));
     },
