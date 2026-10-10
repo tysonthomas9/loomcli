@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -51,12 +52,15 @@ func (f *repairFixture) exec(q string, args ...any) {
 	}
 }
 
+// repairAt is the repair's place among the migrations; later ones follow it.
+var repairAt = slices.Index(migrations, historyRepair)
+
 // upgrade reopens the store as the release before the repair left it, so the
 // repair runs as the upgrade does.
 func (f *repairFixture) upgrade() {
 	f.t.Helper()
 	f.exec(`DROP TABLE IF EXISTS agent_history_unrepaired`)
-	f.exec(fmt.Sprintf("PRAGMA user_version = %d", len(migrations)-1))
+	f.exec(fmt.Sprintf("PRAGMA user_version = %d", repairAt))
 	f.s.Close()
 	f.s = openAt(f.t, f.path)
 }
@@ -64,7 +68,7 @@ func (f *repairFixture) upgrade() {
 // rerun runs the repair again on the upgraded store.
 func (f *repairFixture) rerun() {
 	f.t.Helper()
-	f.exec(migrations[len(migrations)-1])
+	f.exec(migrations[repairAt])
 }
 
 func (f *repairFixture) events(agentID string) []Event {
@@ -211,7 +215,7 @@ func TestHistoryRepairConcurrentWrites(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for range 40 {
-			if _, err := f.s.db.Exec(migrations[len(migrations)-1]); err != nil {
+			if _, err := f.s.db.Exec(migrations[repairAt]); err != nil {
 				t.Error(err)
 			}
 		}
