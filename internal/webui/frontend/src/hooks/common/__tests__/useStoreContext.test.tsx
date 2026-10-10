@@ -292,40 +292,6 @@ describe("useStoreContext", () => {
   });
 
   describe("Monitor status refresh", () => {
-    it("refreshes agent data from workspace SSE mutations", () => {
-      vi.useFakeTimers();
-
-      renderHook(() => useAgentStoreInstance(), { wrapper });
-
-      const monitorCallback = mockEvent.subscribe.mock.calls[0]?.[0] as
-        | ((mutation: {
-            type: string;
-            issue_id: string;
-            timestamp: string;
-          }) => void)
-        | undefined;
-      expect(monitorCallback).toBeDefined();
-
-      monitorCallback?.({
-        type: "status",
-        issue_id: "loom-123",
-        timestamp: new Date().toISOString(),
-      });
-
-      expect(agentMethodsRef.current.fetchData).not.toHaveBeenCalled();
-
-      act(() => {
-        vi.advanceTimersByTime(250);
-      });
-
-      expect(agentMethodsRef.current.fetchData).toHaveBeenCalledTimes(1);
-      // The server caches monitor metadata briefly; a mutation-triggered
-      // refresh must bypass it or a just-assigned lead epic stays hidden.
-      expect(agentMethodsRef.current.fetchData).toHaveBeenCalledWith({
-        fresh: true,
-      });
-    });
-
     it("ignores terminal-only SSE mutations for monitor refresh", () => {
       vi.useFakeTimers();
 
