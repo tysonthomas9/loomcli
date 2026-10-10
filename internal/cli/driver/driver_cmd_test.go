@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
+	driverpkg "github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/infra/memstore"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -316,4 +317,13 @@ func (s *fakeDriverTaskRunStore) AppendLog(context.Context, string, string, stor
 
 func (s *fakeDriverTaskRunStore) ListLogs(context.Context, string, string, store.TaskRunLogFilter) ([]*domain.TaskRunLogEntry, error) {
 	panic("unexpected ListLogs")
+}
+
+// loom driver exec-task and work-task-run build task copies, so the driver
+// commands register FleetDB's code-review bases for them (P1.26).
+func TestDriverCommandsRegisterTheCodeReviewBases(t *testing.T) {
+	l, ok := driverpkg.DefaultStackLineageLookup().(driverpkg.StackLineageLookup)
+	if !ok || l.CodeReviewBase == nil {
+		t.Fatalf("driver commands left the code-review base lookup unset: %#v", driverpkg.DefaultStackLineageLookup())
+	}
 }

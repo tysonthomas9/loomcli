@@ -176,3 +176,21 @@ func TestTaskBehindCodeReviewInAnotherRepoKeepsItsBase(t *testing.T) {
 		t.Fatalf("delegated app-lead lacks the lead's work: %q", got)
 	}
 }
+
+// The default lineage lookup reads code-review bases through the lookup loom
+// serve and loom driver register; with none registered it has none.
+func TestDefaultLineageUsesTheRegisteredCodeReviewBases(t *testing.T) {
+	t.Cleanup(func() { UseCodeReviewBases(nil) })
+	UseCodeReviewBases(nil)
+	if l, ok := DefaultStackLineageLookup().(StackLineageLookup); !ok || l.CodeReviewBase != nil {
+		t.Fatalf("default lineage with nothing registered = %#v", DefaultStackLineageLookup())
+	}
+	UseCodeReviewBases(reviewBases)
+	l, ok := DefaultStackLineageLookup().(StackLineageLookup)
+	if !ok || l.CodeReviewBase == nil {
+		t.Fatalf("default lineage ignores the registered lookup: %#v", DefaultStackLineageLookup())
+	}
+	if base, found, err := l.CodeReviewBase(context.Background(), "TEST", "task-c"); err != nil || !found || base != "task-a" {
+		t.Fatalf("registered lookup = %q, %v, %v; want task-a", base, found, err)
+	}
+}

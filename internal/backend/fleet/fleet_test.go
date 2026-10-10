@@ -1761,10 +1761,7 @@ func TestReopen_EmptyID(t *testing.T) {
 func TestReady_HappyPath(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	parent := "epic-1"
-	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if answersCodeReviewLookup(w, r) {
-			return
-		}
+	fb, ts := newTestServer(t, withCodeReviewLookup(func(w http.ResponseWriter, r *http.Request) {
 		if got, want := r.URL.Path, "/api/v1/test-ws/issues/ready"; got != want {
 			t.Errorf("path = %q, want %q", got, want)
 		}
@@ -1774,7 +1771,7 @@ func TestReady_HappyPath(t *testing.T) {
 				Parent:         &parent,
 			},
 		})
-	})
+	}))
 	defer ts.Close()
 
 	result, err := fb.Ready(context.Background(), backend.ReadyOpts{Limit: 10})
@@ -1794,16 +1791,13 @@ func TestReady_ClientFiltersSourceReposWithoutServerLimit(t *testing.T) {
 	var gotQuery string
 	repoA := "repo-a"
 	repoB := "repo-b"
-	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if answersCodeReviewLookup(w, r) {
-			return
-		}
+	fb, ts := newTestServer(t, withCodeReviewLookup(func(w http.ResponseWriter, r *http.Request) {
 		gotQuery = r.URL.RawQuery
 		respondOK(w, []*readyIssueWithParent{
 			{fleetIssueWire: fleetIssueWire{ID: "repo-a", Title: "A", Status: string(types.StatusOpen), CreatedAt: now, UpdatedAt: now}, Repo: &repoA},
 			{fleetIssueWire: fleetIssueWire{ID: "repo-b", Title: "B", Status: string(types.StatusOpen), CreatedAt: now, UpdatedAt: now}, Repo: &repoB},
 		})
-	})
+	}))
 	defer ts.Close()
 
 	result, err := fb.Ready(context.Background(), backend.ReadyOpts{
@@ -1855,10 +1849,7 @@ func TestDeferred_HappyPath(t *testing.T) {
 
 func TestBlocked_HappyPath(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
-	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if answersCodeReviewLookup(w, r) {
-			return
-		}
+	fb, ts := newTestServer(t, withCodeReviewLookup(func(w http.ResponseWriter, r *http.Request) {
 		if got, want := r.URL.Path, "/api/v1/test-ws/issues/blocked"; got != want {
 			t.Errorf("path = %q, want %q", got, want)
 		}
@@ -1869,7 +1860,7 @@ func TestBlocked_HappyPath(t *testing.T) {
 				BlockedByCount: 1,
 			},
 		})
-	})
+	}))
 	defer ts.Close()
 
 	result, err := fb.Blocked(context.Background(), backend.BlockedOpts{Limit: 10})

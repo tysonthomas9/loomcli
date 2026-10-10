@@ -143,7 +143,7 @@ func DefaultStackLineageLookup() TaskLineageLookup {
 	if err != nil {
 		return nil
 	}
-	return StackLineageLookup{Store: store, CodeReviewBase: FleetCodeReviewBase}
+	return StackLineageLookup{Store: store, CodeReviewBase: registeredCodeReviewBases()}
 }
 
 // DefaultStackStore returns the per-user loom stack store, or nil when the loom

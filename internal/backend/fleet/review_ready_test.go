@@ -20,6 +20,15 @@ func answersCodeReviewLookup(w http.ResponseWriter, r *http.Request) bool {
 	return false
 }
 
+// withCodeReviewLookup answers the code-review lookup before handler.
+func withCodeReviewLookup(handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !answersCodeReviewLookup(w, r) {
+			handler(w, r)
+		}
+	}
+}
+
 func ids(issues []backend.IssueData) []string {
 	out := make([]string, 0, len(issues))
 	for _, issue := range issues {
