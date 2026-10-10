@@ -191,7 +191,11 @@ export function RevisionsSection({
           (verdictsFor !== undefined && revision.number !== verdictsFor);
         // The list reports the verdict for this exact revision head, so a new
         // derived revision has none and offers the buttons again.
-        const decided = Boolean(revision.verdict);
+        // A spent approval was never applied and can no longer apply (e.g. the
+        // change was unapplied first): show why and let the reviewer approve
+        // again, which re-arms the follow.
+        const spent = revision.follow_status === "spent";
+        const decided = Boolean(revision.verdict) && !spent;
         // The server reports an approved revision still waiting for a working
         // area, so Apply survives a reload. A follow status from this session
         // (e.g. a 404 from Apply clearing it) takes precedence.
@@ -263,6 +267,12 @@ export function RevisionsSection({
                 >
                   Create PR
                 </button>
+              </div>
+            )}
+            {spent && (
+              <div role="status" data-testid="revision-follow-spent">
+                Not applied:{" "}
+                {revision.follow_reason || "this approval can no longer apply"}
               </div>
             )}
             <div className={styles.actions}>

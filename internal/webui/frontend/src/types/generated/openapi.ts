@@ -3397,6 +3397,10 @@ export interface components {
       verdict?: string;
       /** @description True while this exact revision is applied in a lead working area (from the applied log, so it survives reloads and clears after unapply). */
       applied: boolean;
+      /** @description Lead follow state of this revision's approval (approved, applied, conflict, apply_pending, superseded, spent). "spent" means the approval's apply can never run (for example the change was unapplied before the follow settled); approving again re-arms it. */
+      follow_status?: string;
+      /** @description Reviewer-facing reason for a spent follow. */
+      follow_reason?: string;
       /** @description True when the latest verdict approves this revision, it is not applied, and the verdict's target lead has no working area yet, so Apply is needed. */
       needs_working_area: boolean;
       /** @description True when a newer source revision of the same change exists; verdicts on it are refused. */

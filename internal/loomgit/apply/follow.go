@@ -16,6 +16,25 @@ type FollowResult struct {
 	Applied []string `json:"applied"`
 	Pending []string `json:"pending"`
 	Paths   []string `json:"paths,omitempty"`
+	// Spent lists approvals settled without applying: their apply request can
+	// never apply again. A newer approval re-arms them.
+	Spent []SpentApproval `json:"spent,omitempty"`
+}
+
+// SpentApproval is an approval that was settled as spent, with the reason.
+type SpentApproval struct {
+	Change   string `json:"change"`
+	Revision int    `json:"revision"`
+	Reason   string `json:"reason"`
+}
+
+// spentReason is the reviewer-facing reason carried by a spent apply error.
+func spentReason(err error) string {
+	var coded *loomgit.Error
+	if errors.As(err, &coded) && coded.Message != "" {
+		return coded.Message
+	}
+	return "its apply request can no longer apply"
 }
 
 func RecoverPending(ctx context.Context, store *journal.SQLite) error {
@@ -135,13 +154,9 @@ func followApprovals(ctx context.Context, store *journal.SQLite, cfg *config.Loo
 				waitingOnPredecessor = true
 				continue
 			}
-			applied, applyErr := applyApproval(ctx, store, cfg, approval)
-			if applyErr != nil {
-				result.Pending = append(result.Pending, approval.Change)
-				result.Paths = applied.Paths
-				return result, applyErr
+			if err := followOne(ctx, store, cfg, approval, &result); err != nil {
+				return result, err
 			}
-			result.Applied = append(result.Applied, approval.Change)
 			delete(remaining, approval.Change)
 			progress = true
 		}
@@ -156,6 +171,24 @@ func followApprovals(ctx context.Context, store *journal.SQLite, cfg *config.Loo
 		}
 	}
 	return result, nil
+}
+
+// followOne applies one ready approval. A spent request settles as spent
+// without counting as applied; a newer approval re-arms the follow.
+func followOne(ctx context.Context, store *journal.SQLite, cfg *config.LoomConfig,
+	approval journal.PendingApproval, result *FollowResult) error {
+	applied, err := applyApproval(ctx, store, cfg, approval)
+	if errors.Is(err, ErrRequestSpent) {
+		result.Spent = append(result.Spent, SpentApproval{Change: approval.Change, Revision: approval.Revision, Reason: spentReason(err)})
+		return nil
+	}
+	if err != nil {
+		result.Pending = append(result.Pending, approval.Change)
+		result.Paths = applied.Paths
+		return err
+	}
+	result.Applied = append(result.Applied, approval.Change)
+	return nil
 }
 
 func latestApprovals(ctx context.Context, store *journal.SQLite, pending []journal.PendingApproval) (map[string]journal.PendingApproval, error) {
@@ -195,6 +228,12 @@ func applyApproval(ctx context.Context, store *journal.SQLite, cfg *config.LoomC
 	if !alreadyApplied {
 		result, err = applyLocalWithStore(ctx, Request{Workspace: approval.Workspace, Lead: approval.Lead,
 			Change: approval.Change, Revision: approval.Revision, RequestID: requestID}, store, cfg)
+	}
+	if errors.Is(err, ErrRequestSpent) {
+		if setErr := store.SpendApprovalFollow(ctx, approval, spentReason(err)); setErr != nil {
+			return result, setErr
+		}
+		return result, err
 	}
 	if err != nil {
 		status := "conflict"
