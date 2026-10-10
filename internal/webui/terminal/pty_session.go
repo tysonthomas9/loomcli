@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/creack/pty"
@@ -290,13 +291,31 @@ func (s *ptySession) close(reason string) error {
 				firstErr = err
 			}
 		}
+		// Hang up the child as a terminal would (closing the master does not
+		// while drain's Read is pending) and give it a moment to exit on its
+		// own before killing it: `loom lead` stops its codex app-server on
+		// SIGHUP, and an immediate kill orphaned it. The child is the session
+		// leader, so its exit also sends SIGHUP to the foreground job.
 		if s.cmd != nil && s.cmd.Process != nil {
-			_ = s.cmd.Process.Kill()
-			_ = s.cmd.Wait()
+			_ = s.cmd.Process.Signal(syscall.SIGHUP)
+			exited := make(chan struct{})
+			go func() {
+				_ = s.cmd.Wait()
+				close(exited)
+			}()
+			select {
+			case <-exited:
+			case <-time.After(ptyExitGrace):
+				_ = s.cmd.Process.Kill()
+				<-exited
+			}
 		}
 	})
 	return firstErr
 }
+
+// ptyExitGrace bounds how long close waits for a hung-up child to exit.
+var ptyExitGrace = 5 * time.Second
 
 // send attempts a non-blocking copy to the attachment's channel. Dropped
 // frames are fine — the scrollback ring always has the ground truth and a

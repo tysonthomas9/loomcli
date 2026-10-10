@@ -184,6 +184,13 @@ func runServe(cmd *cobra.Command, args []string) {
 		log.Fatal(err)
 	}
 	configureServeLocalRuntimeMode()
+	// Leads' codex app-servers left running by a server that crashed or was
+	// killed before their lead runtime could stop them.
+	go func() {
+		if pids := opsimpl.ReapOrphanedLeadAppServers(); len(pids) > 0 {
+			slog.Info("stopped codex lead app-servers left by a previous server", "pids", pids)
+		}
+	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
