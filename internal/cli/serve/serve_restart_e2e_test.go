@@ -56,7 +56,7 @@ func testServeRestartKeepsWorkspace(t *testing.T, sig syscall.Signal) {
 	serve := func() *exec.Cmd {
 		cmd := exec.Command(loom, "serve", "--port", fmt.Sprint(port))
 		cmd.Dir = repo
-		cmd.Env = append(os.Environ(), "LOOM_CONFIG_DIR="+cfgDir, "FLEET_DB_BIN="+fleetDB)
+		cmd.Env = append(os.Environ(), "LOOM_CONFIG_DIR="+cfgDir, "FLEET_DB_BIN="+fleetDB, "LOOM_FLEET_DB_URL=")
 		cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
@@ -96,9 +96,15 @@ func testServeRestartKeepsWorkspace(t *testing.T, sig syscall.Signal) {
 		t.Fatalf("workspace not listed before the restart: %s", got)
 	}
 
-	_ = first.Process.Signal(sig)
-	if err := first.Wait(); err != nil && sig == syscall.SIGTERM {
+	if err := first.Process.Signal(sig); err != nil {
+		t.Fatal(err)
+	}
+	err = first.Wait()
+	if sig == syscall.SIGTERM && err != nil {
 		t.Fatalf("loom serve did not exit cleanly on SIGTERM: %v", err)
+	}
+	if ws, ok := first.ProcessState.Sys().(syscall.WaitStatus); sig == syscall.SIGKILL && !(ok && ws.Signaled() && ws.Signal() == syscall.SIGKILL) {
+		t.Fatalf("loom serve was not SIGKILLed: %v", err)
 	}
 
 	serve()

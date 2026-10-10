@@ -54,7 +54,8 @@ func (h *StoreHandle) URL() string {
 }
 
 // Flush writes an owned embedded store's in-memory keyspace to disk now
-// instead of at the next periodic snapshot. No-op otherwise.
+// instead of at the next periodic snapshot. No-op otherwise, including a
+// handle that reused another process's runtime: that owner snapshots it.
 func (h *StoreHandle) Flush() error {
 	if h == nil || h.embedded == nil || h.embedded.redisMgr == nil {
 		return nil
