@@ -44,6 +44,7 @@ type fakeWorkspace struct {
 	tree    string                 // the working copy's content a capture saves; under mu
 	refs    map[string]string      // each checkpoint ref: the tree it saved; under mu
 	capture func(ref string) error // runs before each new capture, outside mu; an error fails it
+	dropped []string               // the repo of each DropCheckpoints; under mu
 }
 
 // setTree sets the working copy's content the next capture saves.
@@ -85,7 +86,18 @@ func (f *fakeWorkspace) CheckpointDiff(context.Context, string, string, string) 
 	return CheckpointDiff{}, nil
 }
 
-func (f *fakeWorkspace) DropCheckpoints(context.Context, string, string) error { return nil }
+// DropCheckpoints deletes the refs under prefix and records repo.
+func (f *fakeWorkspace) DropCheckpoints(_ context.Context, repo, prefix string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.dropped = append(f.dropped, repo)
+	for ref := range f.refs {
+		if strings.HasPrefix(ref, prefix) {
+			delete(f.refs, ref)
+		}
+	}
+	return nil
+}
 
 // setEnsureErr makes every Ensure fail with err; nil restores it.
 func (f *fakeWorkspace) setEnsureErr(err error) {
