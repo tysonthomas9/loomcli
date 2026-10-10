@@ -497,6 +497,47 @@ test("agents drawer at 390px: opens on a view without the sidebar", async ({
   await expect(row).toBeHidden();
 });
 
+// The drawer always lists the agents as full rows (name shown): also when
+// the tree was collapsed, and on Terminal, whose sidebar otherwise lists
+// terminal sessions.
+test("agents drawer at 390px: full rows when the tree was collapsed", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() =>
+    localStorage.setItem("loom:w1:tree-collapsed", "true"),
+  );
+  await open(page, [agent, other]);
+  await page
+    .locator('nav[aria-label="Primary"]')
+    .getByRole("button", { name: "Agents" })
+    .click();
+  const name = page
+    .getByRole("link", { name: /^docs-writer / })
+    .getByTestId("agent-list-name");
+  await expect(name).toBeVisible();
+  // The saved (desktop) collapse preference is left as it was.
+  expect(
+    await page.evaluate(() => localStorage.getItem("loom:w1:tree-collapsed")),
+  ).toBe("true");
+});
+
+test("agents drawer at 390px: lists the agents on Terminal", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await open(page, [agent, other]);
+  const rail = page.locator('nav[aria-label="Primary"]');
+  await rail.getByRole("button", { name: "Terminal" }).click();
+  await expect(page).toHaveURL(/\/ws\/w1\/terminal/);
+  await rail.getByRole("button", { name: "Agents" }).click();
+  await expect(
+    page
+      .getByRole("link", { name: /^docs-writer / })
+      .getByTestId("agent-list-name"),
+  ).toBeVisible();
+});
+
 test("agents drawer: no Agents button on the desktop, where the sidebar shows", async ({
   page,
 }) => {

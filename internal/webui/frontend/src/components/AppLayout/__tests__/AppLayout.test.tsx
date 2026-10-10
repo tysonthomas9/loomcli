@@ -10,6 +10,12 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
 
+import {
+  KeyboardShortcutProvider,
+  LAYER_CONFIRM_DIALOG,
+  useRegisterEscapeLayer,
+} from "@/hooks";
+
 import { AppLayout } from "../AppLayout";
 
 describe("AppLayout", () => {
@@ -694,14 +700,16 @@ describe("AppLayout", () => {
     it("closes on the backdrop and on Escape, and refocuses its opener", () => {
       const onSidebarClose = vi.fn();
       render(
-        <AppLayout
-          navRail={opener}
-          sidebar={<div>tree</div>}
-          sidebarOpen
-          onSidebarClose={onSidebarClose}
-        >
-          <p>content</p>
-        </AppLayout>,
+        <KeyboardShortcutProvider>
+          <AppLayout
+            navRail={opener}
+            sidebar={<div>tree</div>}
+            sidebarOpen
+            onSidebarClose={onSidebarClose}
+          >
+            <p>content</p>
+          </AppLayout>
+        </KeyboardShortcutProvider>,
       );
       expect(
         screen.getByRole("complementary", { name: "Agents" }),
@@ -713,6 +721,43 @@ describe("AppLayout", () => {
       fireEvent.keyDown(document, { key: "Escape" });
       expect(onSidebarClose).toHaveBeenCalledTimes(2);
       expect(screen.getByRole("button", { name: "Agents" })).toHaveFocus();
+    });
+  });
+
+  describe("phone drawer Escape (MOB2)", () => {
+    function Dialog(): JSX.Element {
+      useRegisterEscapeLayer(LAYER_CONFIRM_DIALOG, () => {}, true);
+      return <div role="dialog" aria-label="Confirm" />;
+    }
+
+    it("leaves Escape to a dialog above it", () => {
+      const onSidebarClose = vi.fn();
+      const { rerender } = render(
+        <KeyboardShortcutProvider>
+          <AppLayout
+            sidebar={<div>tree</div>}
+            sidebarOpen
+            onSidebarClose={onSidebarClose}
+          >
+            <Dialog />
+          </AppLayout>
+        </KeyboardShortcutProvider>,
+      );
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(onSidebarClose).not.toHaveBeenCalled();
+      rerender(
+        <KeyboardShortcutProvider>
+          <AppLayout
+            sidebar={<div>tree</div>}
+            sidebarOpen
+            onSidebarClose={onSidebarClose}
+          >
+            <p>content</p>
+          </AppLayout>
+        </KeyboardShortcutProvider>,
+      );
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(onSidebarClose).toHaveBeenCalledTimes(1);
     });
   });
 });

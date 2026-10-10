@@ -3,10 +3,10 @@
  * Provides a consistent structure with fixed header and main content area.
  */
 
-import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 
 import { LiveRegion } from "@/components/LiveRegion/LiveRegion";
+import { LAYER_TERMINAL_PANEL, useRegisterEscapeLayer } from "@/hooks";
 
 import styles from "./AppLayout.module.css";
 
@@ -70,16 +70,6 @@ export function AppLayout({
       .querySelector<HTMLElement>('[aria-controls="agents-drawer"]')
       ?.focus();
   };
-  const closeRef = useRef(close);
-  closeRef.current = close;
-  useEffect(() => {
-    if (!sidebarOpen) return;
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") closeRef.current();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [sidebarOpen]);
 
   const rootClassName = className
     ? `${styles.appLayout} ${className}`
@@ -137,10 +127,21 @@ export function AppLayout({
             onClick={close}
           />
         )}
+        {sidebar && sidebarOpen && <DrawerEscape onClose={close} />}
         <main className={styles.main} role="main" id="main-content">
           {children}
         </main>
       </div>
     </div>
   );
+}
+
+/**
+ * Escape closes the drawer through the app's Escape layers, so a dialog
+ * above it closes first. Mounted only while open: the registry needs the
+ * KeyboardShortcutProvider, which App provides.
+ */
+function DrawerEscape({ onClose }: { onClose: () => void }): null {
+  useRegisterEscapeLayer(LAYER_TERMINAL_PANEL, onClose, true);
+  return null;
 }

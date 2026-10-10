@@ -64,6 +64,11 @@ export interface WorkspaceTreeProps {
   onTreeSelect?: (issueId: string) => void;
   /** Current main view — terminal view swaps the agent list for terminals. */
   activeView?: ViewMode;
+  /**
+   * Shown as the phone's agents drawer (MOB2): always expanded, with the full
+   * agent list on every view; the saved collapse preference is kept as is.
+   */
+  inDrawer?: boolean;
 }
 
 // Scoped key suffix for workspace-specific collapse state
@@ -125,8 +130,10 @@ export function WorkspaceTree({
   disconnectedSince,
   onRetryConnection,
   onTreeSelect,
-  activeView = "kanban",
+  activeView: view = "kanban",
+  inDrawer = false,
 }: WorkspaceTreeProps): JSX.Element {
+  const activeView = inDrawer ? "agents" : view;
   const workspaceContext = useWorkspaceContext();
   const {
     workspaceId,
@@ -146,11 +153,12 @@ export function WorkspaceTree({
   } = useWorkspaceTreeWidth(workspaceId);
 
   // Load initial collapsed state from scoped localStorage
-  const [isCollapsed, setIsCollapsed] = useState(() => {
+  const [savedCollapsed, setIsCollapsed] = useState(() => {
     if (!workspaceId) return defaultCollapsed;
     const stored = wsGet(workspaceId, SK_COLLAPSED);
     return stored !== null ? stored === "true" : defaultCollapsed;
   });
+  const isCollapsed = savedCollapsed && !inDrawer;
 
   const workspaceConnection = workspaceContext as typeof workspaceContext & {
     connectionState?:
@@ -193,8 +201,8 @@ export function WorkspaceTree({
 
   // Persist collapsed state to scoped storage
   useEffect(() => {
-    if (workspaceId) wsSet(workspaceId, SK_COLLAPSED, String(isCollapsed));
-  }, [isCollapsed, workspaceId]);
+    if (workspaceId) wsSet(workspaceId, SK_COLLAPSED, String(savedCollapsed));
+  }, [savedCollapsed, workspaceId]);
 
   // Keep maximized issue panels aligned to the right of the workspace tree.
   useEffect(() => {

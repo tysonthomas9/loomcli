@@ -1502,6 +1502,7 @@ function App() {
       onRetryConnection={staleBannerRetry}
       onTreeSelect={handleTreeIssueSelect}
       activeView={activeView}
+      inDrawer={agentsOpen}
     />
   );
 

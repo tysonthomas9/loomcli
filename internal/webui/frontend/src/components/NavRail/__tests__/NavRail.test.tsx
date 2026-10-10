@@ -687,7 +687,8 @@ describe("NavRail", () => {
       );
       const button = screen.getByRole("button", { name: "Agents" });
       expect(button).toHaveAttribute("aria-expanded", "false");
-      expect(button).toHaveAttribute("aria-controls", "agents-drawer");
+      // Only while open: closed, the drawer may not be in the page.
+      expect(button).not.toHaveAttribute("aria-controls");
       fireEvent.click(button);
       expect(onAgentsToggle).toHaveBeenCalledTimes(1);
       rerender(
@@ -699,6 +700,7 @@ describe("NavRail", () => {
         />,
       );
       expect(button).toHaveAttribute("aria-expanded", "true");
+      expect(button).toHaveAttribute("aria-controls", "agents-drawer");
     });
   });
 });

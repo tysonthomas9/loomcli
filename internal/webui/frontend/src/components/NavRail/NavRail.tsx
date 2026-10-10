@@ -396,7 +396,7 @@ export function NavRail({
           onClick={onAgentsToggle}
           aria-label="Agents"
           aria-expanded={agentsOpen}
-          aria-controls="agents-drawer"
+          aria-controls={agentsOpen ? "agents-drawer" : undefined}
         >
           <span className={styles.icon}>
             <svg viewBox="0 0 24 24" aria-hidden="true">
