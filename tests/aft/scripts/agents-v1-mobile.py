@@ -183,9 +183,12 @@ def pill():
             # The chat may still be settling after the column change (it keeps
             # to the bottom), so scroll and hover again until the row is on
             # screen with its pill shown.
+            # A tall row is scrolled to its top and hovered there, where the
+            # pill is (a centred scroll or hover would leave the top off-screen).
             for _ in range(20):
-                browser("scrollintoview", sel)
-                browser("hover", sel)
+                at = evaluate("(() => { const r = document.querySelector('%s'); r.scrollIntoView({ block: 'start' });"
+                              " const q = r.getBoundingClientRect(); return [q.left + q.width / 2, q.top + 4]; })()" % sel)
+                browser("mouse", "move", str(round(at[0])), str(round(at[1])))
                 time.sleep(0.15)
                 m = evaluate(PILL % row)
                 # A tall bubble may run past the bottom; its top, the pill and
