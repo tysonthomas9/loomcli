@@ -552,10 +552,15 @@ func (s *Session) HasInput(ctx context.Context, key string) (loomharness.Landed,
 // still streaming has no end marker, so history gives its item.completed
 // only once a later part exists or its step has ended.
 //
-// The cursor is OpenCode's own plus the open turn ("c=<native>&t=<turn>");
-// a bare OpenCode cursor still works, with the open turn read back.
+// A failed turn's class comes from its failed step's error, which
+// session.step.failed stores on the assistant message in the shape
+// session.execution.failed gives the live feed.
+//
+// The cursor is OpenCode's own plus the open turn and its failed step's
+// error type ("c=<native>&t=<turn>&f=<type>"); a bare OpenCode cursor still
+// works, with the open turn read back.
 func (s *Session) Messages(ctx context.Context, after string, limit int) (loomharness.MessagePage, error) {
-	native, turn, known := parseCursor(after)
+	native, turn, failed, known := parseCursor(after)
 	page, err := s.list(ctx, native, limit)
 	if err != nil {
 		return loomharness.MessagePage{}, err
@@ -563,6 +568,12 @@ func (s *Session) Messages(ctx context.Context, after string, limit int) (loomha
 	ref := loomharness.NativeRef{Root: s.c.rootOf(s.ref.NativeID), NativeID: s.ref.NativeID}
 	var out loomharness.MessagePage
 	for _, m := range page.Data {
+		if m.Type == "assistant" {
+			var err toolError
+			if json.Unmarshal(m.Error, &err) == nil && err.Type != "" {
+				failed = err.Type
+			}
+		}
 		if !m.opens() {
 			continue
 		}
@@ -586,17 +597,20 @@ func (s *Session) Messages(ctx context.Context, after string, limit int) (loomha
 		}
 		for _, e := range m.events(ref) {
 			e.TurnID = turn
+			if e.Type == loomharness.EventTurnCompleted && e.StopReason == "failed" && failed != "" {
+				e.Failure = (&toolError{Type: failed}).failure()
+			}
 			out.Events = append(out.Events, e)
 		}
 		if m.declined() { // no idle marker follows: end the turn as the feed does
 			out.Events = append(out.Events, loomharness.Event{Type: loomharness.EventTurnCompleted, Session: ref, TurnID: turn, StopReason: "declined", Time: m.created()})
 		}
 		if m.Type == "idle" || m.declined() {
-			turn = ""
+			turn, failed = "", ""
 		}
 	}
 	if limit > 0 && len(page.Data) == limit && page.Cursor.Next != "" {
-		out.Next = url.Values{"c": {page.Cursor.Next}, "t": {turn}}.Encode()
+		out.Next = url.Values{"c": {page.Cursor.Next}, "t": {turn}, "f": {failed}}.Encode()
 		return out, nil
 	}
 	asks, err := s.pendingAsks(ctx, ref, turn)
@@ -609,11 +623,11 @@ func (s *Session) Messages(ctx context.Context, after string, limit int) (loomha
 
 // parseCursor splits a Messages cursor into OpenCode's cursor and the open
 // turn; known is false for a bare OpenCode cursor.
-func parseCursor(after string) (native, turn string, known bool) {
+func parseCursor(after string) (native, turn, failed string, known bool) {
 	if q, err := url.ParseQuery(after); err == nil && q.Has("c") {
-		return q.Get("c"), q.Get("t"), true
+		return q.Get("c"), q.Get("t"), q.Get("f"), true
 	}
-	return after, "", after == ""
+	return after, "", "", after == ""
 }
 
 // pendingAsks lists the session's pending permission and form asks as

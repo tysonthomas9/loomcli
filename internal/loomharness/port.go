@@ -272,7 +272,7 @@ type Event struct {
 // no reset field. A reset time, when one is mapped, is its own event.
 type Failure struct {
 	Class     string `json:"class"` // FailureUsageLimit | FailureAuth | FailureProvider
-	Retryable bool   `json:"retryable,omitempty"`
+	Retryable bool   `json:"retryable"`
 }
 
 // Failure classes.

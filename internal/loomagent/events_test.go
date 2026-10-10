@@ -6,6 +6,7 @@ import (
 	"errors"
 	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -422,5 +423,8 @@ func TestFailureFieldsSurviveBackfill(t *testing.T) {
 	want := []failure{{"usage limit", limit}, {"bad key", &loomharness.Failure{Class: loomharness.FailureAuth}}, {"no class", nil}}
 	if got := ended(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("turn_completed rows %+v, want %+v", got, want)
+	}
+	if r := kinds(rows(t, s, a.AgentID, 0), EventTurnCompleted)[1]; !strings.Contains(string(r.Payload), `"failure":{"class":"auth","retryable":false}`) {
+		t.Fatalf("a non-retryable failure must say so: %s", r.Payload)
 	}
 }

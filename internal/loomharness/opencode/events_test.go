@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -531,5 +532,37 @@ func TestOpenCodeFailureNoReset(t *testing.T) {
 		if e, ok := m.mapEvent([]byte(raw)); !ok || e.Failure != nil {
 			t.Errorf("%s -> %+v", raw, e.Failure)
 		}
+	}
+
+	// History: the failed step's stored error (session.step.failed keeps
+	// the execution's error shape on the assistant message) classes the
+	// failed idle marker, as the live feed does; a succeeded turn, or a
+	// failed one with no step error, carries none.
+	ctx := context.Background()
+	st := newStore()
+	c := fakeServer(t, st)
+	ref, _ := c.Open(ctx, loomharness.OpenSpec{Key: "agent-1", Dir: "/repo"})
+	st.messages[ref.NativeID] = []map[string]any{
+		{"id": "msg_u1", "type": "user", "text": "one"},
+		{"id": "msg_a1", "type": "assistant", "finish": "error", "error": map[string]string{"type": "provider.rate-limit", "message": "slow down"}},
+		{"id": "msg_i1", "type": "idle", "outcome": "failed"},
+		{"id": "msg_u2", "type": "user", "text": "two"},
+		{"id": "msg_i2", "type": "idle", "outcome": "failed"},
+		{"id": "msg_u3", "type": "user", "text": "three"},
+		{"id": "msg_a3", "type": "assistant", "finish": "stop", "content": []map[string]any{{"type": "text", "text": "ok"}}},
+		{"id": "msg_i3", "type": "idle", "outcome": "succeeded"},
+	}
+	page, err := c.Session(ref).Messages(ctx, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []*loomharness.Failure
+	for _, e := range page.Events {
+		if e.Type == loomharness.EventTurnCompleted {
+			got = append(got, e.Failure)
+		}
+	}
+	if want := []*loomharness.Failure{limit, nil, nil}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("history failures %+v, want %+v", got, want)
 	}
 }
