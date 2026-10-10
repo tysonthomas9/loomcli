@@ -193,12 +193,10 @@ before="$(listing "$host")"
 boot="$T/boot.log"
 : > "$boot"
 # Follow loom-local's log as soon as the container exists; on the ready line,
-# list the catalog and send a Create at once, recording the timings.
+# list the catalog and send a Create at once, recording the timings. It waits
+# as long as the build takes; it is stopped below if the boot fails.
 (
-  i=0
-  until podman container exists "$ctr" 2>/dev/null; do
-    i=$((i + 1)); [ "$i" -le 3600 ] || exit 0; sleep 0.25
-  done
+  until podman container exists "$ctr" 2>/dev/null; do sleep 0.25; done
   podman logs -f "$ctr" 2>&1 | while IFS= read -r line; do
     printf '%s\n' "$line" >> "$boot"
     if [ "$line" = "[local-mode] ready" ]; then
@@ -218,7 +216,14 @@ take_build_lock
 out="$(up 2>&1)"; rc=$?
 drop_build_lock
 printf '%s\n' "$out" > "$T/k2b-up.log"
-wait "$follower"; follower=""
+# make returns once the ready marker exists; give the follower's two requests
+# up to 90 s more to land, then stop it.
+i=0
+while [ "$rc" = 0 ] && [ ! -s "$T/k1-timing" ] && kill -0 "$follower" 2>/dev/null && [ "$i" -lt 90 ]; do
+  i=$((i + 1)); sleep 1
+done
+kill "$follower" 2>/dev/null; wait "$follower" 2>/dev/null; follower=""
+podman logs "$ctr" > "$T/loom-local.log" 2>&1 || true
 
 check "K2 good host folder: make local-mode-agents-up succeeds and prints STACK UP" \
   '[ "$rc" = 0 ] && printf "%s" "$out" | grep -q "STACK UP"'
