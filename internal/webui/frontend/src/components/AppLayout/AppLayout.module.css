@@ -126,7 +126,8 @@
     top: var(--unified-header-height);
     bottom: var(--nav-bottom-height);
     left: 0;
-    z-index: calc(var(--z-overlay) + 1);
+    /* Above the phone issue view and panels (z-overlay), under modals. */
+    z-index: calc(var(--z-overlay) + 3);
     display: flex;
     width: min(320px, 85vw);
     box-shadow: var(--shadow-lg);
@@ -144,7 +145,7 @@
     bottom: var(--nav-bottom-height);
     left: 0;
     right: 0;
-    z-index: var(--z-overlay);
+    z-index: calc(var(--z-overlay) + 2);
     display: block;
     padding: 0;
     border: none;

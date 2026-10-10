@@ -584,6 +584,28 @@ test("agents drawer at 390px: a row menu takes the first Escape", async ({
   await expect(row).toBeHidden();
 });
 
+// The smallest phones: the rail, Agents button included, fits on screen.
+test("rail at 320px: every control on screen", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 640 });
+  await open(page);
+  const rights = await page
+    .locator('nav[aria-label="Primary"] > button')
+    .evaluateAll((els) =>
+      els.map((e) => ({
+        label: e.getAttribute("aria-label"),
+        left: e.getBoundingClientRect().left,
+        right: e.getBoundingClientRect().right,
+      })),
+    );
+  expect(rights.map((r) => r.label)).toContain("Agents");
+  for (const r of rights) {
+    expect(r.left, String(r.label)).toBeGreaterThanOrEqual(0);
+    expect(r.right, String(r.label)).toBeLessThanOrEqual(320);
+  }
+  if (process.env.MOB2_SHOTS)
+    await page.screenshot({ path: `${process.env.MOB2_SHOTS}/mob2-320.png` });
+});
+
 test("agents drawer: no Agents button on the desktop, where the sidebar shows", async ({
   page,
 }) => {

@@ -429,3 +429,15 @@
     display: none;
   }
 }
+
+/* Below 360px the rail still fits on screen: the buttons narrow further and
+   the switcher keeps one item, its chevrons beside it. */
+@media (width < 360px) {
+  .navButton {
+    min-width: 32px;
+  }
+
+  .switcherFrame {
+    min-width: 36px;
+  }
+}
