@@ -1,8 +1,21 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { fetchStacks, type StackCard } from "@/api/workspace/git";
+import {
+  fetchStacks,
+  queueMergeUpTo,
+  type StackCard,
+  type StackCardLayer,
+} from "@/api/workspace/git";
 
-export type { StackCard };
+export type { StackCard, StackCardLayer };
+
+/** Merge up to here: queue change's PR and the approved PRs below it (D38). */
+export async function mergeUpTo(
+  workspaceId: string,
+  change: string,
+): Promise<void> {
+  await queueMergeUpTo(workspaceId, change);
+}
 
 /** A stack merge that is queued or running (not blocked). */
 export function mergeRunning(card: StackCard): boolean {

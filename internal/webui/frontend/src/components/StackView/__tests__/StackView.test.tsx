@@ -117,7 +117,10 @@ describe("canMergeUpTo", () => {
     };
     expect(canMergeUpTo({ ...card(["approved"]), merge }, 0)).toBe(false);
     expect(
-      canMergeUpTo({ ...card(["approved"]), merge: { ...merge, phase: "blocked" } }, 0),
+      canMergeUpTo(
+        { ...card(["approved"]), merge: { ...merge, phase: "blocked" } },
+        0,
+      ),
     ).toBe(true);
   });
 });

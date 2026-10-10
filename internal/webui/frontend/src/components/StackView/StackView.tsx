@@ -7,9 +7,13 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 
-import { queueMergeUpTo } from "@/api/workspace/git";
-import type { StackCard, StackCardLayer } from "@/api/workspace/git";
-import { mergeRunning, useStacks } from "@/hooks/workspace/useStacks";
+import {
+  mergeRunning,
+  mergeUpTo,
+  useStacks,
+  type StackCard,
+  type StackCardLayer,
+} from "@/hooks/workspace/useStacks";
 import type { Issue } from "@/types";
 
 import styles from "./StackView.module.css";
@@ -141,7 +145,7 @@ function StackCardView({
     setBusy(true);
     setError("");
     try {
-      await queueMergeUpTo(workspaceId, change);
+      await mergeUpTo(workspaceId, change);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -160,7 +164,9 @@ function StackCardView({
     >
       <header className={styles.cardHeader}>
         <div>
-          <h2 className={styles.cardTitle}>{epic || repoShortName(card.repo)}</h2>
+          <h2 className={styles.cardTitle}>
+            {epic || repoShortName(card.repo)}
+          </h2>
           <p className={styles.cardSubtitle}>
             {card.repo}
             <span className={styles.publisher}>
@@ -178,7 +184,11 @@ function StackCardView({
         </p>
       )}
       {error && (
-        <p className={styles.error} role="alert" data-testid="stack-merge-error">
+        <p
+          className={styles.error}
+          role="alert"
+          data-testid="stack-merge-error"
+        >
           {error}
         </p>
       )}

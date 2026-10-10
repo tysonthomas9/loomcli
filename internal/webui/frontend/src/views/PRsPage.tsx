@@ -90,7 +90,8 @@ export function prStateFromGithub(
   if (pr.review_decision === "APPROVED") {
     return { label: "Approved on GitHub", key: "open" };
   }
-  if (issue?.status === "review") return { label: "Code review", key: "review" };
+  if (issue?.status === "review")
+    return { label: "Code review", key: "review" };
   return { label: "Open", key: "open" };
 }
 
