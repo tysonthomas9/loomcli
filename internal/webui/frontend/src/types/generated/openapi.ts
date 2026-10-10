@@ -1798,6 +1798,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/issues/{id}/rebuild": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Rebuild a task whose code was built on a rejected or replaced revision
+     * @description A human action (an actor of any other kind is refused with review_required). Rejects the task's newest revision with the rebuild as the reason, cancels any approval of it still waiting to apply, and moves the task's base to the newest revision of the task it depends on, so the task reopens for a new attempt. Never automatic. Refused with 409 when the task is not stale or there is no newer revision to build on yet.
+     */
+    post: operations["rebuildStaleTask"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/changes/{change}/revisions/{r}/verdict": {
     parameters: {
       query?: never;
@@ -1855,6 +1875,26 @@ export interface paths {
     };
     /** List the workspace's queued, running and blocked stack merges */
     get: operations["getMergeQueue"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/git/stacks": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the workspace's published stacks for the Pull Requests page
+     * @description One card per stack, with its PRs bottom first and one state each. Both publishers (GitHub native and Loom's own) produce the same card.
+     */
+    get: operations["listStacks"];
     put?: never;
     post?: never;
     delete?: never;
@@ -2597,6 +2637,35 @@ export interface components {
       reason?: string;
       /** @description "lead" for the lead, otherwise the human who asked. */
       queued_by?: string;
+    };
+    StackCard: {
+      stack_id: string;
+      /** @description The provider's owner/name. */
+      repo: string;
+      /** @description native (GitHub native stacks) or loom (Loom's own publisher). */
+      backend: string;
+      /** @description A plain-words blocker or progress line for the stack, if any. */
+      note?: string;
+      merge?: components["schemas"]["QueuedMerge"];
+      /** @description The stack's PRs, bottom first. */
+      layers: components["schemas"]["StackCardLayer"][];
+    };
+    StackCardLayer: {
+      change: string;
+      /** @description The Loom task the change belongs to, if known. */
+      task?: string;
+      pr_number: number;
+      pr_url: string;
+      /** @enum {string} */
+      state:
+        | "draft"
+        | "needs_review"
+        | "approved"
+        | "checks_failing"
+        | "ready"
+        | "merging"
+        | "merged"
+        | "diverged";
     };
     ErrorResponse: {
       /** @constant */
@@ -3409,9 +3478,9 @@ export interface components {
       verdict?: string;
       /** @description True while this exact revision is applied in a lead working area (from the applied log, so it survives reloads and clears after unapply). */
       applied: boolean;
-      /** @description Lead follow state of this revision's approval (approved, applied, conflict, apply_pending, superseded, spent). "spent" means the approval's apply can never run (for example the change was unapplied before the follow settled); approving again re-arms it. */
+      /** @description Lead follow state of this revision's approval (approved, waiting_for_dependency, applied, conflict, apply_pending, superseded, spent). "waiting_for_dependency" means the approval waits for the task this code was built on, which applies first. "spent" means the approval's apply can never run (for example the change was unapplied before the follow settled, or the code it was built on was rejected or replaced); approving again re-arms it. */
       follow_status?: string;
-      /** @description Reviewer-facing reason for a spent follow. */
+      /** @description Reviewer-facing reason for a spent or waiting follow, such as "waiting for T1 to be approved". */
       follow_reason?: string;
       /** @description True when the latest verdict approves this revision, it is not applied, and the verdict's target lead has no working area yet, so Apply is needed. */
       needs_working_area: boolean;
@@ -3461,6 +3530,17 @@ export interface components {
       feedback_reason?: string;
       /** @description True when this fix-up cancelled the change's pending Approve and merge, so merging needs a new Approve. */
       feedback_merge_cancelled?: boolean;
+      /** @description The task this revision's code was built on, before that task's code was reviewed (a dependent starts once its blocker's agent finishes). */
+      depends_on?: string;
+      /**
+       * @description Set when the code this revision was built on is no longer the code to build on. stale means that task's revision was rejected or replaced; Approve is refused until the task is rebuilt (Override is not). Absent when the base is current.
+       * @enum {string}
+       */
+      lineage_state?: "stale" | "dependency_abandoned";
+      /** @description Why the base is stale and what a rebuild would build on, such as "built on T1's code, which was rejected: rebuild it on T1's new code". Plain words; the revision numbers are in rebuild_on. */
+      lineage_reason?: string;
+      /** @description The revision of depends_on a rebuild would build on; absent while there is none yet. */
+      rebuild_on?: number;
     };
     RevisionDiffFile: {
       path: string;
@@ -7949,6 +8029,63 @@ export interface operations {
       };
     };
   };
+  rebuildStaleTask: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          actor: {
+            /** @enum {string} */
+            kind: "human" | "agent" | "lead";
+            id: string;
+          };
+        };
+      };
+    };
+    responses: {
+      /** @description The task was set aside for a rebuild. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data: {
+              change_id: string;
+              revision: number;
+              depends_on: string;
+              rebuild_on: number;
+              /** @description reject, or empty when the revision was already rejected. */
+              verdict: string;
+            };
+          };
+        };
+      };
+      /** @description Not a human actor, not stale, nothing newer to build on, or the revision is already applied. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success?: boolean;
+            error?: string;
+            message?: string;
+          };
+        };
+      };
+    };
+  };
   submitRevisionVerdict: {
     parameters: {
       query?: never;
@@ -8084,6 +8221,29 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["QueuedMerge"][];
+        };
+      };
+    };
+  };
+  listStacks: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Published stacks */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["StackCard"][];
         };
       };
     };

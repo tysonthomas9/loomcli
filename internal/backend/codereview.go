@@ -36,3 +36,46 @@ func MarkCodeReview(ctx context.Context, issues IssueBackend, task, actor string
 	}
 	return nil
 }
+
+// A task whose code awaits review has a finished agent and a frozen
+// revision, so a dependent in its epic starts on that revision instead of
+// waiting for the review (Tyson, 2026-10-09). A dependent with another open
+// blocker, in another epic or in no epic cannot be built on the blocker's
+// code alone, so it waits until its blockers close.
+
+// SharesCodeReviewBase reports whether a task in parent, whose only open
+// blocker is blocker (in blockerParent), starts on that blocker's code.
+func SharesCodeReviewBase(parent, blockerParent string, blockerInCodeReview bool) bool {
+	return parent != "" && parent == blockerParent && blockerInCodeReview
+}
+
+// CodeReviewBase returns the task whose frozen revision taskID is built on
+// while its code awaits review: taskID's only open blocker, in code review,
+// in taskID's epic. found is false for any other task.
+func CodeReviewBase(ctx context.Context, issues IssueBackend, taskID string) (string, bool, error) {
+	task, err := issues.Get(ctx, taskID)
+	if err != nil {
+		return "", false, fmt.Errorf("read task %s: %w", taskID, err)
+	}
+	if task.Parent == "" {
+		return "", false, nil
+	}
+	var open []string
+	for _, dependency := range task.Dependencies {
+		if dependency.Type == "blocks" && dependency.IssueID == taskID && dependency.Status != "closed" {
+			open = append(open, dependency.DependsOnID)
+		}
+	}
+	if len(open) != 1 {
+		return "", false, nil
+	}
+	blocker, err := issues.Get(ctx, open[0])
+	if err != nil {
+		return "", false, fmt.Errorf("read blocker %s: %w", open[0], err)
+	}
+	inReview := blocker.Status == "review" && HasCodeReviewLabel(blocker.Labels)
+	if !SharesCodeReviewBase(task.Parent, blocker.Parent, inReview) {
+		return "", false, nil
+	}
+	return blocker.ID, true, nil
+}

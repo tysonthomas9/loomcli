@@ -709,6 +709,24 @@ function DefaultContent({
     }
   }, [persistedTabState, isLoadingPersistedTabs, issue?.id]);
 
+  // A ?tab=changes link (the PR page's stack rows) opens a task on Changes,
+  // after any persisted tabs are restored.
+  const linkedTabIssueRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (
+      !issue?.id ||
+      issue.issue_type !== "task" ||
+      isLoadingPersistedTabs ||
+      linkedTabIssueRef.current === issue.id
+    ) {
+      return;
+    }
+    linkedTabIssueRef.current = issue.id;
+    if (new URLSearchParams(window.location.search).get("tab") === "changes") {
+      setActiveTabId(CHANGES_TAB.id);
+    }
+  }, [issue?.id, issue?.issue_type, isLoadingPersistedTabs, persistedTabState]);
+
   // Persist tab state on changes (debounced via hook)
   useEffect(() => {
     // Don't persist while still loading persisted state or before restoration

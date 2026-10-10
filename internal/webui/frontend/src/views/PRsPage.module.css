@@ -393,6 +393,12 @@
   padding-right: 12px;
 }
 
+.nextAction {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
 .repoChip {
   display: inline-flex;
   align-items: center;
@@ -573,44 +579,6 @@
 }
 
 /* ============= Grouped lists ============= */
-
-.groups {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-
-.group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.groupHeader {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 2px;
-}
-
-.groupName {
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-bold);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--color-text-secondary);
-}
-
-.groupCount {
-  min-width: 20px;
-  padding: 1px 7px;
-  font-size: 11px;
-  font-weight: var(--font-weight-bold);
-  text-align: center;
-  color: var(--color-text-secondary);
-  background: var(--color-bg-card);
-  border-radius: var(--radius-full);
-}
 
 /* Attached PR concept: compact filter rail and elevated review cards. */
 .page {

@@ -37,7 +37,7 @@ vi.mock("@/hooks/workspace", () => ({
   useWorkspaceContext: () => ({ workspaceId: "demo" }),
 }));
 
-vi.mock("@/components/MergeQueue", () => ({ MergeQueue: () => null }));
+vi.mock("@/components/StackView", () => ({ StackView: () => null }));
 
 vi.mock("../PRReviewWorkspace", () => ({
   PRReviewWorkspace: (props: {

@@ -59,6 +59,7 @@ func (m *Module) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/changes/{change}/revisions/{r}/interdiff", HandleRevisionDiff(true))
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/revisions", handleTaskRevisions)
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/diff", HandleTaskDiff())
+	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/rebuild", handleRebuild)
 	mux.HandleFunc("POST /api/workspaces/{ws}/changes/{change}/revisions/{r}/verdict", func(w http.ResponseWriter, r *http.Request) {
 		handleVerdictWithPublisher(w, r, m.epicPublish)
 	})
@@ -68,6 +69,7 @@ func (m *Module) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/changes/{change}/merge-up-to", handleMergeUpTo)
 	mux.HandleFunc("POST /api/workspaces/{ws}/changes/{change}/merge-up-to", handleMergeUpTo)
 	mux.HandleFunc("GET /api/workspaces/{ws}/git/merge-queue", handleMergeQueue)
+	mux.HandleFunc("GET /api/workspaces/{ws}/git/stacks", handleStacks)
 	mux.HandleFunc("PUT /api/workspaces/{ws}/git/following/{lead}", handleFollowing)
 	mux.HandleFunc("GET /api/workspaces/{ws}/git/settings", handleGitSettings)
 	mux.HandleFunc("PUT /api/workspaces/{ws}/git/settings", handleGitSettings)

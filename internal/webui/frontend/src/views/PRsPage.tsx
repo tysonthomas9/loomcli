@@ -15,11 +15,11 @@ import {
   type KeyboardEvent,
   type SetStateAction,
 } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import type { GitPullRequest } from "@/api/workspace";
 import type { Issue } from "@/types";
-import { MergeQueue } from "@/components/MergeQueue";
+import { StackView } from "@/components/StackView";
 import { useWorkspaceViewData } from "@/contexts/WorkspaceViewContext";
 import { usePullRequests, useWorkspaceContext } from "@/hooks/workspace";
 import { getReviewType, isPRUrl, prKeyFromRef } from "@/utils/issue";
@@ -29,7 +29,6 @@ import { PRReviewWorkspace } from "./PRReviewWorkspace";
 import styles from "./PRsPage.module.css";
 
 type PRFilter = "all" | "review" | "merged";
-type GroupMode = "none" | "repo" | "epic";
 
 const FILTERS: { id: PRFilter; label: string }[] = [
   { id: "all", label: "All" },
@@ -75,19 +74,6 @@ function matchesFilter(row: PullRequestRow, filter: PRFilter): boolean {
   }
 }
 
-export function groupKeyFor(row: PullRequestRow, mode: GroupMode): string {
-  if (mode === "repo") {
-    if (row.pr) {
-      return (
-        row.pr.source_repo || row.pr.repo_name || row.issue?.repo || "No repo"
-      );
-    }
-    return row.issue?.repo || "No repo";
-  }
-  if (mode === "epic") return row.issue?.parent_title || "No epic";
-  return "";
-}
-
 /** Map GitHub PR metadata to a display label and CSS state key. */
 export function prStateFromGithub(
   pr: GitPullRequest,
@@ -96,13 +82,16 @@ export function prStateFromGithub(
   if (pr.is_draft) return { label: "Draft", key: "open" };
   if (pr.state === "MERGED") return { label: "Merged", key: "merged" };
   if (pr.state === "CLOSED") return { label: "Closed", key: "merged" };
+  // GitHub's review is labelled as GitHub's, so "Approved" alone keeps one
+  // meaning: Loom's code approval (S9).
   if (pr.review_decision === "CHANGES_REQUESTED") {
-    return { label: "Changes", key: "review" };
+    return { label: "Changes requested on GitHub", key: "review" };
   }
   if (pr.review_decision === "APPROVED") {
-    return { label: "Approved", key: "open" };
+    return { label: "Approved on GitHub", key: "open" };
   }
-  if (issue?.status === "review") return { label: "Review", key: "review" };
+  if (issue?.status === "review")
+    return { label: "Code review", key: "review" };
   return { label: "Open", key: "open" };
 }
 
@@ -113,7 +102,22 @@ export function rowState(row: PullRequestRow): { label: string; key: string } {
   if (issue && getReviewType(issue) === "plan") {
     return { label: "Plan review", key: "review" };
   }
-  return { label: "Review", key: "review" };
+  return { label: "Code review", key: "review" };
+}
+
+/** A Loom task's next step, shown on its row; plan reviews stay in the review workspace. */
+export function nextAction(row: PullRequestRow): string {
+  const issue = row.issue;
+  if (!issue) return "";
+  if (getReviewType(issue) === "plan") return "Review the plan";
+  if (issue.status === "review") return "Review the code";
+  if (row.pr?.state === "OPEN") return "Merge from its stack";
+  return "";
+}
+
+/** A Loom task opens its Changes tab; a plan review keeps the review workspace. */
+export function opensChanges(row: PullRequestRow): boolean {
+  return Boolean(row.issue && getReviewType(row.issue) !== "plan");
 }
 
 export function prReviewRef(pr: GitPullRequest): string | null {
@@ -243,7 +247,7 @@ export function PRsPage(): JSX.Element {
     state: "all",
   });
   const [filter, setFilter] = useState<PRFilter>("review");
-  const groupMode: GroupMode = "none";
+  const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [railQuery, setRailQuery] = useState("");
   const [selectedRepos, setSelectedRepos] = useState<Set<string>>(new Set());
@@ -344,19 +348,13 @@ export function PRsPage(): JSX.Element {
     });
   };
 
-  const groups = useMemo(() => {
-    if (groupMode === "none") return null;
-    const map = new Map<string, PullRequestRow[]>();
-    for (const row of filtered) {
-      const key = groupKeyFor(row, groupMode);
-      const bucket = map.get(key);
-      if (bucket) bucket.push(row);
-      else map.set(key, [row]);
-    }
-    return [...map.entries()];
-  }, [filtered, groupMode]);
-
   const openReview = (row: PullRequestRow): void => {
+    if (row.issue && opensChanges(row)) {
+      navigate(
+        `/ws/${workspaceId}/issues/${encodeURIComponent(row.issue.id)}?tab=changes`,
+      );
+      return;
+    }
     if (row.issue) {
       setSearchParams({ review: row.issue.id });
       return;
@@ -374,9 +372,9 @@ export function PRsPage(): JSX.Element {
   function renderRow(row: PullRequestRow): JSX.Element {
     const { pr, issue } = row;
     const state = rowState(row);
-    const showRepo =
-      groupMode !== "repo" && Boolean(pr?.repo_name || issue?.repo);
-    const showEpic = groupMode !== "epic" && Boolean(issue?.parent_title);
+    const showRepo = Boolean(pr?.repo_name || issue?.repo);
+    const showEpic = Boolean(issue?.parent_title);
+    const next = nextAction(row);
     const avatarName = issue?.assignee || pr?.author_login;
     const title = pr?.title || issue?.title || "Untitled pull request";
     const handleKeyDown = (event: KeyboardEvent<HTMLLIElement>) => {
@@ -431,6 +429,11 @@ export function PRsPage(): JSX.Element {
           <span className={styles.rowTitle}>{title}</span>
         </div>
         <div className={styles.rowRight}>
+          {next && (
+            <span className={styles.nextAction} data-testid="pr-next-action">
+              {next}
+            </span>
+          )}
           {avatarName ? (
             <Avatar name={avatarName} />
           ) : (
@@ -544,7 +547,7 @@ export function PRsPage(): JSX.Element {
         </p>
       )}
 
-      <MergeQueue workspaceId={workspaceId} />
+      <StackView workspaceId={workspaceId} issues={issues} />
 
       {!loading && rows.length === 0 ? (
         <div className={styles.empty}>
@@ -692,28 +695,6 @@ export function PRsPage(): JSX.Element {
                 <p className={styles.emptyHint}>
                   No pull requests match this filter.
                 </p>
-              </div>
-            ) : groups ? (
-              <div
-                className={styles.scrollRegion}
-                role="region"
-                aria-label="Pull request list"
-              >
-                <div className={styles.groups}>
-                  {groups.map(([key, groupRows]) => (
-                    <section key={key} className={styles.group}>
-                      <header className={styles.groupHeader}>
-                        <span className={styles.groupName}>{key}</span>
-                        <span className={styles.groupCount}>
-                          {groupRows.length}
-                        </span>
-                      </header>
-                      <ul className={styles.list}>
-                        {groupRows.map(renderRow)}
-                      </ul>
-                    </section>
-                  ))}
-                </div>
               </div>
             ) : (
               <div

@@ -83,3 +83,17 @@ func TestOldMergeRequestRoutesAreGone(t *testing.T) {
 		}
 	}
 }
+
+func TestStacksListsThePublishedStacks(t *testing.T) {
+	old := stackCards
+	t.Cleanup(func() { stackCards = old })
+	stackCards = func(_ context.Context, workspace string) ([]publish.StackCard, error) {
+		return []publish.StackCard{{StackID: "feature-" + workspace, Repo: "owner/repo", Backend: "native",
+			Layers: []publish.StackCardLayer{{Change: "A", PRNumber: 7, State: "ready"}}}}, nil
+	}
+	response := serveMergeQueue(http.MethodGet, "/api/workspaces/W/git/stacks", "")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"stack_id":"feature-W"`) ||
+		!strings.Contains(response.Body.String(), `"state":"ready"`) {
+		t.Fatalf("stacks %d %s", response.Code, response.Body.String())
+	}
+}

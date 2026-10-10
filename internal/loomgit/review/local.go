@@ -129,6 +129,15 @@ type TaskRevision struct {
 	FeedbackStatus         string `json:"feedback_status,omitempty"`
 	FeedbackReason         string `json:"feedback_reason,omitempty"`
 	FeedbackMergeCancelled bool   `json:"feedback_merge_cancelled,omitempty"`
+	// DependsOn is the task this revision's code was built on, before that
+	// task's code was reviewed. LineageState is "stale" when that task's
+	// revision was rejected or replaced, or "dependency_abandoned"; it is
+	// empty when the base is current. RebuildOn is the predecessor revision a
+	// rebuild would build on, 0 if none yet.
+	DependsOn     string `json:"depends_on,omitempty"`
+	LineageState  string `json:"lineage_state,omitempty"`
+	LineageReason string `json:"lineage_reason,omitempty"`
+	RebuildOn     int    `json:"rebuild_on,omitempty"`
 }
 
 func (l *Local) TaskRevisions(ctx context.Context, workspace, task string) ([]TaskRevision, error) {
@@ -175,6 +184,9 @@ func (l *Local) TaskRevisionsForLead(ctx context.Context, workspace, task, lead 
 			return nil, err
 		}
 		if err := l.addFeedbackState(ctx, workspace, &i, statusSource(r)); err != nil {
+			return nil, err
+		}
+		if err := l.addDependencyState(ctx, workspace, lead, r.Kind, &i); err != nil {
 			return nil, err
 		}
 		out = append(out, i)

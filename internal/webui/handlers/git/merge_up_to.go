@@ -18,6 +18,7 @@ type mergeUpToRequest struct {
 var queueMergeUpTo = publish.QueueMergeUpToLocal
 var mergeUpToView = publish.MergeUpToViewLocal
 var mergeQueue = publish.MergeQueueLocal
+var stackCards = publish.StackCardsLocal
 
 // handleMergeUpTo queues "merge up to this task's PR" (D38): the PR and the
 // approved PRs below it, bottom up. It is the one merge queue the PR page's
@@ -42,6 +43,12 @@ func handleMergeUpTo(w http.ResponseWriter, r *http.Request) {
 // handleMergeQueue lists the workspace's queued, running and blocked stack merges.
 func handleMergeQueue(w http.ResponseWriter, r *http.Request) {
 	result, err := mergeQueue(r.Context(), r.PathValue("ws"))
+	writeMergeResult(w, result, err)
+}
+
+// handleStacks lists the workspace's published stacks for the PR page's stack view.
+func handleStacks(w http.ResponseWriter, r *http.Request) {
+	result, err := stackCards(r.Context(), r.PathValue("ws"))
 	writeMergeResult(w, result, err)
 }
 
