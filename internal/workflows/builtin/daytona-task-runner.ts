@@ -399,8 +399,10 @@ const value = (args, env) => git(args, env).toString("utf8").trim();
 const paths = (args) => git(args).toString("utf8").split("\0").filter(Boolean);
 const secret = (name) => name.split("/").some((part) => {
   const lower = part.toLowerCase();
+  // Mirrors capture.SecretPath: only SSH key names also match with ".pub".
   return lower.startsWith(".env") || lower.endsWith(".pem") || lower.endsWith(".key") ||
-    ["id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", ".npmrc", ".netrc", "credentials.json"].includes(lower.replace(/\.pub$/, ""));
+    ["id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"].includes(lower.replace(/\.pub$/, "")) ||
+    [".npmrc", ".netrc", "credentials.json"].includes(lower);
 });
 const head = value(["rev-parse", "HEAD"]);
 const tracked = new Set(paths(["ls-tree", "-r", "--name-only", "-z", "HEAD"]));
@@ -431,7 +433,22 @@ for (const name of [...new Set([...changed, ...untracked])].sort()) {
   if (category === "secret_suspect" || category === "incomplete") complete = false;
   entries.push({ path: name, class: category, size: info ? info.size : 0, ...(reason ? { reason } : {}) });
 }
-for (const name of ignored) entries.push({ path: name, class: "listed", size: 0 });
+// Ignored files are listed with their size, never captured (D18), like Capture.
+const sizeOf = (target) => {
+  const info = fs.lstatSync(target);
+  if (!info.isDirectory()) return info.size;
+  let size = 0;
+  for (const child of fs.readdirSync(target)) size += sizeOf(path.join(target, child));
+  return size;
+};
+for (const name of ignored) {
+  try {
+    entries.push({ path: name, class: "listed", size: sizeOf(path.join(repo, name.replace(/\/$/, ""))) });
+  } catch (error) {
+    entries.push({ path: name, class: "incomplete", size: 0, reason: String(error.message || error) });
+    complete = false;
+  }
+}
 entries.sort((left, right) => left.path.localeCompare(right.path));
 const manifest = { workspace: input.workspace, attempt: input.attempt, entries, complete, retained: !complete };
 const gitPath = value(["rev-parse", "--git-path", "loom/capture"]);

@@ -1120,3 +1120,83 @@ func TestLastJSONLine(t *testing.T) {
 		t.Fatalf("line = %s, want JSON object", line)
 	}
 }
+
+// D18 on the successful TaskRun freeze: an untracked secret-pattern path in the
+// runner's patch stays out of the revision, which is incomplete, and the task
+// copy is retained.
+func TestHostBridgeSuccessfulRunNeverFreezesUntrackedSecretPath(t *testing.T) {
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	repo := newPatchBackRepo(t)
+	base := repo.commitFile("file.txt", "old\n", "base")
+	repo.write("server.pem", "non-secret test marker\n")
+	patch := "diff --git a/server.pem b/server.pem\nnew file mode 100644\n--- /dev/null\n+++ b/server.pem\n@@ -0,0 +1 @@\n+non-secret test marker\n"
+	executor := HostBridgeTaskExecutor{Store: memstore.New(), WorktreePath: repo.dir,
+		Command: hostBridgeHelperCommand(t, "success", base, patch)}
+	result, err := executor.ExecuteTask(context.Background(), hostBridgeTaskExecRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta := result.RuntimeMetadata
+	if meta["patch_back_status"] != "frozen" || meta["revision_incomplete"] != "true" || meta["retained_path"] != repo.dir {
+		t.Fatalf("secret-path result = %+v", result)
+	}
+	tree := repo.git("ls-tree", "-r", "--name-only", meta["revision_head_sha"])
+	if strings.Contains(tree, "server.pem") {
+		t.Fatalf("revision captured server.pem: %s", tree)
+	}
+	if repo.read("server.pem") != "non-secret test marker\n" {
+		t.Fatal("task copy lost server.pem")
+	}
+}
+
+// D18 on a completed TaskRun whose patch is empty: an untracked secret file
+// in the task copy is left out, so the revision is incomplete, not "No
+// changes", and the copy is retained. An ignored file alone keeps "No changes".
+func TestHostBridgeEmptyPatchRunWithUntrackedSecretIsIncomplete(t *testing.T) {
+	for _, tc := range []struct {
+		name, file       string
+		ignored          bool
+		incomplete       bool
+		wantNoChanges    string
+		wantManifestPath string
+	}{
+		{name: "secret", file: "server.pem", incomplete: true, wantNoChanges: "false", wantManifestPath: `"secret_suspect"`},
+		{name: "ignored", file: "build.log", ignored: true, wantNoChanges: "true", wantManifestPath: `"listed"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+			repo := newPatchBackRepo(t)
+			repo.commitFile(".gitignore", "*.log\n", "ignore logs")
+			base := repo.commitFile("file.txt", "old\n", "base")
+			repo.write(tc.file, "non-secret test marker\n")
+			executor := HostBridgeTaskExecutor{Store: memstore.New(), WorktreePath: repo.dir,
+				Command: hostBridgeHelperCommand(t, "success", base, "")}
+			result, err := executor.ExecuteTask(context.Background(), hostBridgeTaskExecRequest())
+			if err != nil {
+				t.Fatal(err)
+			}
+			meta := result.RuntimeMetadata
+			if result.Status != domain.TaskRunCompleted || meta["patch_back_status"] != "frozen" ||
+				(meta["revision_incomplete"] == "true") != tc.incomplete || meta["revision_no_changes"] != tc.wantNoChanges {
+				t.Fatalf("empty-patch result = %+v", result)
+			}
+			if (meta["retained_path"] == repo.dir) != tc.incomplete {
+				t.Fatalf("retained_path = %q", meta["retained_path"])
+			}
+			if strings.Contains(repo.git("ls-tree", "-r", "--name-only", meta["revision_head_sha"]), tc.file) {
+				t.Fatalf("revision captured %s", tc.file)
+			}
+			if repo.read(tc.file) != "non-secret test marker\n" {
+				t.Fatalf("task copy lost %s", tc.file)
+			}
+			manifests, _ := filepath.Glob(filepath.Join(repo.dir, ".git", "loom", "capture", "*.json"))
+			if len(manifests) != 1 {
+				t.Fatalf("manifests = %v", manifests)
+			}
+			data, err := os.ReadFile(manifests[0])
+			if err != nil || !strings.Contains(string(data), `"`+tc.file+`"`) || !strings.Contains(string(data), tc.wantManifestPath) {
+				t.Fatalf("manifest = %s, %v", data, err)
+			}
+		})
+	}
+}

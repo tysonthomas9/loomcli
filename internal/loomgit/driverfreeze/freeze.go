@@ -9,11 +9,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/agentcapture"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/capture"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/changeset"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
@@ -38,6 +40,11 @@ type CaptureRequest struct {
 	Outcome                        string
 	Complete                       bool
 	SkipRetention                  bool
+	// ScreenTaskCopy applies the capture rules (D18) to the task copy before
+	// freezing: a left-out secret file makes the revision incomplete and its
+	// manifest records what was left out. For captures not made by Capture,
+	// such as a run that changed nothing.
+	ScreenTaskCopy bool
 }
 
 // FreezeCapture records a host capture as a source revision. The caller retains
@@ -105,26 +112,55 @@ func FreezeCaptureAt(ctx context.Context, journalPath string, in CaptureRequest)
 		if requestID == "" {
 			requestID = "driver:" + in.Attempt
 		}
+		complete := in.Complete
+		if in.ScreenTaskCopy {
+			if complete, err = screenTaskCopy(ctx, runner, in); err != nil {
+				return err
+			}
+		}
 		revision, err = changeset.FreezeSource(ctx, store, runner, changeset.SourceInput{
 			Workspace: in.Workspace, Change: change, RequestID: requestID,
 			Attempt: in.Attempt, TaskID: in.Task, BaseSHA: in.Base, CaptureSHA: captureSHA,
-			Outcome: in.Outcome, Complete: in.Complete,
+			Outcome: in.Outcome, Complete: complete,
 		})
 		if err != nil {
 			return err
 		}
-		if in.SourceRepo != "" {
-			if err := taskcopy.ImportSnapshotUnderLease(ctx, journalPath, in.SourceRepo, in.Worktree, in.Workspace, in.Attempt, revision.Change, revision.Number); err != nil {
-				return err
-			}
-		}
-		if in.SkipRetention {
-			return nil
-		}
-		return store.RecordRetainedCopy(ctx, journal.RetainedCopy{Workspace: in.Workspace, Change: revision.Change,
-			Attempt: in.Attempt, Path: in.Worktree, SourceRepo: in.SourceRepo, Complete: in.Complete})
+		return keepCapturedCopy(ctx, store, journalPath, in, revision, complete)
 	})
 	return revision, err
+}
+
+// keepCapturedCopy imports the source snapshot for a frozen capture and
+// records the task copy as retained unless the caller retains it itself.
+func keepCapturedCopy(ctx context.Context, store *journal.SQLite, journalPath string, in CaptureRequest, revision loomgit.Revision, complete bool) error {
+	if in.SourceRepo != "" {
+		if err := taskcopy.ImportSnapshotUnderLease(ctx, journalPath, in.SourceRepo, in.Worktree, in.Workspace, in.Attempt, revision.Change, revision.Number); err != nil {
+			return err
+		}
+	}
+	if in.SkipRetention {
+		return nil
+	}
+	return store.RecordRetainedCopy(ctx, journal.RetainedCopy{Workspace: in.Workspace, Change: revision.Change,
+		Attempt: in.Attempt, Path: in.Worktree, SourceRepo: in.SourceRepo, Complete: complete})
+}
+
+// screenTaskCopy records what the task copy's capture leaves out and reports
+// whether the capture is still complete.
+func screenTaskCopy(ctx context.Context, runner *gitexec.Runner, in CaptureRequest) (bool, error) {
+	entries, err := capture.ScreenTaskCopy(ctx, runner, in.Worktree)
+	if err != nil {
+		return false, err
+	}
+	complete := in.Complete && capture.Complete(entries)
+	if len(entries) > 0 {
+		if _, err := capture.SaveManifest(ctx, runner, in.Worktree, capture.Manifest{Workspace: in.Workspace,
+			Attempt: in.Attempt, Entries: entries, Complete: complete, Retained: !complete}); err != nil {
+			return false, err
+		}
+	}
+	return complete, nil
 }
 
 func captureSHAForRequest(ctx context.Context, runner *gitexec.Runner, captureSHA string) (string, error) {
@@ -200,11 +236,22 @@ func FreezeAt(ctx context.Context, journalPath string, in Request) (loomgit.Revi
 	}
 	var revision loomgit.Revision
 	err = agentcapture.WithTaskCopyLease(ctx, journalPath, sourceForFreeze(in.SourceRepo, in.Worktree), in.Worktree, func(ctx context.Context) error {
-		tree, err := stagePatch(ctx, runner, in)
+		tree, entries, err := stagePatch(ctx, runner, in)
 		if err != nil {
 			return err
 		}
-		revision, err = recordRevision(ctx, store, runner, in, tree)
+		entries, err = withIgnored(ctx, runner, in.Worktree, entries)
+		if err != nil {
+			return err
+		}
+		complete := capture.Complete(entries)
+		if len(entries) > 0 {
+			if _, err := capture.SaveManifest(ctx, runner, in.Worktree, capture.Manifest{Workspace: in.Workspace,
+				Attempt: in.Attempt, Entries: entries, Complete: complete, Retained: !complete}); err != nil {
+				return err
+			}
+		}
+		revision, err = recordRevision(ctx, store, runner, in, tree, complete)
 		if err != nil {
 			return err
 		}
@@ -214,38 +261,69 @@ func FreezeAt(ctx context.Context, journalPath string, in Request) (loomgit.Revi
 			}
 		}
 		return store.RecordRetainedCopy(ctx, journal.RetainedCopy{Workspace: in.Workspace, Change: revision.Change,
-			Attempt: in.Attempt, Path: in.Worktree, SourceRepo: in.SourceRepo, Complete: true})
+			Attempt: in.Attempt, Path: in.Worktree, SourceRepo: in.SourceRepo, Complete: complete})
 	})
 	return revision, err
 }
 
-func stagePatch(ctx context.Context, runner *gitexec.Runner, in Request) (string, error) {
+// withIgnored adds the task copy's ignored files to the screened patch entries
+// (D18): they are listed, never captured, as in a cancel-time capture.
+func withIgnored(ctx context.Context, runner *gitexec.Runner, worktree string, entries []capture.Entry) ([]capture.Entry, error) {
+	ignored, err := capture.IgnoredEntries(ctx, runner, worktree)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		seen[entry.Path] = true
+	}
+	for _, entry := range ignored {
+		if !seen[entry.Path] {
+			entries = append(entries, entry)
+		}
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
+	return entries, nil
+}
+
+// stagePatch stages the flat patch on Base in a private index, then applies
+// the capture engine's D18 rules: untracked secret-pattern paths never enter
+// the frozen tree.
+func stagePatch(ctx context.Context, runner *gitexec.Runner, in Request) (string, []capture.Entry, error) {
 	base, err := runner.Run(ctx, "rev-parse", "--verify", in.Base+"^{commit}")
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if strings.TrimSpace(string(base)) != in.Base {
-		return "", fmt.Errorf("base must be an exact commit SHA")
+		return "", nil, fmt.Errorf("base must be an exact commit SHA")
 	}
 	index, err := os.CreateTemp("", "loom-driver-index-*")
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	indexPath := index.Name()
 	_ = index.Close()
 	defer func() { _ = os.Remove(indexPath) }()
 	env := map[string]string{"GIT_INDEX_FILE": indexPath}
 	if _, err = runner.RunWithEnv(ctx, env, "read-tree", in.Base); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if _, err = runner.RunWithInput(ctx, in.Patch, env, "apply", "--cached", "--binary"); err != nil {
-		return "", err
+		return "", nil, err
+	}
+	parent := in.Base
+	if in.CommitHeadSHA != "" {
+		parent = in.CommitHeadSHA
+	}
+	entries, err := capture.ScreenStaged(ctx, runner, env, parent)
+	if err != nil {
+		return "", nil, err
 	}
 	tree, err := runner.RunWithEnv(ctx, env, "write-tree")
-	return strings.TrimSpace(string(tree)), err
+	return strings.TrimSpace(string(tree)), entries, err
 }
 
-func recordRevision(ctx context.Context, store *journal.SQLite, runner *gitexec.Runner, in Request, tree string) (loomgit.Revision, error) {
+func recordRevision(ctx context.Context, store *journal.SQLite, runner *gitexec.Runner, in Request, tree string, complete bool) (loomgit.Revision, error) {
 	change, err := changeForTask(ctx, store, in.Workspace, in.Task, in.Repo)
 	if err != nil {
 		return loomgit.Revision{}, err
@@ -279,7 +357,7 @@ func recordRevision(ctx context.Context, store *journal.SQLite, runner *gitexec.
 	revision, err := changeset.FreezeSource(ctx, store, runner, changeset.SourceInput{
 		Workspace: in.Workspace, Change: change, RequestID: requestID,
 		Attempt: in.Attempt, TaskID: in.Task, BaseSHA: in.Base,
-		CaptureSHA: captureSHA, Outcome: in.Outcome, Complete: true,
+		CaptureSHA: captureSHA, Outcome: in.Outcome, Complete: complete,
 	})
 	if err != nil {
 		return revision, err

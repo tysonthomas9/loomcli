@@ -185,6 +185,24 @@ describe("TaskChangesTab", () => {
     expect(screen.queryByRole("button", { name: /History/ })).toBeNull();
   });
 
+  it("never says No changes for an incomplete revision with an empty diff", async () => {
+    getTaskRevisions.mockResolvedValue([{ ...rev2, incomplete: true }]);
+    getTaskDiff.mockResolvedValue([
+      { ...taskDiff, compare: "base", files: [] },
+    ]);
+    render(<TaskChangesTab workspaceId="W" taskId="T" />);
+    expect(
+      await screen.findByText(
+        /Nothing was captured\. This capture is incomplete/,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Incomplete capture")).toBeInTheDocument();
+    expect(screen.queryByText("No changes")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Approve and create PR" }),
+    ).toBeDisabled();
+  });
+
   it("closes an empty attempt as No changes with no verdict buttons", async () => {
     getTaskRevisions.mockResolvedValue([{ ...rev2, no_changes: true }]);
     getTaskDiff.mockResolvedValue([

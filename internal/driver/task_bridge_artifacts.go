@@ -377,7 +377,9 @@ func (e HostBridgeTaskExecutor) safeRunnerPath(rawPath, label string) (string, e
 
 // freezeNoChanges keeps a completed attempt that changed nothing as evidence
 // (D29): its source revision equals its base, so the task closes as "No
-// changes" with no review, apply or PR. Failed or retained runs, and runs
+// changes" with no review, apply or PR. The task copy is screened first
+// (D18): a left-out secret file makes the revision incomplete, not "No
+// changes", and the copy is retained. Failed or retained runs, and runs
 // without a host worktree or exact base, record nothing, as before.
 func (e HostBridgeTaskExecutor) freezeNoChanges(ctx context.Context, req TaskExecRequest, runner bridgeTaskRunnerResult, result TaskExecResult) (TaskExecResult, error) {
 	base := firstNonEmpty(runner.PatchBaseRef, runner.PatchBaseRefCamel, runner.BaseRef, runner.BaseRefCamel)
@@ -396,7 +398,7 @@ func (e HostBridgeTaskExecutor) freezeNoChanges(ctx context.Context, req TaskExe
 	revision, err := driverfreeze.FreezeCapture(ctx, driverfreeze.CaptureRequest{
 		Workspace: req.WorkspaceKey, Task: req.TaskID, Repo: repoName, Attempt: attempt,
 		Worktree: e.WorktreePath, Base: base, CaptureSHA: base, SourceRepo: result.RuntimeMetadata["source_repo_path"],
-		Outcome: string(result.Status), Complete: true,
+		Outcome: string(result.Status), Complete: true, ScreenTaskCopy: true,
 	})
 	if err != nil {
 		result.Status = domain.TaskRunFailed
@@ -414,6 +416,10 @@ func (e HostBridgeTaskExecutor) freezeNoChanges(ctx context.Context, req TaskExe
 	result.RuntimeMetadata["revision"] = strconv.Itoa(revision.Number)
 	result.RuntimeMetadata["revision_head_sha"] = revision.HeadSHA
 	result.RuntimeMetadata["revision_no_changes"] = strconv.FormatBool(revision.NoChanges)
+	result.RuntimeMetadata["revision_incomplete"] = strconv.FormatBool(revision.Incomplete)
+	if revision.Incomplete {
+		result.RuntimeMetadata["retained_path"] = e.WorktreePath
+	}
 	return result, nil
 }
 
