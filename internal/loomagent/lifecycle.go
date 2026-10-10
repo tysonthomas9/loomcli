@@ -2,8 +2,10 @@ package loomagent
 
 import (
 	"context"
+	"errors"
 	"time"
 
+	"github.com/tysonthomas9/loomcli/internal/loomharness"
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
 )
 
@@ -39,7 +41,11 @@ func (s *Service) Archive(ctx context.Context, req ArchiveRequest) error {
 		return s.finishArchive(ctx, a, deref(a.ArchiveReason))
 	}
 	if req.Reason == ArchiveCancelled {
-		return s.archiveCancelled(ctx, a)
+		if err := s.archiveCancelled(ctx, a); err != nil {
+			s.retryLater(a.AgentID) // settle finishes it once stopping
+			return err
+		}
+		return nil
 	}
 	switch {
 	case a.Mode == "single_task" && a.State != StateFinished:
@@ -286,7 +292,8 @@ func (s *Service) checkUnsaved(ctx context.Context, a loomstore.Agent, fingerpri
 }
 
 // stop marks a stopping, recording arch when set in the same transaction,
-// interrupts its running turn and withdraws every waiting message.
+// interrupts its running turn (none runs in a session that is gone) and
+// withdraws every waiting message.
 func (s *Service) stop(ctx context.Context, a loomstore.Agent, arch *archiveCols) (loomstore.Agent, error) {
 	var err error
 	if a.State != StateStopping {
@@ -297,7 +304,7 @@ func (s *Service) stop(ctx context.Context, a loomstore.Agent, arch *archiveCols
 		}
 	}
 	if a.RunningTurnID != nil {
-		if err := s.interrupt(ctx, a); err != nil {
+		if err := s.interrupt(ctx, a); err != nil && !errors.Is(err, loomharness.ErrSessionNotFound) { // gone: nothing runs
 			return a, err
 		}
 	}
