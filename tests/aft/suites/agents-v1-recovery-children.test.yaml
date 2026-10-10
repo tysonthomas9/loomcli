@@ -172,8 +172,11 @@ tests:
               assert "AGV1-B1-KID-DONE" in (mine[0].get("summary") or ""), mine[0]
           assert len(recs) == 2, "the lead saved %d task_completed records; want 2" % len(recs)
           dl = [e for e in json.load(open(d + "/b1-delivered.json"))["events"] if e["kind"] == "message.delivered"]
+          # A delivered input names the records it carries (OR4c may batch
+          # both children's into one); each record is delivered once in all.
+          carried = lambda e: [(c.get("child"), c.get("attempt")) for c in ((e.get("payload") or {}).get("completions") or [])]
           for kid in (a, b):
-              n = sum(1 for e in dl if (e.get("payload") or {}).get("sender") == "agent:" + kid)
+              n = sum(carried(e).count((kid, 0)) for e in dl)
               assert n == 1, "%s's record was delivered to the lead %d times; want 1" % (kid, n)
           title = lambda r: any("You are a title generator" in json.dumps(m.get("content")) for m in r.get("messages", []) if m.get("role") == "system")
           reqs = [r.get("messages", []) for r in json.load(open(d + "/b1-requests.json"))["requests"] if not title(r)]
@@ -192,7 +195,7 @@ tests:
           acks = int(open(d + "/b1-acks.txt").read().strip().strip('"'))
           assert acks == len(hand), "the Lead wrote %d replies for %d hand-overs" % (acks, len(hand))
           PY
-        intent: "Check the Lead saved one completed task_completed per child attempt, each delivered once from the child's slot; each child's brief reached its model once; each completion was handed to the Lead's model once; and the Lead wrote one reply per hand-over"
+        intent: "Check the Lead saved one completed task_completed per child attempt, each delivered once; each child's brief reached its model once; each completion was handed to the Lead's model once; and the Lead wrote one reply per hand-over"
 
   - name: B2 child deleted before delivery - a child that finishes while the Lead is busy and is then deleted still reaches the Lead once
     intent: An OpenCode lead's turn is busy when its child finishes; the operator deletes the finished child before the Lead reads its result; when the Lead's turn ends, it is handed that child's completion exactly once, the result card stays once before and after a reload, and nothing shows an error
