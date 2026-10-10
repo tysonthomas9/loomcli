@@ -329,7 +329,7 @@ case "$case_name" in
     test "$(merge_up_to_here "$b" "$case_dir/merge-b.json")" = 200 || { cat "$case_dir/merge-b.json"; exit 1; }
     wait_merged "1 1 0" "merge up to B"
     wait_merge_phase "$b" done "$case_dir/status-b.json"
-    json "$case_dir/status-b.json" 'assert v["backend"]=="loom" and [l["state"] for l in v["layers"]]==["done","done"], v'
+    json "$case_dir/status-b.json" 's=[l["state"] for l in v["layers"]]; assert v["backend"]=="loom" and s[:2]==["done","done"] and s[2:]==["pending"], v'
     rc="$(merge_up_to_here "$c" "$case_dir/merge-c.json")"
     printf 'merge up to C after B returned %s:\n' "$rc"
     cat "$case_dir/merge-c.json"
