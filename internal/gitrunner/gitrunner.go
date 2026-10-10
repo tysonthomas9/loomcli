@@ -20,7 +20,7 @@ type Runner interface {
 // GIT_INDEX_FILE for a private index.
 type EnvRunner interface {
 	Runner
-	RunEnv(ctx context.Context, dir string, env []string, args ...string) (string, error)
+	RunEnv(ctx context.Context, dir string, env []string, args ...string) (string, error) // raw output
 }
 
 // Exec runs the git executable with terminal prompts turned off.
@@ -29,16 +29,19 @@ type Exec struct{}
 // Run implements Runner: Output with the success output trimmed and no
 // output on error.
 func (Exec) Run(ctx context.Context, dir string, args ...string) (string, error) {
-	return Exec{}.RunEnv(ctx, dir, nil, args...)
+	out, err := Exec{}.RunEnv(ctx, dir, nil, args...)
+	return strings.TrimSpace(out), err
 }
 
-// RunEnv implements EnvRunner: Run with env added to git's environment.
+// RunEnv implements EnvRunner: git with env added to its environment,
+// returning its raw output (untrimmed, so -z output keeps every name whole)
+// and no output on error.
 func (Exec) RunEnv(ctx context.Context, dir string, env []string, args ...string) (string, error) {
 	out, err := output(ctx, dir, env, args...)
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(out), nil
+	return out, nil
 }
 
 // Output runs git in dir with terminal prompts turned off and returns its raw

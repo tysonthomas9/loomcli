@@ -243,3 +243,18 @@ func TestCheckpointSkipsGitlinks(t *testing.T) {
 		}
 	}
 }
+
+// TestCheckpointNestedRepoLeadingSpace: a nested repository whose name
+// starts with a space is still left out (ls-files -z output kept whole).
+func TestCheckpointNestedRepoLeadingSpace(t *testing.T) {
+	w, s, path := agentTree(t)
+	nested := filepath.Join(path, " lead")
+	run(t, "", "init", "-q", "-b", "main", nested)
+	commit(t, nested, "x.txt", "x")
+	if err := w.Checkpoint(context.Background(), s, turn1); err != nil {
+		t.Fatal(err)
+	}
+	if got := run(t, path, "ls-tree", "--name-only", turn1); got != "base.txt" {
+		t.Fatalf("turn/1 top level = %q; want only base.txt", got)
+	}
+}

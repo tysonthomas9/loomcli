@@ -406,18 +406,25 @@ func (s *Service) settle(ctx context.Context, agentID string) error {
 // no turn running, has the end of running (a turn ID, or an input key until
 // turn.started names the turn).
 func endedNatively(ctx context.Context, sess loomharness.Session, running string) (bool, error) {
+	end, err := nativeEnd(ctx, sess, running)
+	return end != nil, err
+}
+
+// nativeEnd is the end of running (a turn ID, or an input key until
+// turn.started names the turn) in sess's history, or nil.
+func nativeEnd(ctx context.Context, sess loomharness.Session, running string) (*loomharness.Event, error) {
 	f := newFold()
 	for after := ""; ; {
 		page, err := sess.Messages(ctx, after, 100)
 		if err != nil {
-			return false, err
+			return nil, err
 		}
 		for _, e := range page.Events {
 			f.add(e)
 		}
 		if after = page.Next; after == "" {
 			_, _, ended := f.resolve(running)
-			return ended != nil, nil
+			return ended, nil
 		}
 	}
 }

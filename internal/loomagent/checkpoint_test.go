@@ -2,6 +2,7 @@ package loomagent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -310,6 +311,10 @@ func TestCheckpointSwitchMidTurn(t *testing.T) {
 	if waitingAtTurn1 != loomstore.SlotWaiting {
 		t.Fatalf("r-next at the turn/1 capture = %q; want it captured while r-next waited", waitingAtTurn1)
 	}
+	late := loomharness.Event{Type: loomharness.EventTurnCompleted, TurnID: "turn_0", StopReason: "cancelled", Session: e.old}
+	if _, err := e.s.events.Append(ctx, nativeRow("a1", EventTurnCompleted, late)); err != nil { // the old session's own end, late
+		t.Fatal(err)
+	}
 	if n, err := e.s.store.CountEvents(ctx, "a1", EventTurnCompleted); err != nil || n != 1 {
 		t.Fatalf("saved turn ends = %d, %v; want the stopped turn's one", n, err)
 	}
@@ -364,5 +369,76 @@ func TestCheckpointFailureRetriedWithoutSession(t *testing.T) {
 	s := newService(t, ServiceConfig{Workspace: ws}, a)
 	if err := s.reconcileAgent(context.Background(), "a1"); !isCheckpointFailed(err) {
 		t.Fatalf("reconcile = %v; want the capture failure, for the queue to retry", err)
+	}
+}
+
+// TestCheckpointHandedEndedWhileDown: a message handed just before a crash
+// ran its whole turn while Loom was down, and no backfill saved its end
+// (it failed). The recovery saves that end, so turn/1 is captured before the
+// next message is handed over.
+func TestCheckpointHandedEndedWhileDown(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	s := e.service(ServiceConfig{})
+	a, _ := newLead(t, e, s, "alpha")
+	fh.Script(a.AgentID, fake.Turn{}, fake.Turn{Steps: []fake.Step{{Ask: "t2"}}})
+	if !crashDispatchAt(t, "prompted")(func() { _, _ = s.Send(ctx, sendReq(a.AgentID, "u1", "go", user)) }) {
+		t.Fatal("did not crash")
+	}
+	s = e.service(ServiceConfig{}) // Loom restarts; its backfill failed, so no feed or reconcile runs
+	waiting := ""
+	e.ws.capture = func(ref string) error {
+		if ref == checkpointRef(a.AgentID, 1) {
+			waiting = slotState(t, s, a.AgentID, "c1")
+		}
+		return nil
+	}
+	mustSendMsg(t, s, sendReq(a.AgentID, "c1", "next", child))
+	if waiting != loomstore.SlotWaiting || len(handedReqs(t, s, a.AgentID, "c1")) != 1 {
+		t.Fatalf("c1 at the turn/1 capture = %q, handed %v; want turn/1 captured while c1 waited, then c1 handed",
+			waiting, handedReqs(t, s, a.AgentID, "c1"))
+	}
+}
+
+// TestCheckpointArchiveCancelledSavesEnd: Archive(cancelled) saves the end of
+// the turn it stops before the agent is archived, so its ref stays owed with
+// no feed: the native end when the history has it (its own stop reason),
+// else a cancelled one.
+func TestCheckpointArchiveCancelledSavesEnd(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		turn fake.Turn
+		stop func(string) bool
+	}{
+		{"running", fake.Turn{Steps: []fake.Step{{Ask: "t1"}}}, func(r string) bool { return r != "" }},
+		{"ended natively", fake.Turn{}, func(r string) bool { return r != "cancelled" && r != "" }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			ctx := context.Background()
+			e := newCreateEnv(t)
+			fh := e.h.Harness.(*fake.Harness)
+			s := e.service(ServiceConfig{})
+			a, _ := newLead(t, e, s, "alpha")
+			fh.Script(a.AgentID, c.turn)
+			mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user)) // no feed: the row's turn still runs
+			if err := s.Archive(ctx, ArchiveRequest{AgentID: a.AgentID, Reason: ArchiveCancelled}); err != nil {
+				t.Fatal(err)
+			}
+			ends := kinds(rows(t, s, a.AgentID, 0), EventTurnCompleted)
+			var p struct{ StopReason string }
+			if len(ends) == 1 {
+				_ = json.Unmarshal(ends[0].Payload, &p)
+			}
+			if len(ends) != 1 || !c.stop(p.StopReason) {
+				t.Fatalf("saved ends = %d, stop reason %q", len(ends), p.StopReason)
+			}
+			if err := s.reconcileAgent(ctx, a.AgentID); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := e.ws.checkpoint(checkpointRef(a.AgentID, 1)); !ok {
+				t.Fatal("turn/1 missing for the archived agent")
+			}
+		})
 	}
 }

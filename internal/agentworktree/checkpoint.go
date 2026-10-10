@@ -71,12 +71,12 @@ func (w *Worktrees) capture(ctx context.Context, path, ref string) error {
 	if err != nil {
 		return err
 	}
-	commit, err := git.RunEnv(ctx, path, env, "commit-tree", tree, "-p", "HEAD", "-m", msg)
+	commit, err := git.RunEnv(ctx, path, env, "commit-tree", strings.TrimSpace(tree), "-p", "HEAD", "-m", msg)
 	if err != nil {
 		return err
 	}
 	checkpointCrash("update-ref")
-	if _, err := git.RunEnv(ctx, path, env, "update-ref", ref, commit, ""); err != nil {
+	if _, err := git.RunEnv(ctx, path, env, "update-ref", ref, strings.TrimSpace(commit), ""); err != nil {
 		return fmt.Errorf("agentworktree: checkpoint %s: %w", ref, err)
 	}
 	return nil

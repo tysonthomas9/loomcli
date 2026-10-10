@@ -110,6 +110,9 @@ func (s *Service) dispatch(ctx context.Context, a loomstore.Agent) (loomstore.Ag
 		if slots, err = s.store.Slots(ctx, a.AgentID); err != nil {
 			return a, err
 		}
+		if err := s.checkpoint(ctx, a); err != nil { // the recovered turn's ref
+			return a, err
+		}
 		break // one turn's input can be handed at a time
 	}
 	waiting := slices.ContainsFunc(slots, func(sl loomstore.Slot) bool { return sl.State == loomstore.SlotWaiting })
@@ -126,7 +129,7 @@ func (s *Service) dispatch(ctx context.Context, a loomstore.Agent) (loomstore.Ag
 // no turn runs from it and dispatch may go on: it never landed and is back
 // in line, or it landed and its turn already ended.
 func (s *Service) recoverHanded(ctx context.Context, a loomstore.Agent, sl loomstore.Slot, slots []loomstore.Slot) (loomstore.Agent, bool, error) {
-	sess, _, err := s.current(ctx, a)
+	sess, ref, err := s.current(ctx, a)
 	if err != nil || sess == nil {
 		return a, false, errors.Join(err, &Error{Code: CodeHarnessUnavailable, Message: a.Harness + " is not available"})
 	}
@@ -143,8 +146,8 @@ func (s *Service) recoverHanded(ctx context.Context, a loomstore.Agent, sl looms
 		if err != nil {
 			return a, false, harnessErr(err)
 		}
-		if !st.Running {
-			return a, true, nil // its turn ran while Loom was down
+		if !st.Running { // its turn ran while Loom was down: its end counts before the next hand-over
+			return a, true, s.saveTurnEnd(ctx, a.AgentID, sess, ref, deref(sl.NativeKey))
 		}
 		to := a.StateOf()
 		to.RunningTurn = sl.NativeKey // until turn.started names it

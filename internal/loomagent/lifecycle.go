@@ -292,6 +292,9 @@ func (s *Service) stop(ctx context.Context, a loomstore.Agent, arch *archiveCols
 		if err := s.interrupt(ctx, a); err != nil {
 			return a, err
 		}
+		if err := s.stoppedEnd(ctx, a); err != nil { // its ref stays owed once archived
+			return a, err
+		}
 	}
 	slots, err := s.store.Slots(ctx, a.AgentID)
 	if err != nil {

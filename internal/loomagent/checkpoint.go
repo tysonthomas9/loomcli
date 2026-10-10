@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/tysonthomas9/loomcli/internal/loomharness"
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
 )
 
@@ -51,4 +52,31 @@ func (s *Service) checkpoint(ctx context.Context, a loomstore.Agent) error {
 func isCheckpointFailed(err error) bool {
 	var c checkpointFailed
 	return errors.As(err, &c)
+}
+
+// stoppedEnd saves the end of a's running turn, which a stop just
+// interrupted, so it counts as ended before a moves on (saveTurnEnd).
+func (s *Service) stoppedEnd(ctx context.Context, a loomstore.Agent) error {
+	if a.RunningTurnID == nil {
+		return nil
+	}
+	sess, ref, err := s.current(ctx, a)
+	if err != nil || sess == nil {
+		return err
+	}
+	return s.saveTurnEnd(ctx, a.AgentID, sess, ref, *a.RunningTurnID)
+}
+
+// saveTurnEnd saves the end of running (a turn ID, or an input key until
+// turn.started names the turn), which no longer runs on sess at ref: its
+// native end if the history has one, else a cancelled end with the EventID
+// the native one would have, so a late native end adds no row.
+func (s *Service) saveTurnEnd(ctx context.Context, agentID string, sess loomharness.Session, ref loomharness.NativeRef, running string) error {
+	end, err := nativeEnd(ctx, sess, running)
+	if err != nil || end == nil { // an unread history: still count the turn
+		end = &loomharness.Event{Type: loomharness.EventTurnCompleted, TurnID: running, StopReason: "cancelled"}
+	}
+	end.Session = ref // the EventID the feed would give it
+	_, err = s.events.Append(ctx, nativeRow(agentID, EventTurnCompleted, *end))
+	return err
 }
