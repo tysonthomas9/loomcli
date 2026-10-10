@@ -83,7 +83,7 @@ teardown: |
 
 tests:
   - name: I1 DF2 activity line - a working child's tray row shows each step in turn, a command, a file read and a thinking line, with the turn's time, and never falls back to Working… within a turn
-    intent: An operator's OpenCode lead starts one child that keeps working. Its tray row reads "Working…" until its first step, then "▸ Ran command · npm test", then "▸ Read file · src/routes.ts", then "💭 Thinking · Checking the routes table", each with the turn's elapsed time. Within a turn the row never falls back to "Working…" once a step has shown; a new turn reads "Working…" only until its first step (DF2b restarts the turn's time and step). A MutationObserver checks this for the whole run. When the child finishes it leaves the tray.
+    intent: An operator's OpenCode lead starts one child that keeps working. Its tray row reads "Working…" until its first step, then "▸ Ran command · npm test", then "▸ Read file · src/routes.ts", then "💭 Thinking · Checking the routes table", each with the turn's elapsed time. Within a turn the row never falls back to "Working…" once a step has shown; a new turn reads "Working…" only until its first step, and its time starts again, below what the first turn reached (DF2b restarts the turn's time and step). A MutationObserver checks this for the whole run. When the child finishes it leaves the tray.
     steps:
       - run: |
           set -e
@@ -166,6 +166,13 @@ tests:
               return ticks.size >= 2; })()
         budget: 10000
         intent: "Wait until the held step's clock has advanced, so the line shows a live turn timer, not a fixed time"
+      - wait:
+          fn: >-
+            (() => { const w = window.__df2; if (!w) return false;
+              w.secs = (l) => { const [m, s] = l.split(' · ').pop().split(':'); return Number(m) * 60 + Number(s); };
+              return w.seen.some((l) => l.startsWith('▸ Ran command · npm test · ') && w.secs(l) >= 4); })()
+        budget: 15000
+        intent: "Wait until the first turn has run at least 0:04, so a later turn's restarted timer reads lower"
       - run: |
           set -e
           agent-browser --session "$AFT_SESSION" eval 'window.__df2.arm()' | grep -q true
@@ -193,6 +200,14 @@ tests:
               return kinds.length === 3 && w.bad.length === 0 && w.fallback === 0 &&
                 document.querySelector('[data-testid=agent-tray] [data-tray-row] [data-status=running]')?.lastElementChild?.textContent !== 'Working…'; })()
         intent: "Check the row showed all three steps, two tool kinds and a thinking line, never went blank, and read Working… only while a turn the test started had no step yet, never as a fallback within a turn"
+      - wait:
+          fn: >-
+            (() => { const w = window.__df2; if (!w) return false;
+              const first = (k) => w.seen.find((l) => l.startsWith(k));
+              const ran = Math.max(...w.seen.filter((l) => l.startsWith('▸ Ran command · ')).map(w.secs));
+              const read = first('▸ Read file · '), think = first('💭 Thinking · ');
+              return ran >= 4 && !!read && !!think && w.secs(read) < ran && w.secs(think) < ran; })()
+        intent: "Check that each Stop with a message restarted the turn's timer (DF2b): the read and thinking turns' first lines read a lower time than the first turn reached, not the first turn's running total"
       - run: |
           set -e
           "$AFT_WORK_DIR/act-send" "$(cat "$AFT_WORK_DIR/actDf2Kid")" "agv1-act-df2-stop-${RUN_ID:-local}" ""
