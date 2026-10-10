@@ -60,8 +60,6 @@ func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error 
 	}
 	defer func() { _ = logFile.Close() }()
 	defer cancelApp()
-	// The crash-cleanup record goes only once the app-server is known to be
-	// stopped; if it would not die, a later `loom serve` still reaps it.
 	stopApp := func() error {
 		return stopAndForgetCodexAppServer(runtimeHome, func() error { return stopCodexAppServer(appCmd, appErr, cancelApp) })
 	}
@@ -74,10 +72,7 @@ func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error 
 		_ = UpdateCodexRuntimeMetadata(context.Background(), cfg.Store, cfg.Workspace, cfg.SessionID, runtime)
 		return err
 	}
-	// Ready: the launcher has spawned the native app-server, so record it too.
-	if err := recordCodexAppServer(runtimeHome, appCmd.Process.Pid); err != nil {
-		cfg.Logger.Warn("failed to record codex app-server for crash cleanup", "err", err)
-	}
+	noteCodexAppServer(cfg, runtimeHome, appCmd.Process.Pid) // ready: record the native child too
 
 	discoverCtx, cancelDiscover := context.WithCancel(ctx)
 	defer cancelDiscover()
@@ -140,9 +135,7 @@ func startCodexAppServer(
 		_ = logFile.Close()
 		return nil, nil, nil, nil, fmt.Errorf("start codex app-server: %w", err)
 	}
-	if err := recordCodexAppServer(runtimeHome, appCmd.Process.Pid); err != nil {
-		cfg.Logger.Warn("failed to record codex app-server for crash cleanup", "err", err)
-	}
+	noteCodexAppServer(cfg, runtimeHome, appCmd.Process.Pid)
 	appErr := make(chan error, 1)
 	go func() {
 		appErr <- appCmd.Wait()
@@ -440,6 +433,17 @@ func unixFloatTime(value float64) time.Time {
 	return time.Unix(seconds, nanos).UTC()
 }
 
+// noteCodexAppServer records the app-server so a later `loom serve` can reap
+// it if this runtime dies without stopping it.
+func noteCodexAppServer(cfg CodexLeadRuntimeConfig, runtimeHome string, pid int) {
+	if err := recordCodexAppServer(runtimeHome, pid); err != nil {
+		cfg.Logger.Warn("failed to record codex app-server for crash cleanup", "err", err)
+	}
+}
+
+// stopAndForgetCodexAppServer drops the crash-cleanup record only once the
+// app-server is known to be stopped; if it would not die, a later
+// `loom serve` still reaps it.
 func stopAndForgetCodexAppServer(runtimeHome string, stop func() error) error {
 	err := stop()
 	if !errors.Is(err, errCodexAppServerStillRunning) {
