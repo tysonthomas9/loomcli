@@ -105,8 +105,7 @@ func (s *Service) limitResume(ctx context.Context, agentID string) error {
 		return err
 	}
 	a, err := s.store.GetAgent(ctx, agentID)
-	if errors.Is(err, loomstore.ErrNotFound) || (err == nil && (!on || a.DeletedAt != nil || a.Mode == "single_task" ||
-		a.State == StateArchived || a.State == StateStopping || deref(a.HarnessSessionID) != r.Session)) {
+	if errors.Is(err, loomstore.ErrNotFound) || (err == nil && (!on || resumeVoid(a, r))) {
 		return s.store.DropLimitResume(ctx, agentID)
 	} else if err != nil {
 		return err
@@ -121,6 +120,14 @@ func (s *Service) limitResume(ctx context.Context, agentID string) error {
 		return nil
 	}
 	return err
+}
+
+// resumeVoid reports whether a can no longer take its resume r: it is a
+// single task, deleted, archived or stopping, or no longer on the session
+// whose turn hit the limit (a harness switch).
+func resumeVoid(a loomstore.Agent, r loomstore.LimitResume) bool {
+	return a.DeletedAt != nil || a.Mode == "single_task" || a.State == StateArchived || a.State == StateStopping ||
+		deref(a.HarnessSessionID) != r.Session
 }
 
 // pending reports whether a slot waits or is handed over.
