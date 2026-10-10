@@ -1,0 +1,207 @@
+# Agent API requests on the OpenCode emulator (LOOM_HARNESS_EMU=1, the
+# agents-v1 deterministic tier): a stale Update retry (OR5d), a classed
+# terminal failure (OR9) and the OpenCode version gate (R21/R22). Each
+# agent's turns come from the emulator's scenario file; fail_type plays
+# OpenCode's typed provider error, and emu-version beside the emulator's
+# service registration is the version its `--version` reports.
+suite: agents-v1-requests
+classification: { area: agents, feature: agent-api-requests, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: |
+  set -e
+  if [ -z "${AFT_EMU_SCENARIOS:-}" ]; then echo "agents-v1-requests needs LOOM_HARNESS_EMU=1" >&2; exit 1; fi
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-REQ" >/dev/null || true
+  repo="$AFT_WORK_DIR/agv1-req-repo"
+  mkdir -p "$repo"
+  git -C "$repo" init -q -b main
+  echo "agents-v1 requests ${RUN_ID:-local}" > "$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" -c user.email=e2e@x -c user.name=e2e commit -q -m init
+  printf '{"name":"e2e-agv1-req","type":"empty","repos":["%s"]}' "$repo" |
+    curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @- >/dev/null
+teardown: |
+  set +e
+  : > "$(dirname "$AFT_OPENCODE_SERVICE")/emu-version"
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-REQ" >/dev/null
+
+tests:
+  - name: G1 a stale Update retry returns its stored result and leaves the newer spec in place
+    intent: An API client sets the lead's effort with request A, then with request B, then retries A; the retry answers A's stored result, the agent keeps B's effort, and only two agent.updated events exist
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-REQ/v1/agents
+          headers: { Idempotency-Key: "agv1-g1-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-g1-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-req-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1G1Id
+        intent: "Create an OpenCode lead through the Agent API"
+      - run: |
+          set -e
+          api="$AFT_BASE_URL/api/workspaces/E2E-AGV1-REQ/v1/agents/$(cat "$AFT_WORK_DIR/agv1G1Id")"
+          patch() { curl -sf -X PATCH "$api" -H "Content-Type: application/json" -H "Idempotency-Key: $1-${RUN_ID:-local}" -d "{\"effort\":\"$2\"}" > "$AFT_WORK_DIR/agv1-g1-$3.json"; }
+          patch agv1-g1-a low a
+          patch agv1-g1-b high b
+          patch agv1-g1-a low retry
+          curl -sf "$api" > "$AFT_WORK_DIR/agv1-g1-get.json"
+          curl -sf "$api/events?limit=500" > "$AFT_WORK_DIR/agv1-g1-events.json"
+          python3 - "$AFT_WORK_DIR" <<'PY'
+          import json, sys
+          load = lambda n: json.load(open(f"{sys.argv[1]}/agv1-g1-{n}.json"))
+          effort = lambda a: [o["Value"] for o in json.loads(a["spec"]).get("Options") or [] if o["ID"] == "effort"]
+          a, b, retry, now = load("a"), load("b"), load("retry"), load("get")
+          assert effort(a) == ["low"] and effort(b) == ["high"], (a["spec"], b["spec"])
+          assert b["spec_version"] > a["spec_version"], (a["spec_version"], b["spec_version"])
+          assert retry["spec_version"] == a["spec_version"] and effort(retry) == ["low"], f"the retry of A is not A's stored result: {retry}"
+          assert now["spec_version"] == b["spec_version"] and effort(now) == ["high"], f"the retry of A changed the spec: {now}"
+          updated = [e for e in load("events")["events"] if e["kind"] == "agent.updated"]
+          assert [e["payload"]["spec_version"] for e in updated] == [a["spec_version"], b["spec_version"]], f"agent.updated events: {updated}"
+          PY
+        intent: "PATCH effort low (A), then high (B), retry A, and check the retry, the spec and the agent.updated events"
+
+  - name: G2 a classed terminal failure shows its reason, is saved with its class and retryable, and the next message works
+    intent: An OpenCode lead's turn fails on a rate limit and then on a refused credential; the chat shows each readable reason, each saved turn end carries failure class and retryable (no reset time on OpenCode), the reasons survive a reload, and the next message gets a reply
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-REQ/v1/agents
+          headers: { Idempotency-Key: "agv1-g2-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-g2-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-req-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1G2Id
+        intent: "Create an OpenCode lead through the Agent API"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1G2Id")"
+          python3 - "$id" "$AFT_EMU_SCENARIOS" <<'PY'
+          import json, sys
+          agent, scenarios = sys.argv[1:3]
+          json.dump({agent: [{"fail": "AGV1-G2-LIMIT Rate limit exceeded, retry later", "fail_type": "provider.rate-limit"},
+                             {"fail": "AGV1-G2-AUTH Invalid API key", "fail_type": "provider.auth"},
+                             {"text": "AGV1-G2-AFTER"}]}, open(scenarios, "w"))
+          PY
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-REQ/chat/$id"
+        intent: "Script a rate-limited turn, an auth-failed turn and a reply, and open the lead's chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the chat for the lead is ready"
+      - fill: { label: Message, value: "first try" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=turn-error]')?.textContent || '').includes('AGV1-G2-LIMIT Rate limit exceeded') &&
+            (document.querySelector('[data-testid=turn-end-error]')?.textContent || '').includes('AGV1-G2-LIMIT') &&
+            (document.querySelector('section[aria-label="Agent chat"] header')?.textContent || '').includes('idle')
+        budget: 90000
+        intent: "Wait until the rate-limit reason shows in the error banner and the turn's note, and the lead is idle"
+      - fill: { label: Message, value: "second try" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=turn-error]')?.textContent || '').includes('AGV1-G2-AUTH Invalid API key') &&
+            (document.querySelector('section[aria-label="Agent chat"] header')?.textContent || '').includes('idle')
+        budget: 90000
+        intent: "Wait until the auth reason shows in the error banner and the lead is idle"
+      - fill: { label: Message, value: "third try" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-G2-AFTER')
+        budget: 90000
+        intent: "Wait until the next message gets the lead's reply"
+      - reload: true
+      - wait:
+          fn: >-
+            (() => { const t = Array.from(document.querySelectorAll('[data-testid=turn-end-error]')).map((n) => n.textContent).join('|');
+              return t.includes('AGV1-G2-LIMIT') && t.includes('AGV1-G2-AUTH') &&
+                (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-G2-AFTER'); })()
+        intent: "Wait until a reload replays both failed turns' reasons and the reply from saved events"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1G2Id")"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-REQ/v1/agents/$id/events?limit=500" > "$AFT_WORK_DIR/agv1-g2-events.json"
+          python3 - "$AFT_WORK_DIR/agv1-g2-events.json" <<'PY'
+          import json, sys
+          ends = [e["payload"] for e in json.load(open(sys.argv[1]))["events"] if e["kind"] == "agent.turn_completed"]
+          got = [(p.get("stopReason"), p.get("failure")) for p in ends]
+          want = [("failed", {"class": "usage_limit", "retryable": True}),
+                  ("failed", {"class": "auth", "retryable": False}),
+                  ("completed", None)]
+          assert got == want, f"turn ends {got}; want {want}"
+          assert "AGV1-G2-LIMIT" in ends[0].get("error", "") and "AGV1-G2-AUTH" in ends[1].get("error", ""), ends
+          assert "reset" not in json.dumps(ends).lower(), f"a turn end names a reset time: {ends}"
+          PY
+        intent: "Check that each saved turn end carries its failure class and retryable, with no reset time, and the last turn completed"
+
+  - name: G3 an OpenCode below the minimum version is refused clearly and the lead shows Attention until it is upgraded
+    intent: With the emulator reporting OpenCode 2.0.1 (below the 2.0.19 minimum) and its service stopped, Create is refused with harness_unavailable naming the version, a message to an existing lead is refused with the version reason while the chat shows Attention harness unavailable; after the upgrade the lead replies again
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-REQ/v1/agents
+          headers: { Idempotency-Key: "agv1-g3-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-g3-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-req-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1G3Id
+        intent: "Create an OpenCode lead through the Agent API"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1G3Id")"
+          python3 - "$id" "$AFT_EMU_SCENARIOS" <<'PY'
+          import json, sys
+          agent, scenarios = sys.argv[1:3]
+          json.dump({agent: [{"text": "AGV1-G3-BEFORE"}, {"text": "AGV1-G3-AFTER"}]}, open(scenarios, "w"))
+          PY
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-REQ/chat/$id"
+        intent: "Script two replies and open the lead's chat"
+      - fill: { label: Message, value: "before downgrade" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-G3-BEFORE') &&
+            (document.querySelector('section[aria-label="Agent chat"] header')?.textContent || '').includes('idle')
+        budget: 90000
+        intent: "Wait until the first reply arrives and the lead is idle"
+      - run: |
+          set -e
+          svc="$AFT_OPENCODE_SERVICE"
+          echo 2.0.1 > "$(dirname "$svc")/emu-version"
+          kill "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$svc")"
+        intent: "Make the installed OpenCode report 2.0.1 and stop its service, so Loom must check the version to reconnect"
+      - run: |
+          set -e
+          code="$(curl -s -o "$AFT_WORK_DIR/agv1-g3-create.json" -w '%{http_code}' -X POST "$AFT_BASE_URL/api/workspaces/E2E-AGV1-REQ/v1/agents" \
+            -H "Content-Type: application/json" -H "Idempotency-Key: agv1-g3-old-${RUN_ID:-local}" \
+            -d "{\"preset\":\"lead\",\"name\":\"agv1-g3-old-${RUN_ID:-local}\",\"repo\":\"$AFT_WORK_DIR/agv1-req-repo\",\"base_ref\":\"main\",\"overrides\":{\"harness\":\"opencode\"}}")"
+          python3 - "$code" "$AFT_WORK_DIR/agv1-g3-create.json" <<'PY'
+          import json, sys
+          code, b = int(sys.argv[1]), json.load(open(sys.argv[2]))
+          assert code >= 400 and b.get("code") == "harness_unavailable", (code, b)
+          assert "2.0.1" in b["error"] and "2.0.19" in b["error"], f"the refusal does not name the versions: {b}"
+          PY
+        intent: "Check that Create on OpenCode 2.0.1 is refused as harness_unavailable naming the installed and minimum versions"
+      - fill: { label: Message, value: "while too old" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const s = document.querySelector('section[aria-label="Agent chat"]');
+              const alerts = Array.from(s?.querySelectorAll('[role=alert]') || []).map((n) => n.textContent).join('|');
+              return alerts.includes('2.0.19') && (s?.textContent || '').includes('the harness is unavailable'); })()
+        budget: 60000
+        intent: "Wait until the chat shows the version reason and Attention harness unavailable"
+      - run: |
+          set -e
+          : > "$(dirname "$AFT_OPENCODE_SERVICE")/emu-version"
+        intent: "Upgrade: the emulator reports its pinned 2.0.19 again"
+      - fill: { label: Message, value: "after upgrade" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-G3-AFTER') &&
+            !(document.querySelector('section[aria-label="Agent chat"]')?.textContent || '').includes('the harness is unavailable')
+        budget: 90000
+        intent: "Wait until the upgraded lead replies and its Attention clears"
