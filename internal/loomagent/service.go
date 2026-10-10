@@ -330,6 +330,9 @@ func (s *Service) changeState(ctx context.Context, a loomstore.Agent, to loomsto
 	if err != nil {
 		return before, err
 	}
+	if a.RunningTurnID == nil {
+		s.forgetCalls(a.AgentID)
+	}
 	return a, nil
 }
 

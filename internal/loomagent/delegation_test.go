@@ -377,6 +377,34 @@ func TestChildCreatedNamesItsCall(t *testing.T) {
 	if got := call(create("c7", byLead)); got != "call4" {
 		t.Fatalf("c7 call = %v, want call4", got)
 	}
+	// Known race, pinned: call4 ended and call5 made c8, but neither event
+	// was ingested before c8's Create committed, so c8 names call4.
+	if got := call(create("c8", byLead)); got != "call4" {
+		t.Fatalf("c8 call = %v, want call4 (the known race)", got)
+	}
+	tracked := func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		_, ok := s.calls[lead.AgentID]
+		return ok
+	}
+	// Calls are forgotten once none runs, once no turn runs, and on delete.
+	tool(loomharness.EventItemCompleted, "call4")
+	if tracked() {
+		t.Fatal("calls kept after the last one completed")
+	}
+	run("T5", "call6")
+	finishTurn(t, s, lead.AgentID, "cancelled")
+	if tracked() {
+		t.Fatal("calls kept after the turn ended")
+	}
+	run("T6", "call7")
+	if err := s.tombstone(ctx, s.get(t, lead.AgentID)); err != nil {
+		t.Fatal(err)
+	}
+	if tracked() {
+		t.Fatal("calls kept after the lead was deleted")
+	}
 }
 
 // TestTaskCompletedReconcileOnce: a child's turn ends while Loom is down;

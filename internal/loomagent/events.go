@@ -524,11 +524,26 @@ func (s *Service) trackCall(a loomstore.Agent, e loomharness.Event) {
 		s.calls[a.AgentID] = calls
 	case e.Type == loomharness.EventItemCompleted:
 		delete(s.calls[a.AgentID], e.ItemID)
+		if len(s.calls[a.AgentID]) == 0 {
+			delete(s.calls, a.AgentID)
+		}
 	}
 }
 
+// forgetCalls drops agentID's tracked calls: no turn of it runs, or it is
+// deleted.
+func (s *Service) forgetCalls(agentID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.calls, agentID)
+}
+
 // runningCall is a's one running tool call in its running turn, or "" when
-// it runs none or more than one.
+// it runs none or more than one. It is a best guess from a's harness
+// events, which reach Loom apart from the bridge's Create: if a's call A
+// ended and its call B started in the same turn, but neither event was
+// ingested before B's Create commits, the child names A. Exact attribution
+// needs each harness to hand the bridge its tool-call ID.
 func (s *Service) runningCall(a loomstore.Agent) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()

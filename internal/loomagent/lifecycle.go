@@ -224,6 +224,9 @@ func (s *Service) tombstone(ctx context.Context, a loomstore.Agent) error {
 	_, err = s.events.commit(func() ([]loomstore.Event, error) {
 		return s.store.TombstoneEvents(ctx, a.AgentID, now, rows)
 	}, s.busPublish(out))
+	if err == nil {
+		s.forgetCalls(a.AgentID)
+	}
 	return err
 }
 
