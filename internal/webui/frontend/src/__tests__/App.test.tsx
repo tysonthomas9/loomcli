@@ -544,7 +544,8 @@ vi.mock("@/hooks/ui/usePanelManager", () => ({
   usePanelManager: mockUsePanelManager,
 }));
 
-vi.mock("@/hooks/ui/useKeyboardShortcuts", () => ({
+vi.mock("@/hooks/ui/useKeyboardShortcuts", async () => ({
+  EscapeRegistryContext: (await import("react")).createContext(null),
   KeyboardShortcutProvider: ({ children }: { children: React.ReactNode }) =>
     children,
   useKeyboardShortcuts: vi.fn(() => ({

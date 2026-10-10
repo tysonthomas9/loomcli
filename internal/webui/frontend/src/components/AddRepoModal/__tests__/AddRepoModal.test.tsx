@@ -10,6 +10,8 @@ vi.mock("@/hooks/api", () => ({
   addWorkspaceRepos: (...args: unknown[]) => mockAddWorkspaceRepos(...args),
 }));
 
+import { KeyboardShortcutProvider } from "@/hooks/ui/useKeyboardShortcuts";
+
 import { AddRepoModal } from "../AddRepoModal";
 
 const WS = "ws-1";
@@ -112,5 +114,48 @@ describe("AddRepoModal", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Add Repository" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("clone failed");
+  });
+});
+
+// ESC1: Escape closes the dialog, but not while the repo is being added
+// (Cancel is disabled then too).
+describe("AddRepoModal: Escape", () => {
+  function renderWithEscape() {
+    const onClose = vi.fn();
+    render(
+      <KeyboardShortcutProvider>
+        <AddRepoModal
+          isOpen
+          workspaceId={WS}
+          onClose={onClose}
+          onSuccess={vi.fn()}
+        />
+      </KeyboardShortcutProvider>,
+    );
+    return { onClose };
+  }
+
+  it("closes on Escape", () => {
+    const { onClose } = renderWithEscape();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores Escape while the repo is being added", async () => {
+    mockAddWorkspaceRepos.mockReturnValue(new Promise(() => {}));
+    const { onClose } = renderWithEscape();
+    fireEvent.change(screen.getByLabelText("Repository URL"), {
+      target: { value: "https://github.com/org/repo" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add Repository" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled(),
+    );
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

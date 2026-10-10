@@ -723,7 +723,7 @@ test("agents drawer at 390px: lists the agents on Terminal", async ({
 
 // A dialog opened from the drawer (New Agent) is on top: the first Escape
 // closes only the dialog, the next one the drawer underneath it (ESC1).
-test("agents drawer at 390px: Escape in a dialog opened from it keeps it open", async ({
+test("agents drawer at 390px: Escape closes a dialog opened from it, then the drawer", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });

@@ -447,6 +447,7 @@ export function CreateAgentModal({
       title="New Agent"
       ariaLabel="New Agent"
       onClose={onClose}
+      closeOnEscape={!isSubmitting}
       overlayTestId="create-agent-overlay"
       closeTestId="create-agent-close"
       dialogClassName={aetherModalStyles.dialogWide}
