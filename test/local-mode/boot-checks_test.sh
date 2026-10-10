@@ -24,7 +24,8 @@
 # Knobs: FLEET_DB_REPO (a fleet-db checkout to build, when there is no
 # ../fleet-db next to this repo), S15_MODEL (default
 # anthropic/claude-sonnet-4-5), S15_KEEP=1 keeps the stack up afterwards
-# (tear down with make local-mode-agents-down).
+# (tear down with make local-mode-agents-down), S15_EVIDENCE=<dir> keeps the
+# run's logs.
 # Checks are single-quoted strings eval'd by check():
 # shellcheck disable=SC2016,SC2034
 set -uo pipefail
@@ -76,12 +77,38 @@ if [ -n "$fleet" ]; then
   printf 'services:\n  fleet-db:\n    build:\n      context: %s\n' "$fleet" > "$T/fleet-db.yml"
   export LOCAL_MODE_COMPOSE_FILES="${LOCAL_MODE_COMPOSE_FILES:+$LOCAL_MODE_COMPOSE_FILES }$T/fleet-db.yml"
 fi
+# No real credentials: the REAL override's codex and Claude binds read
+# /dev/null instead of the host logins (OpenCode uses the fixture above).
+export LOCAL_MODE_CODEX_AUTH=/dev/null LOCAL_MODE_CLAUDE_AUTH=/dev/null LOCAL_MODE_CLAUDE_TOKEN_FILE=/dev/null
 down() {
   (cd "$repo" && LOCAL_MODE_AGENTS_REAL=1 make -s local-mode-agents-down >"$T/down.log" 2>&1) || true
 }
+# Image builds on this host are serialized by a shared mkdir lock (the AFT
+# agent-flows runner takes the same one): a concurrent build or prune can drop
+# the intermediate stage the agents target builds FROM.
+build_lock=/private/tmp/dryhawk-stack-build.lock
+lock_held=""
+take_build_lock() {
+  local i=0
+  until mkdir "$build_lock" 2>/dev/null; do
+    i=$((i + 1)); [ "$i" -le 1800 ] || die "shared stack build lock $build_lock still held after 1h"
+    sleep 2
+  done
+  lock_held=1
+  printf 's15-boot-checks project=%s pid=%s %s\n' "$project" "$$" "$(date -u +%FT%TZ)" > "$build_lock/owner"
+}
+drop_build_lock() {
+  [ -n "$lock_held" ] || return 0
+  rm -f "$build_lock/owner"; rmdir "$build_lock" 2>/dev/null; lock_held=""
+}
 cleanup() {
   [ -n "${follower:-}" ] && kill "$follower" 2>/dev/null
+  drop_build_lock
   [ "${S15_KEEP:-}" = 1 ] || down
+  # S15_EVIDENCE=<dir> keeps the logs (never the fixture or any db).
+  if [ -n "${S15_EVIDENCE:-}" ]; then
+    mkdir -p "$S15_EVIDENCE" && find "$T" -maxdepth 1 \( -name '*.log' -o -name 'k1-*' \) -exec cp {} "$S15_EVIDENCE"/ \;
+  fi
   rm -rf "$T"
 }
 trap cleanup EXIT
@@ -187,7 +214,9 @@ boot="$T/boot.log"
   done
 ) &
 follower=$!
+take_build_lock
 out="$(up 2>&1)"; rc=$?
+drop_build_lock
 printf '%s\n' "$out" > "$T/k2b-up.log"
 wait "$follower"; follower=""
 
