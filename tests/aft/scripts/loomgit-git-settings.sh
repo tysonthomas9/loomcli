@@ -110,15 +110,19 @@ run_tasks() {
   fi
   curl -fsS -X POST "$api/workflows/epic-runner" -H 'Content-Type: application/json' \
     -d "{\"epicId\":\"$epic\",\"runner\":\"local-task-runner\"}" > "$case_dir/workflow.json"
-  for name in "$@"; do
-    task="$(cat "$case_dir/task-$name.id")"
-    for _ in $(seq 1 90); do
-      curl -fsS "$api/issues/$task/revisions" > "$case_dir/revisions-$name.json"
-      if grep -q '"head_sha"' "$case_dir/revisions-$name.json"; then break; fi
-      sleep 2
-    done
-    grep -q '"head_sha"' "$case_dir/revisions-$name.json"
+}
+
+# wait_task <name>: the task records a reviewable revision. A stacked task runs
+# only once the task below it is approved (P1.26).
+wait_task() {
+  task="$(cat "$case_dir/task-$1.id")"
+  for _ in $(seq 1 90); do
+    curl -fsS "$api/issues/$task/revisions" > "$case_dir/revisions-$1.json"
+    if grep -q '"head_sha"' "$case_dir/revisions-$1.json"; then return 0; fi
+    sleep 2
   done
+  echo "task $1 recorded no revision" >&2
+  return 1
 }
 
 approve() {
@@ -130,6 +134,7 @@ approve() {
 
 if [[ "$case_name" == ui ]]; then
   run_tasks only
+  wait_task only
   expect_settings stack true off
   open_git_settings
   test "$(ui_value git-delivery-mode)" = stack
@@ -196,6 +201,7 @@ fi
 run_tasks a b c
 expect_settings stack true off
 for name in a b; do
+  wait_task "$name"
   approve "$case_dir/revisions-$name.json" "$case_dir/change-$name.id"
   change="$(cat "$case_dir/change-$name.id")"
   revision="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["data"][0]["number"])' "$case_dir/revisions-$name.json")"
@@ -219,6 +225,7 @@ test "$(put_settings '{"actor":{"kind":"lead","id":"lead"},"delivery_mode":"trun
 expect_settings trunk true off
 expect_cli_settings pr-per-task off on
 
+wait_task c
 approve "$case_dir/revisions-c.json" "$case_dir/change-c.id"
 change="$(cat "$case_dir/change-c.id")"
 curl -sS --fail-with-body -X POST "$api/agents/lead/git/pr" -H 'Content-Type: application/json' \
