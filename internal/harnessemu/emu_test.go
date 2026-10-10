@@ -842,3 +842,63 @@ func TestEmulatorSessionInstructionEntries(t *testing.T) {
 		t.Fatalf("PUT on a missing session = %d %s", code, b)
 	}
 }
+
+// TestEmulatorTypedFailure: a scripted failure with a type ends the turn as
+// OpenCode ends a typed provider failure, so live and history both carry
+// its class, and the next turn still plays.
+func TestEmulatorTypedFailure(t *testing.T) {
+	ctx := context.Background()
+	sc := scenarios(t, map[string][]harnessemu.Turn{"agent-1": {
+		{Fail: "Rate limit exceeded", FailType: "provider.rate-limit"},
+		{Text: "after"},
+	}})
+	c, _ := emu(t, filepath.Join(t.TempDir(), "state.json"), sc)
+	f, err := c.Feed(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	ref, err := c.Open(ctx, loomharness.OpenSpec{Key: "agent-1", Dir: t.TempDir(), Metadata: map[string]string{"agent_id": "agent-1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := c.Session(ref)
+	want := loomharness.Failure{Class: loomharness.FailureUsageLimit, Retryable: true}
+	if err := s.Prompt(ctx, loomharness.Input{Key: opencode.PromptID("agent-1", "r1"), Text: "go"}); err != nil {
+		t.Fatal(err)
+	}
+	live := until(t, f, completed)
+	if e := live[len(live)-1]; e.StopReason != "failed" || e.Error != "Rate limit exceeded" || e.Failure == nil || *e.Failure != want {
+		t.Fatalf("live failed turn = %+v", e)
+	}
+	var ended []loomharness.Event
+	for _, e := range history(t, s, 0) {
+		if e.Type == loomharness.EventTurnCompleted {
+			ended = append(ended, e)
+		}
+	}
+	if len(ended) != 1 || ended[0].Failure == nil || *ended[0].Failure != want {
+		t.Fatalf("history's turn ends = %+v", ended)
+	}
+	if err := s.Prompt(ctx, loomharness.Input{Key: opencode.PromptID("agent-1", "r2"), Text: "again"}); err != nil {
+		t.Fatal(err)
+	}
+	if e := until(t, f, completed); e[len(e)-1].StopReason != "completed" {
+		t.Fatalf("next turn = %+v", e[len(e)-1])
+	}
+}
+
+// TestEmulatorReportedVersion: --version reports the pinned build unless a
+// test writes another version to emu-version beside the state.
+func TestEmulatorReportedVersion(t *testing.T) {
+	dir := t.TempDir()
+	if got := harnessemu.ReportedVersion(dir); got != harnessemu.Version {
+		t.Fatalf("no knob: version %q; want %q", got, harnessemu.Version)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "emu-version"), []byte("2.0.1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := harnessemu.ReportedVersion(dir); got != "2.0.1" {
+		t.Fatalf("knob 2.0.1: version %q", got)
+	}
+}

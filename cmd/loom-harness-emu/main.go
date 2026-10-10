@@ -33,7 +33,7 @@ func main() {
 		os.Exit(2)
 	}
 	if len(os.Args) > 1 && os.Args[1] == "--version" {
-		fmt.Println(harnessemu.Version)
+		fmt.Println(harnessemu.ReportedVersion(filepath.Join(os.Getenv("XDG_STATE_HOME"), "opencode")))
 		return
 	}
 	if len(os.Args) < 2 || os.Args[1] != "serve" {

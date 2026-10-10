@@ -22,6 +22,7 @@ package harnessemu
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -47,21 +48,29 @@ import (
 // Version is what the emulator reports: the pinned OpenCode build.
 const Version = "2.0.19"
 
+// ReportedVersion is what `--version` reports: the version a test wrote to
+// emu-version in dir (the emulator's state directory), else Version.
+func ReportedVersion(dir string) string {
+	b, _ := os.ReadFile(filepath.Join(dir, "emu-version"))
+	return cmp.Or(strings.TrimSpace(string(b)), Version)
+}
+
 // RestartNotice is the text of OpenCode's boot-sweep synthetic message.
 const RestartNotice = "The server restarted while you were working"
 
 // Turn is one scripted turn.
 type Turn struct {
 	Reasoning string  `json:"reasoning,omitempty"`
-	Text      string  `json:"text,omitempty"`     // "" echoes the prompt
-	Child     bool    `json:"child,omitempty"`    // start a child session first
-	Hold      bool    `json:"hold,omitempty"`     // run until interrupted
-	Fail      string  `json:"fail,omitempty"`     // fail the step and the execution
-	Tokens    Tokens  `json:"tokens"`             // the step's usage
-	Cost      float64 `json:"cost,omitempty"`     // the step's cost
-	DelayMS   int     `json:"delay_ms,omitempty"` // pause before each streamed delta
-	Tools     []Tool  `json:"tools,omitempty"`    // tool calls the turn ran first
-	Ask       bool    `json:"ask,omitempty"`      // ask Model when the turn plays
+	Text      string  `json:"text,omitempty"`      // "" echoes the prompt
+	Child     bool    `json:"child,omitempty"`     // start a child session first
+	Hold      bool    `json:"hold,omitempty"`      // run until interrupted
+	Fail      string  `json:"fail,omitempty"`      // fail the step and the execution
+	FailType  string  `json:"fail_type,omitempty"` // Fail's OpenCode error type, e.g. provider.rate-limit
+	Tokens    Tokens  `json:"tokens"`              // the step's usage
+	Cost      float64 `json:"cost,omitempty"`      // the step's cost
+	DelayMS   int     `json:"delay_ms,omitempty"`  // pause before each streamed delta
+	Tools     []Tool  `json:"tools,omitempty"`     // tool calls the turn ran first
+	Ask       bool    `json:"ask,omitempty"`       // ask Model when the turn plays
 	// Suspend ends the execution after the text as OpenCode b30c4d0 ends a
 	// declined one (Server.suspend), with no reject, so a feed sees no end.
 	Suspend bool `json:"suspend,omitempty"`
@@ -489,7 +498,7 @@ func (s *Server) play(sid string, r *run) {
 	msg["time"].(map[string]int64)["completed"] = time.Now().UnixMilli()
 	outcome := "succeeded"
 	if t.Fail != "" {
-		outcome, msg["error"] = "failed", map[string]string{"message": t.Fail}
+		outcome, msg["error"] = "failed", map[string]string{"type": t.FailType, "message": t.Fail}
 	} else {
 		msg["finish"], msg["tokens"], msg["cost"] = "stop", t.Tokens, t.Cost
 		s.emit(sid, "session.step.ended", map[string]any{"assistantMessageID": msg["id"], "tokens": t.Tokens, "cost": t.Cost})
