@@ -298,14 +298,7 @@ func deliverNextLeadInboxMessage(
 		result.Reason = "agent inbox store is not configured"
 		return result, nil
 	}
-	claimant := d.claimedBy(sessionID)
-	msg, err := st.AgentInboxMessages().ClaimNext(ctx, store.AgentInboxMessageClaim{
-		WorkspaceKey:  workspace,
-		TargetAgentID: leadName,
-		SessionID:     sessionID,
-		ClaimedBy:     claimant,
-		LeaseTTL:      2 * time.Minute,
-	})
+	msg, err := claimLeadInboxMessage(ctx, st, workspace, leadName, sessionID, d.claimedBy(sessionID))
 	if errors.Is(err, domain.ErrNotFound) {
 		result.State = DeliveryStateNone
 		result.Reason = ""
@@ -315,14 +308,9 @@ func deliverNextLeadInboxMessage(
 		return nil, err
 	}
 	result.InboxMessageID = msg.InboxMessageID
-	if msg.ClaimedBy == "" {
-		msg.ClaimedBy = claimant
-	}
-	if _, version, ok := assignmentFromInboxMessage(msg); ok &&
-		strings.TrimSpace(session.Metadata[MetadataDeliveryVersion]) == version {
-		// The lead already has this assignment version (an earlier turn
-		// landed but its inbox completion did not): finish the message
-		// without injecting the same turn again.
+	if assignmentAlreadyDelivered(session, msg) {
+		// An earlier turn landed but its inbox completion did not: finish
+		// the message without injecting the same turn again.
 		result.State = DeliveryStateDelivered
 		result.Reason = ""
 		return completeLeadInboxDelivered(ctx, st, workspace, sessionID, d, msg, result)
@@ -342,6 +330,30 @@ func deliverNextLeadInboxMessage(
 		return completeLeadInboxRetry(ctx, st, workspace, sessionID, d, msg, delivered)
 	}
 	return completeLeadInboxDelivered(ctx, st, workspace, sessionID, d, msg, delivered)
+}
+
+// claimLeadInboxMessage leases the lead's next queued inbox message. The
+// returned message always carries the claimant, which fleet-db requires on
+// every later completion of the claim.
+func claimLeadInboxMessage(ctx context.Context, st store.Store, workspace, leadName, sessionID, claimant string) (*domain.AgentInboxMessage, error) {
+	msg, err := st.AgentInboxMessages().ClaimNext(ctx, store.AgentInboxMessageClaim{
+		WorkspaceKey:  workspace,
+		TargetAgentID: leadName,
+		SessionID:     sessionID,
+		ClaimedBy:     claimant,
+		LeaseTTL:      2 * time.Minute,
+	})
+	if err == nil && msg.ClaimedBy == "" {
+		msg.ClaimedBy = claimant
+	}
+	return msg, err
+}
+
+// assignmentAlreadyDelivered reports whether msg is an assignment whose
+// version the session already records as delivered.
+func assignmentAlreadyDelivered(session *domain.AgentSession, msg *domain.AgentInboxMessage) bool {
+	_, version, ok := assignmentFromInboxMessage(msg)
+	return ok && strings.TrimSpace(session.Metadata[MetadataDeliveryVersion]) == version
 }
 
 func materializeLeadTurnSkills(ctx context.Context, st store.Store, workspace string, session *domain.AgentSession) error {
