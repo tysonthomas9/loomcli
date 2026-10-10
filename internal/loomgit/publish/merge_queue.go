@@ -130,24 +130,30 @@ func QueueMergeUpTo(ctx context.Context, store *journal.SQLite, forge Forge, wor
 		return view, err
 	}
 	request.MergeAuthority = authority
-	if view.Backend == "native" {
-		// The provider merges the unmerged prefix up to the target.
-		if request.Changes, err = unlandedChanges(ctx, store, workspace, request.Changes); err != nil {
-			return view, err
-		}
-		err = GitHubStackBackend{Store: store}.MergeUpTo(ctx, request, change)
-		if target, active, activeErr := activeStackMerge(ctx, store, workspace, stackID); err != nil &&
-			activeErr == nil && active && target == change {
-			// Queued; the provider could not be asked yet and Reconcile retries.
-			err = nil
-		}
-	} else {
-		err = LoomStackBackend{Store: store}.MergeUpTo(ctx, request, change)
-	}
-	if err != nil {
+	if err := startStackMerge(ctx, store, view.Backend, request, change); err != nil {
 		return view, err
 	}
 	return mergeStackView(ctx, store, workspace, lead, stackID, change)
+}
+
+// startStackMerge starts the stack's merge machine up to change on its backend.
+func startStackMerge(ctx context.Context, store *journal.SQLite, backend string, request StackRequest, change string) error {
+	if backend != "native" {
+		return LoomStackBackend{Store: store}.MergeUpTo(ctx, request, change)
+	}
+	// The provider merges the unmerged prefix up to the target.
+	changes, err := unlandedChanges(ctx, store, request.Workspace, request.Changes)
+	if err != nil {
+		return err
+	}
+	request.Changes = changes
+	err = GitHubStackBackend{Store: store}.MergeUpTo(ctx, request, change)
+	if target, active, activeErr := activeStackMerge(ctx, store, request.Workspace, request.StackID); err != nil &&
+		activeErr == nil && active && target == change {
+		// Queued; the provider could not be asked yet and Reconcile retries.
+		return nil
+	}
+	return err
 }
 
 // MergeUpToViewLocal shows the merge up to change: its stack's layers and,
