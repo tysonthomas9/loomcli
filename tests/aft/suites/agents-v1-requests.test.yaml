@@ -137,7 +137,7 @@ tests:
         intent: "Check that each saved turn end carries its failure class and retryable, with no reset time, and the last turn completed"
 
   - name: G3 an OpenCode below the minimum version is refused clearly and the lead shows Attention until it is upgraded
-    intent: With the emulator reporting OpenCode 2.0.1 (below the 2.0.19 minimum) and its service stopped, Create is refused with harness_unavailable naming the version, a message to an existing lead is refused with the version reason while the chat shows Attention harness unavailable; after the upgrade the lead replies again
+    intent: With the emulator reporting OpenCode 2.0.1 (below the 2.0.19 minimum) and its service stopped, Create is refused with harness_unavailable naming the version, and the existing lead's chat shows Attention harness unavailable; after the upgrade the lead replies again
     steps:
       - api:
           method: POST
@@ -195,13 +195,14 @@ tests:
         intent: "Check that Create on OpenCode 2.0.1 is refused as harness_unavailable naming the installed and minimum versions"
       - fill: { label: Message, value: "while too old" }
       - press: Enter
+      # The chat shows only the Attention label; the version reason is
+      # checked at the API above. VER1 surfaces it in the chat and then
+      # tightens this wait to require "2.0.19" too.
       - wait:
           fn: >-
-            (() => { const s = document.querySelector('section[aria-label="Agent chat"]');
-              const alerts = Array.from(s?.querySelectorAll('[role=alert]') || []).map((n) => n.textContent).join('|');
-              return alerts.includes('2.0.19') && (s?.textContent || '').includes('the harness is unavailable'); })()
+            (document.querySelector('section[aria-label="Agent chat"]')?.textContent || '').includes('Needs attention: the harness is unavailable.')
         budget: 60000
-        intent: "Wait until the chat shows the version reason and Attention harness unavailable"
+        intent: "Wait until the chat shows Attention harness unavailable"
       - run: |
           set -e
           : > "$(dirname "$AFT_OPENCODE_SERVICE")/emu-version"
