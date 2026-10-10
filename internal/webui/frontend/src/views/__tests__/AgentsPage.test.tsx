@@ -284,7 +284,7 @@ describe("AgentsPage", () => {
     expect(browser.getAttribute("data-agent")).toBe("lead-1");
     expect(browser.getAttribute("data-active")).toBe("false");
 
-    fireEvent.click(screen.getByRole("button", { name: "Files" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Files" }));
     await waitFor(() => {
       expect(
         screen

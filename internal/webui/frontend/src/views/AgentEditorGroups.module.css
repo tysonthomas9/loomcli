@@ -81,6 +81,11 @@
   flex-shrink: 0;
 }
 
+.tabList {
+  display: flex;
+  align-items: stretch;
+}
+
 .editorTab {
   display: inline-flex;
   align-items: center;
