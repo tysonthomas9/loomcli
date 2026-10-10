@@ -52,9 +52,11 @@ func (issue *releaseOrderIssueBackend) ReleaseIssueAsActor(context.Context, stri
 }
 
 type apiTaskRevision struct {
-	Number  int    `json:"number"`
-	HeadSHA string `json:"head_sha"`
-	Verdict string `json:"verdict"`
+	Number     int    `json:"number"`
+	HeadSHA    string `json:"head_sha"`
+	Verdict    string `json:"verdict"`
+	Incomplete bool   `json:"incomplete"`
+	NoChanges  bool   `json:"no_changes"`
 }
 
 func taskRevisionResponse(t *testing.T) []apiTaskRevision {
@@ -483,5 +485,84 @@ func TestCleanExitStillCapturesAndClearsCheckpoint(t *testing.T) {
 	cp, err := config.LoadCheckpoint(lockDir)
 	if err != nil || cp != nil {
 		t.Fatalf("clean checkpoint: %+v, %v", cp, err)
+	}
+}
+
+// D18 on the successful daemon freeze: an untracked secret-pattern file is
+// left out, the run still freezes a revision, marked incomplete, and the
+// worktree is retained with the file.
+func TestCleanExitWithUntrackedSecretFreezesIncompleteRevision(t *testing.T) {
+	dir := captureRepo(t)
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	base := gitForCaptureTest(t, dir, "rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(dir, "main.txt"), []byte("completed work\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "server.pem"), []byte("non-secret test marker\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	writeLockFile(t, dir, &cli.LockInfo{AgentName: "agent", TaskID: "task-1"})
+	s := newTestSupervisor()
+	s.WorkspaceID = "WS"
+	ap := &AgentProcess{Entry: config.AgentEntry{Worktree: "agent"}, WorktreePath: dir,
+		BeforeRef: base, AgentSessionID: "session-1", AssignedTaskID: "task-1"}
+	s.handleAgentCheckpoint(ap, 0)
+
+	revisions := taskRevisionResponse(t)
+	if len(revisions) != 1 || !revisions[0].Incomplete || revisions[0].NoChanges {
+		t.Fatalf("revisions = %+v, want one incomplete revision", revisions)
+	}
+	assertSecretLeftOut(t, dir, revisions[0].HeadSHA)
+	if !ap.CaptureRetained {
+		t.Fatal("incomplete capture must keep the worktree retained")
+	}
+	cp, err := config.LoadCheckpoint(cli.ResolveLockDir(dir))
+	if err != nil || cp == nil || !cp.Retained || cp.FreezeID != "" {
+		t.Fatalf("checkpoint = %+v, %v; want retained with no pending freeze", cp, err)
+	}
+}
+
+// D18 on the restart path: a pending freeze reconciled before the next run
+// captures the worktree, leaves the untracked secret file out and records an
+// incomplete revision.
+func TestReconcilePendingFreezeWithUntrackedSecretIsIncomplete(t *testing.T) {
+	dir := captureRepo(t)
+	t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+	base := gitForCaptureTest(t, dir, "rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(dir, "main.txt"), []byte("completed work\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "server.pem"), []byte("non-secret test marker\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	lockDir := cli.ResolveLockDir(dir)
+	if err := config.SaveCheckpoint(lockDir, &config.Checkpoint{AgentName: "agent", TaskID: "task-1",
+		FreezeBase: base, FreezeID: "session-1", FreezeRepo: "repo", FreezeState: "completed"}); err != nil {
+		t.Fatal(err)
+	}
+	s := newTestSupervisor()
+	s.WorkspaceID = "WS"
+	ap := &AgentProcess{Entry: config.AgentEntry{Worktree: "agent"}, WorktreePath: dir}
+	if err := s.reconcilePendingFreeze(ap); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	revisions := taskRevisionResponse(t)
+	if len(revisions) != 1 || !revisions[0].Incomplete || revisions[0].NoChanges {
+		t.Fatalf("revisions = %+v, want one incomplete revision", revisions)
+	}
+	assertSecretLeftOut(t, dir, revisions[0].HeadSHA)
+}
+
+func assertSecretLeftOut(t *testing.T, dir, head string) {
+	t.Helper()
+	tree := gitForCaptureTest(t, dir, "ls-tree", "-r", "--name-only", head)
+	if strings.Contains(tree, "server.pem") || !strings.Contains(tree, "main.txt") {
+		t.Fatalf("revision tree = %q", tree)
+	}
+	if got := gitForCaptureTest(t, dir, "show", head+":main.txt"); got != "completed work" {
+		t.Fatalf("main.txt = %q", got)
+	}
+	if data, err := os.ReadFile(filepath.Join(dir, "server.pem")); err != nil || string(data) != "non-secret test marker\n" {
+		t.Fatalf("worktree lost server.pem: %q, %v", data, err)
 	}
 }

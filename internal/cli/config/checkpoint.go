@@ -13,19 +13,22 @@ const CheckpointFileName = ".agent.checkpoint.json"
 
 // Checkpoint points the next agent session to the durable capture of its work.
 type Checkpoint struct {
-	AgentName   string    `json:"agent_name"`
-	TaskID      string    `json:"task_id"`
-	EpicID      string    `json:"epic_id,omitempty"`
-	CaptureRef  string    `json:"capture_ref,omitempty"`
-	FreezeBase  string    `json:"freeze_base,omitempty"`
-	FreezeID    string    `json:"freeze_id,omitempty"`
-	FreezeRepo  string    `json:"freeze_repo,omitempty"`
-	FreezeState string    `json:"freeze_state,omitempty"`
-	Retained    bool      `json:"retained,omitempty"`
-	ExitCode    int       `json:"exit_code"`
-	ErrorClass  string    `json:"error_class,omitempty"`
-	YieldReason string    `json:"yield_reason,omitempty"` // non-empty when agent was preempted via yield
-	Timestamp   time.Time `json:"timestamp"`
+	AgentName  string `json:"agent_name"`
+	TaskID     string `json:"task_id"`
+	EpicID     string `json:"epic_id,omitempty"`
+	CaptureRef string `json:"capture_ref,omitempty"`
+	// CaptureIncomplete marks a CaptureRef whose capture left paths out
+	// (D18), so a later freeze records an incomplete revision.
+	CaptureIncomplete bool      `json:"capture_incomplete,omitempty"`
+	FreezeBase        string    `json:"freeze_base,omitempty"`
+	FreezeID          string    `json:"freeze_id,omitempty"`
+	FreezeRepo        string    `json:"freeze_repo,omitempty"`
+	FreezeState       string    `json:"freeze_state,omitempty"`
+	Retained          bool      `json:"retained,omitempty"`
+	ExitCode          int       `json:"exit_code"`
+	ErrorClass        string    `json:"error_class,omitempty"`
+	YieldReason       string    `json:"yield_reason,omitempty"` // non-empty when agent was preempted via yield
+	Timestamp         time.Time `json:"timestamp"`
 }
 
 // SaveCheckpoint atomically writes a checkpoint file to the lock directory.
