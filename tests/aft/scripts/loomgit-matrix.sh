@@ -199,6 +199,11 @@ publish_settled() { # the task's PR is open and Loom shows the same PR
   [[ "$(rev_field "$1" pr_number)" == "$number" ]]
 }
 
+task_closed_clean() { # the slot's task is closed and has no code-review label
+  curl -fsS "$api/issues/$(task_id "$1")" > "$work/issue-$1.json" || return 1
+  json "$work/issue-$1.json" 'd=v["data"]; assert d["status"]=="closed" and "code-review" not in (d.get("labels") or []), d' 2> /dev/null
+}
+
 record_pr() { # record_pr <slot>: PR number, URL and head for later comparisons and the report
   pull_of "$1" > /dev/null
   json "$work/pull-$1.json" 'print(v["number"])' > "$work/pr-$1.number"
@@ -784,8 +789,9 @@ pr)
   expect_base "$slot" "$base"
   record_pr "$slot"
   file_at "$(pull_field "$slot" head)" "$(file_of "$slot")" > "$work/pr-file-$slot.txt" || fail "PR of $slot lacks $(file_of "$slot")"
-  curl -fsS "$api/issues/$(task_id "$slot")" > "$work/issue-$slot.json"
-  json "$work/issue-$slot.json" 'd=v["data"]; assert d["status"]=="closed" and "code-review" not in (d.get("labels") or []), d'
+  # On real GitHub the publish is still pending when the PR first shows, so the
+  # task closes a moment later; wait for it instead of reading it once.
+  wait_until $((45 * scale)) "task $slot closed without code-review" task_closed_clean "$slot"
   say "PR #$(cat "$work/pr-$slot.number") of $slot on $(pull_field "$slot" base): $(cat "$work/pr-$slot.url")"
   ;;
 
