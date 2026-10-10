@@ -67,14 +67,7 @@ func dependencies(ctx context.Context, store DependencyStore, workspace, change 
 			waiting = append(waiting, "task "+predecessor+" (no change recorded yet)")
 			continue
 		}
-		repos := make([]string, 0, len(changes))
-		for name := range changes {
-			if sameRepo || name != repo {
-				repos = append(repos, name)
-			}
-		}
-		sort.Strings(repos)
-		for _, name := range repos {
+		for _, name := range predecessorRepos(changes, repo, sameRepo) {
 			found = true
 			reason, err := predecessorWait(ctx, store, workspace, name, changes[name])
 			if err != nil {
@@ -95,6 +88,19 @@ func dependencies(ctx context.Context, store DependencyStore, workspace, change 
 		return stackpublish.DependencyStatus{State: "success", Description: "All cross-repo predecessors landed"}, true, nil
 	}
 	return stackpublish.DependencyStatus{State: "pending", Description: "Waiting for " + strings.Join(waiting, "; ")}, true, nil
+}
+
+// predecessorRepos lists, sorted, the repos of a predecessor's changes that
+// count: other repos only, or every repo when sameRepo is set.
+func predecessorRepos(changes map[string]string, repo string, sameRepo bool) []string {
+	repos := make([]string, 0, len(changes))
+	for name := range changes {
+		if sameRepo || name != repo {
+			repos = append(repos, name)
+		}
+	}
+	sort.Strings(repos)
+	return repos
 }
 
 // predecessorWait names why a predecessor change has not landed, or "" once it has.
