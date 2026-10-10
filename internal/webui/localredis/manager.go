@@ -253,6 +253,18 @@ func (m *Manager) Dump() error {
 	return m.dump(ctx)
 }
 
+// DumpContext is Dump that also stops when ctx ends, so a caller's request
+// deadline bounds the sweep.
+func (m *Manager) DumpContext(ctx context.Context) error {
+	if m.snapshotPath == "" {
+		return nil
+	}
+	dctx, cancel := context.WithTimeout(m.baseCtx, m.sweepCap)
+	defer cancel()
+	defer context.AfterFunc(ctx, cancel)()
+	return m.dump(dctx)
+}
+
 // dump runs one sweep+write attempt and records its outcome in the
 // package metrics. Single instrumentation point: every failure mode
 // (partial-read abort, scan failure, marshal, file I/O) increments the

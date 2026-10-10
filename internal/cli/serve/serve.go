@@ -669,14 +669,14 @@ func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, sto
 // flushAfterCreate makes a created workspace durable before the API returns.
 // The embedded store otherwise reaches disk only on its periodic snapshot or a
 // clean shutdown, so a hard kill right after the create lost the workspace.
-func flushAfterCreate(create service.WorkspaceCreateFn, flush func() error) service.WorkspaceCreateFn {
+func flushAfterCreate(create service.WorkspaceCreateFn, flush func(context.Context) error) service.WorkspaceCreateFn {
 	if create == nil {
 		return nil
 	}
 	return func(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
 		res, err := create(ctx, req)
 		if err == nil {
-			if ferr := flush(); ferr != nil {
+			if ferr := flush(ctx); ferr != nil {
 				slog.Warn("workspace created but not yet flushed to disk", "workspace", res.WorkspaceID, "err", ferr)
 				service.AddCreateWarning(ctx, "workspace created but not yet saved to disk; a crash in the next 30s may lose it: "+ferr.Error())
 			}

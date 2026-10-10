@@ -56,11 +56,11 @@ func (h *StoreHandle) URL() string {
 // Flush writes an owned embedded store's in-memory keyspace to disk now
 // instead of at the next periodic snapshot. No-op otherwise, including a
 // handle that reused another process's runtime: that owner snapshots it.
-func (h *StoreHandle) Flush() error {
+func (h *StoreHandle) Flush(ctx context.Context) error {
 	if h == nil || h.embedded == nil || h.embedded.redisMgr == nil {
 		return nil
 	}
-	return h.embedded.redisMgr.Dump()
+	return h.embedded.redisMgr.DumpContext(ctx)
 }
 
 // Close shuts down the store and any subprocess it owns. Idempotent.

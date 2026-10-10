@@ -371,3 +371,29 @@ func containsKey(t *testing.T, data []byte, key string) bool {
 	}
 	return false
 }
+
+func TestDumpContext_StopsWithCallerContext(t *testing.T) {
+	snapPath := filepath.Join(t.TempDir(), "snapshot.json")
+	m, err := NewManager(snapPath, false, nil)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	defer m.Close()
+	if err := m.Client().HSet(context.Background(), "terminal:meta:ws1:s1", "label", "x").Err(); err != nil {
+		t.Fatalf("HSet: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := m.DumpContext(ctx); err == nil {
+		t.Fatal("DumpContext with a cancelled context succeeded")
+	}
+	if _, err := os.Stat(snapPath); !os.IsNotExist(err) {
+		t.Fatalf("snapshot written despite cancelled context: %v", err)
+	}
+	if err := m.DumpContext(context.Background()); err != nil {
+		t.Fatalf("DumpContext: %v", err)
+	}
+	if _, err := os.Stat(snapPath); err != nil {
+		t.Fatalf("snapshot not written: %v", err)
+	}
+}
