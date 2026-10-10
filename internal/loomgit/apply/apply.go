@@ -55,6 +55,7 @@ type Service struct {
 	onIndexLocked    func()
 	beforeRecoverCAS func()
 	beforeSaveLayer  func()
+	beforeReadTree   func()
 }
 
 func New(store Store, repo *pool.LocalRepo, runner *gitexec.Runner) *Service {
@@ -449,12 +450,22 @@ func (s *Service) install(ctx context.Context, branch, indexPath, old, next, req
 			_ = os.Remove(ownerPath)
 		}
 	}()
+	// This apply holds index.lock, so no Git command could have written a
+	// refreshed index. Restored files keep stale stat data that read-tree
+	// would treat as modified; refresh the private copy (content is unchanged).
+	tmpIndex := map[string]string{"GIT_INDEX_FILE": tmpPath}
+	if _, err := s.runner.RunWithEnv(ctx, tmpIndex, "update-index", "-q", "--refresh"); err != nil {
+		return fmt.Errorf("refresh working file stats: %w", err)
+	}
 	if err := s.store.AdvanceApplied(ctx, requestID, "prepared", "installing"); err != nil {
 		return err
 	}
 	*keepLock = true
-	if _, err := s.runner.RunWithEnv(ctx, map[string]string{"GIT_INDEX_FILE": tmpPath}, "read-tree", "-m", "-u", old, next); err != nil {
-		return fmt.Errorf("install working files: %w", err)
+	if s.beforeReadTree != nil {
+		s.beforeReadTree()
+	}
+	if _, err := s.runner.RunWithEnv(ctx, tmpIndex, "read-tree", "-m", "-u", old, next); err != nil {
+		return s.abandonInstall(ctx, requestID, old, next, keepLock, err)
 	}
 	if err := s.store.AdvanceApplied(ctx, requestID, "installing", "files_updated"); err != nil {
 		return err
@@ -474,6 +485,27 @@ func (s *Service) install(ctx context.Context, branch, indexPath, old, next, req
 	}
 	*keepLock = false
 	return nil
+}
+
+// abandonInstall handles a read-tree refusal. read-tree checks every entry
+// before it writes, so when HEAD and every incoming path still match the old
+// tip the checkout is untouched: release the user's index lock and reopen the
+// request for a retry. Anything else stays held for Reconcile.
+func (s *Service) abandonInstall(ctx context.Context, requestID, old, next string, keepLock *bool, cause error) error {
+	failed := fmt.Errorf("install working files: %w", cause)
+	head, err := git(ctx, s.runner, "rev-parse", "HEAD")
+	if err != nil || head != old {
+		return errors.Join(failed, err)
+	}
+	if paths, err := s.pendingPaths(ctx, old, next); err != nil || len(paths) != 0 {
+		return errors.Join(failed, err)
+	}
+	if err := s.store.AdvanceApplied(ctx, requestID, "installing", "not_applied"); err != nil {
+		return errors.Join(failed, err)
+	}
+	*keepLock = false
+	return loomgit.NewError(loomgit.ApplyPending,
+		"working files changed while the revision was being applied; nothing was changed, so retry Apply", cause)
 }
 
 func prepareIndex(indexPath, tmpPath, ownerPath string) error {
