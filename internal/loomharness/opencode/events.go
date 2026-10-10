@@ -412,6 +412,30 @@ func (e *toolError) failure() *loomharness.Failure {
 	return &loomharness.Failure{Class: loomharness.FailureProvider}
 }
 
+// failedStep is a failed assistant step's error type; "" for any other message.
+func (m message) failedStep() string {
+	var err toolError
+	if m.Type != "assistant" || json.Unmarshal(m.Error, &err) != nil {
+		return ""
+	}
+	return err.Type
+}
+
+// turnEvents is m's events in turn; a failed idle marker is classed by
+// failed, the error type of the turn's failed step, which
+// session.step.failed stores on the assistant message in the shape
+// session.execution.failed gives the live feed.
+func (m message) turnEvents(ref loomharness.NativeRef, turn, failed string) []loomharness.Event {
+	out := m.events(ref)
+	for i := range out {
+		out[i].TurnID = turn
+		if out[i].Type == loomharness.EventTurnCompleted && out[i].StopReason == "failed" && failed != "" {
+			out[i].Failure = (&toolError{Type: failed}).failure()
+		}
+	}
+	return out
+}
+
 // toolInput is a tool call's input object as text; "" when it has none.
 func toolInput(raw json.RawMessage) string {
 	switch string(raw) {
