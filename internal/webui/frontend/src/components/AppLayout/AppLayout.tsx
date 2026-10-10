@@ -142,12 +142,15 @@ export function AppLayout({
  * KeyboardShortcutProvider, which App provides.
  */
 function DrawerEscape({ onClose }: { onClose: () => void }): null {
-  // Some modals (AetherModal) handle no Escape of their own; the drawer
-  // under an open one stays open. Closed panels sit under aria-hidden.
+  // Some modals (AetherModal) and the rows' context menus handle Escape on
+  // their own; the drawer under an open one stays open. Closed panels sit
+  // under aria-hidden.
   useRegisterEscapeLayer(
     LAYER_TERMINAL_PANEL,
     () => {
-      const modals = document.querySelectorAll('[aria-modal="true"]');
+      const modals = document.querySelectorAll(
+        '[aria-modal="true"], [role="menu"]',
+      );
       const modalOpen = Array.from(modals).some(
         (m) => !m.closest('[aria-hidden="true"]'),
       );

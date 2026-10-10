@@ -516,10 +516,11 @@ test("agents drawer at 390px: full rows when the tree was collapsed", async ({
     .getByRole("link", { name: /^docs-writer / })
     .getByTestId("agent-list-name");
   await expect(name).toBeVisible();
-  // There is nothing to collapse in the drawer.
+  // There is nothing to collapse or resize in the drawer.
   await expect(
     page.getByRole("button", { name: "Collapse workspace tree" }),
   ).toBeHidden();
+  await expect(page.getByLabel("Resize workspace sidebar")).toHaveCount(0);
   // The saved (desktop) collapse preference is left as it was.
   expect(
     await page.evaluate(() => localStorage.getItem("loom:w1:tree-collapsed")),
@@ -559,6 +560,28 @@ test("agents drawer at 390px: Escape in a dialog opened from it keeps it open", 
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(row).toBeVisible();
+});
+
+// A row's context menu takes the first Escape, as on the desktop; the next
+// one closes the drawer.
+test("agents drawer at 390px: a row menu takes the first Escape", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await open(page, [agent, other]);
+  await page
+    .locator('nav[aria-label="Primary"]')
+    .getByRole("button", { name: "Agents" })
+    .click();
+  const row = page.getByRole("link", { name: /^docs-writer / });
+  await row.click({ button: "right" });
+  const menu = page.getByRole("menu");
+  await expect(menu).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(menu).toBeHidden();
+  await expect(row).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(row).toBeHidden();
 });
 
 test("agents drawer: no Agents button on the desktop, where the sidebar shows", async ({

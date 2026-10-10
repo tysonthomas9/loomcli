@@ -450,7 +450,7 @@ export function WorkspaceTree({
           </CompactRailHost>
         )}
 
-      {!isCollapsed && (
+      {!isCollapsed && !inDrawer && (
         <SidebarResizeHandle
           width={sidebarWidth}
           onDelta={applyDelta}
