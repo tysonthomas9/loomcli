@@ -49,9 +49,9 @@ export function RevisionsSection({
   const [reason, setReason] = useState("");
   const [follow, setFollow] = useState<Record<string, string>>({});
   const [menu, setMenu] = useState("");
-  // Revisions whose verdict the server recorded although the request failed
-  // (held apply or PR): locked until the reloaded list carries the verdict.
-  const [recorded, setRecorded] = useState<Record<string, boolean>>({});
+  // Verdicts the server recorded although the request failed (held apply or
+  // PR), by revision: shown and locked until the reloaded list carries them.
+  const [recorded, setRecorded] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (snapshot) {
@@ -113,8 +113,8 @@ export function RevisionsSection({
       setReason("");
     } catch (err) {
       setError(verdictErrorText(err));
-      if (verdictRecorded(err))
-        setRecorded((prev) => ({ ...prev, [key]: true }));
+      const kept = recordedVerdict(err, verdict);
+      if (kept) setRecorded((prev) => ({ ...prev, [key]: kept }));
       // The verdict may be recorded even though its apply or PR is held (a
       // 409 naming the overlapping paths): show the server's revisions so the
       // decided verdict locks the buttons now, as it does after a reload.
@@ -249,8 +249,10 @@ export function RevisionsSection({
         // change was unapplied first): show why and let the reviewer approve
         // again, which re-arms the follow.
         const spent = revision.follow_status === "spent";
-        const decided =
-          (Boolean(revision.verdict) || Boolean(recorded[key])) && !spent;
+        // The server's list wins; until it arrives, show the verdict the
+        // server said it recorded for this exact revision.
+        const verdictKind = revision.verdict ?? recorded[key];
+        const decided = Boolean(verdictKind) && !spent;
         // An approval whose apply is held stays decided: say why it waits.
         const held = revision.applied ? "" : heldText(revision.follow_status);
         // The server reports an approved revision still waiting for a working
@@ -285,7 +287,7 @@ export function RevisionsSection({
                 ? "Incomplete capture"
                 : revision.verdict === "feedback"
                   ? "Review fix-up (no Approve needed)"
-                  : (revision.verdict ?? "Awaiting review")}
+                  : (verdictKind ?? "Awaiting review")}
             </div>
             {revision.feedback_status && (
               <div data-testid="feedback-status">{feedbackText(revision)}</div>
@@ -480,12 +482,18 @@ export function verdictErrorText(err: unknown): string {
   return err instanceof Error ? err.message : "Could not record verdict";
 }
 
-/** The failed verdict request still recorded the verdict (the server says so). */
-function verdictRecorded(err: unknown): boolean {
-  return (
-    err instanceof ApiError &&
-    typeof (err.body as { status?: unknown } | undefined)?.status === "string"
-  );
+/**
+ * The verdict a failed request still recorded, when the server says so (its
+ * error carries a status): the recorded kind, else the one submitted.
+ */
+function recordedVerdict(err: unknown, submitted: string): string {
+  if (!(err instanceof ApiError)) return "";
+  const body = err.body as
+    | { status?: unknown; data?: { Kind?: unknown } }
+    | undefined;
+  if (typeof body?.status !== "string") return "";
+  const kind = body.data?.Kind;
+  return typeof kind === "string" && kind ? kind : submitted;
 }
 
 /** Why an approved revision is not applied yet, from its follow status. */

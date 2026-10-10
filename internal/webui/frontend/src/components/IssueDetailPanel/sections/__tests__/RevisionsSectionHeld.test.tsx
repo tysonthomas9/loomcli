@@ -120,6 +120,8 @@ describe("RevisionsSection held approval (P2.21)", () => {
       await screen.findByRole("button", { name: "Approve and create PR" }),
     );
     expect(await screen.findByRole("alert")).toHaveTextContent("held.txt");
+    expect(screen.queryByText("Awaiting review")).not.toBeInTheDocument();
+    expect(screen.getByText("approve")).toBeInTheDocument();
     for (const button of verdictButtons()) expect(button).toBeDisabled();
   });
 
