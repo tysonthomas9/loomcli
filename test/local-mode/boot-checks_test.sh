@@ -281,7 +281,7 @@ def call(name, method, path, body, timeout, headers):
         f.write(data)
     c.close()
 call("models", "GET", base + "/harnesses/opencode/models", None, 1, {})
-body = json.dumps({"preset": "lead", "name": "s15-wu1-first", "repo": "source-repo", "base_ref": "main",
+body = json.dumps({"preset": "lead", "name": "s15-wu1-first", "repo": "/root/.loom/workspaces/LOCALMODE/source-repo", "base_ref": "main",
                    "overrides": {"harness": "opencode", "model": model}})
 call("create", "POST", base + "/agents", body, 60, {"Content-Type": "application/json", "Idempotency-Key": key})
 print(json.dumps(res))
