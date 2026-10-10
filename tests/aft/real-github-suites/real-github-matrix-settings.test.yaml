@@ -540,8 +540,8 @@ tests:
         intent: "The lead merges both green PRs without asking"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" ui s8 b merged"
         intent: "Task B shows its PR merged"
-  - name: "S9 Switching delivery mode [needs #943 dependents run]"
-    intent: "With stack A-B open, switching to PR per task leaves it alone and new task D gets its own PR to main Needs the dependents-run change in #943; it fails on 8267795e0 until that lands."
+  - name: "S9 Switching delivery mode"
+    intent: "With stack A-B open, switching to PR per task leaves it alone and new task D gets its own PR to main"
     steps:
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" setup s9"
         intent: "Fixture: one repo with GitHub native stacks, one Loom workspace and its lead (real tier: a clone of the run's sandbox repo)"

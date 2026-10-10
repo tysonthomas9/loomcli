@@ -254,8 +254,8 @@ tests:
         intent: "PR of a opens on the forge based on main, and the task shows it"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" ui r1 a open"
         intent: "Task A shows its PR"
-  - name: "D1 A dependent runs before its blocker is approved [needs #943 dependents run]"
-    intent: "B runs on A's frozen revision before anyone reviews A; the PRs still open in dependency order Needs the dependents-run change in #943; it fails on 8267795e0 until that lands."
+  - name: "D1 A dependent runs before its blocker is approved"
+    intent: "B runs on A's frozen revision before anyone reviews A; the PRs still open in dependency order"
     steps:
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" setup d1"
         intent: "Fixture: one repo with GitHub native stacks, one Loom workspace and its lead (real tier: a clone of the run's sandbox repo)"
@@ -381,8 +381,8 @@ tests:
         intent: "A is open again with a reject verdict and no PR"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" stale d2 b a"
         intent: "B, built on the rejected A, is stale, has no PR and offers a rebuild"
-  - name: "D3 Approving a dependent before its blocker waits [needs #943 dependents run]"
-    intent: "Approve on B before A waits for A; approving A then publishes A and B in order Needs the dependents-run change in #943; it fails on 8267795e0 until that lands."
+  - name: "D3 Approving a dependent before its blocker waits"
+    intent: "Approve on B before A waits for A; approving A then publishes A and B in order"
     steps:
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" setup d3"
         intent: "Fixture: one repo with GitHub native stacks, one Loom workspace and its lead (real tier: a clone of the run's sandbox repo)"
@@ -545,8 +545,8 @@ tests:
         intent: "B does not merge"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" ui x1 b open 'approve again'"
         intent: "Task B asks to approve again"
-  - name: "X2 Cancelling merge after by hand [needs #943 dependents run]"
-    intent: "A human cancels B's waiting Approve and merge; A merges and B stays open Needs the dependents-run change in #943; it fails on 8267795e0 until that lands."
+  - name: "X2 Cancelling merge after by hand"
+    intent: "A human cancels B's waiting Approve and merge; A merges and B stays open"
     steps:
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" setup x2"
         intent: "Fixture: one repo with GitHub native stacks, one Loom workspace and its lead (real tier: a clone of the run's sandbox repo)"

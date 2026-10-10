@@ -215,7 +215,7 @@ def settings_cases():
     st += build(c, [("a", "-", ""), ("b", "a", "")], {"a": human_create_pr(c, "a", "main"), "b": human_create_pr(c, "b", "a")})
     st += run(f"snapshot {c} stack", "Record the open stack") + settings(c, "trunk", "on", "off")
     st += task(c, "d") + human_create_pr(c, "d", "main") + run(f"untouched {c} stack", "A and B are untouched") + run(f"ui {c} d open", "Task D shows its own PR")
-    out += case("S9 Switching delivery mode", "With stack A-B open, switching to PR per task leaves it alone and new task D gets its own PR to main", st)
+    out += case("S9 Switching delivery mode", "With stack A-B open, switching to PR per task leaves it alone and new task D gets its own PR to main", st, needs=False)
 
     c = "s10"
     st = setup(c) + settings(c, "stack", "on", "off") + \
@@ -269,7 +269,7 @@ def variants(real=False):
     st += run(f"chain {c} a b:a", "API client creates A and B (blocked by A) in one epic and starts it") + wait_rev(c, "a") + wait_rev(c, "b") + \
         run(f"ran-before-approval {c} b a", "B ran as soon as A's agent finished, on A's unreviewed revision; A is still in review") + \
         human_create_pr(c, "a", "main") + human_create_pr(c, "b", "a") + run(f"ui {c} b open", "Task B shows its PR on top of A's")
-    out += case("D1 A dependent runs before its blocker is approved", "B runs on A's frozen revision before anyone reviews A; the PRs still open in dependency order", st, needs=True)
+    out += case("D1 A dependent runs before its blocker is approved", "B runs on A's frozen revision before anyone reviews A; the PRs still open in dependency order", st, needs=False)
 
     c = "d2"
     st = setup(c) + settings(c, "stack", "off", "off")
@@ -286,7 +286,7 @@ def variants(real=False):
     ] + run(f"approve-waits {c} b a", "B's approval waits with \"waiting for A to be approved\"; no PR opens") + \
         human_create_pr(c, "a", "main") + run(f"pr {c} b a", "Once A is approved, B's waiting approval opens its PR on A's") + \
         run(f"ui {c} b open", "Task B shows its PR")
-    out += case("D3 Approving a dependent before its blocker waits", "Approve on B before A waits for A; approving A then publishes A and B in order", st, needs=True)
+    out += case("D3 Approving a dependent before its blocker waits", "Approve on B before A waits for A; approving A then publishes A and B in order", st, needs=False)
 
     c = "x1"
     st = setup(c) + settings(c, "stack", "off", "off")
@@ -308,7 +308,7 @@ def variants(real=False):
     ] + run(f"merge-state {c} b cancelled", "B's Approve and merge is cancelled") + \
         human_merge(c, "a") + run(f"merged {c} a", "A merges") + run(f"rebuilt {c} b main", "B is rebuilt on main") + \
         run(f"hold-open {c} 8 b", "B, whose merge after was cancelled, does not merge") + run(f"ui {c} b open", "Task B shows its PR open")
-    out += case("X2 Cancelling merge after by hand", "A human cancels B's waiting Approve and merge; A merges and B stays open", st)
+    out += case("X2 Cancelling merge after by hand", "A human cancels B's waiting Approve and merge; A merges and B stays open", st, needs=False)
 
     if not real:
         # Fake tier only: real GitHub cannot be made to lack native stacks on demand.
