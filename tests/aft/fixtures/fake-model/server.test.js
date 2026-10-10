@@ -81,3 +81,41 @@ test("an error step answers 400 with an OpenAI error", async (t) => {
   assert.equal((await res.json()).error.message, "model refused");
   assert.equal((await (await fetch(base + "/__requests")).json()).queued, 0);
 });
+
+test("a gated step waits until its gate opens; reset answers what still waits", async (t) => {
+  const { base, post, chat } = await start(t);
+  const held = async () => (await (await fetch(base + "/__held")).json()).held;
+  const until = async (n) => {
+    for (let i = 0; i < 200; i++) if ((await held()) >= n) return;
+    assert.fail(`held stayed at ${await held()}; want ${n}`);
+  };
+  await post("/__script", { steps: [{ gate: "g", text: "late" }, { gate: "g", text: "later" }, { gate: "h", text: "never" }] });
+  const user = [{ role: "user", content: "x" }];
+  let done = 0;
+  const a = chat(user).then((r) => (done++, r));
+  const b = chat(user).then((r) => (done++, r));
+  await until(2);
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(done, 0);
+  assert.deepEqual(await (await post("/__open", { gate: "g" })).json(), { released: 2 });
+  assert.deepEqual([(await a).content, (await b).content].sort(), ["late", "later"]);
+  assert.equal(await held(), 0);
+  await post("/__script", { steps: [{ gate: "g", text: "open already" }] });
+  const c = chat(user);
+  await until(1);
+  assert.equal((await chat(user)).content, "open already");
+  await post("/__reset", {});
+  assert.equal((await c).content, "never");
+  assert.equal(await held(), 0);
+  assert.equal((await post("/__open", {})).status, 400);
+  assert.equal((await post("/__open", null)).status, 400);
+  await post("/__script", { steps: [{ gate: "k", text: "gone" }] });
+  const ac = new AbortController();
+  const gone = fetch(base + "/v1/chat/completions", { method: "POST", body: JSON.stringify({ messages: user }), signal: ac.signal }).catch(() => "aborted");
+  await until(1);
+  ac.abort();
+  assert.equal(await gone, "aborted");
+  for (let i = 0; i < 200 && (await held()) > 0; i++);
+  assert.equal(await held(), 0);
+  assert.deepEqual(await (await post("/__open", { gate: "k" })).json(), { released: 0 });
+});
