@@ -1054,6 +1054,12 @@ cli-verdict)
       json "$work/revisions-$1.json" 'r=[i for i in v["data"] if i["number"]==int(sys.argv[3])]; assert r and r[0].get("verdict")==sys.argv[2], r or v' "$2" "$3"
     }
     wait_until 30 "a $want_verdict verdict on $slot revision $decided" recorded "$slot" "$want_verdict" "$decided"
+    # A CLI verdict settles the task on the server's next reconcile tick (every 2 s),
+    # not inside the command: approved work leaves review, a rejected task reopens.
+    want_status=closed
+    [[ "$verb" == reject ]] && want_status=open
+    settled() { curl -fsS "$api/issues/$(task_id "$1")" > "$work/issue-$1.json"; json "$work/issue-$1.json" 'assert v["data"]["status"]==sys.argv[2], v["data"]["status"]' "$2" > /dev/null 2>&1; }
+    wait_until 30 "task $slot $want_status after the CLI $verb" settled "$slot" "$want_status"
   fi
   say "$who's loom $verb on $slot: $want"
   ;;
