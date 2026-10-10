@@ -63,6 +63,9 @@ type TaskRevision struct {
 	// Superseded marks a revision older than its change's newest source
 	// revision; the server refuses verdicts on it.
 	Superseded bool `json:"superseded"`
+	// NoChanges marks a complete source revision identical to its base: the
+	// task closed with no review, apply or PR, and verdicts are refused.
+	NoChanges bool `json:"no_changes"`
 	// Date is the revision head's commit date, when the repo is readable.
 	Date string `json:"date,omitempty"`
 }
@@ -81,7 +84,7 @@ func (l *Local) TaskRevisionsForLead(ctx context.Context, workspace, task, lead 
 	}
 	out := make([]TaskRevision, 0, len(revisions))
 	for _, r := range revisions {
-		i := TaskRevision{ChangeID: r.Change, Number: r.Number, HeadSHA: r.HeadSHA, Outcome: r.Outcome, Incomplete: r.Incomplete}
+		i := TaskRevision{ChangeID: r.Change, Number: r.Number, HeadSHA: r.HeadSHA, Outcome: r.Outcome, Incomplete: r.Incomplete, NoChanges: r.NoChanges}
 		if i.Repo, err = l.store.RepoForChange(ctx, workspace, r.Change); err != nil && !errors.Is(err, journal.ErrNotFound) {
 			return nil, err
 		}

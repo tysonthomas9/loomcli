@@ -40,6 +40,9 @@ func current(ctx context.Context, store Store, r loomgit.Revision) error {
 			return loomgit.NewError(loomgit.RevisionSuperseded, "a newer source revision exists", nil)
 		}
 	}
+	if r.NoChanges {
+		return loomgit.NewError(loomgit.NoChanges, "revision has no code changes; the task closed without review", nil)
+	}
 	return nil
 }
 

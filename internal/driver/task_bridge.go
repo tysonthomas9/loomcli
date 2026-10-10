@@ -309,7 +309,7 @@ func (e HostBridgeTaskExecutor) ExecuteTask(ctx context.Context, req TaskExecReq
 		return TaskExecResult{}, err
 	}
 	if len(patch) == 0 {
-		return result, nil
+		return e.freezeNoChanges(ctx, req, runnerResult, result)
 	}
 	return e.finalizeAndFreezePatch(ctx, req, runnerResult, patch, result)
 }

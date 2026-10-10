@@ -255,3 +255,53 @@ func TestDerivedOperationsAndNextAttemptKeepOldRevision(t *testing.T) {
 		t.Fatal("later attempt changed r1")
 	}
 }
+
+// D29 (4): an attempt that changed nothing freezes as a "no changes" source
+// revision, whether it made no commits or commits that net to nothing.
+func TestFreezeSourceMarksNoChangesOnlyForCompleteEmptySource(t *testing.T) {
+	ctx := context.Background()
+	dir, runner, store := fixture(t)
+	base := must(t, runner, "rev-parse", "HEAD")
+	freeze := func(request, capture string, complete bool, outcome string) loomgit.Revision {
+		t.Helper()
+		rev, err := FreezeSource(ctx, store, runner, SourceInput{Workspace: "W", Change: "C", RequestID: request,
+			Attempt: request, TaskID: "task", BaseSHA: base, CaptureSHA: capture, Outcome: outcome, Complete: complete})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rev
+	}
+	if r := freeze("no-commits", base, true, "completed"); !r.NoChanges || r.HeadSHA != base {
+		t.Fatalf("zero-commit attempt: %+v", r)
+	}
+	must(t, runner, "commit", "--allow-empty", "-qm", "nothing")
+	if r := freeze("empty-commit", must(t, runner, "rev-parse", "HEAD"), true, "completed"); !r.NoChanges {
+		t.Fatalf("empty commit attempt: %+v", r)
+	}
+	if r := freeze("incomplete", base, false, "cancelled"); r.NoChanges || !r.Incomplete {
+		t.Fatalf("incomplete capture must follow the incomplete path: %+v", r)
+	}
+	write(t, dir, "edit", "work")
+	must(t, runner, "add", "edit")
+	must(t, runner, "commit", "-qm", "work")
+	changed := freeze("changed", must(t, runner, "rev-parse", "HEAD"), true, "completed")
+	if changed.NoChanges {
+		t.Fatalf("changed attempt marked no changes: %+v", changed)
+	}
+	stored, err := store.GetRevision(ctx, "W", "C", 1)
+	if err != nil || !stored.NoChanges {
+		t.Fatalf("no_changes not persisted: %+v %v", stored, err)
+	}
+	// An applied layer that nets to nothing (base == head) is derived and is
+	// never "no changes" (P4.1c's empty derived revision is a separate bug).
+	derived, err := RecordDerived(ctx, store, runner, DerivedInput{Workspace: "W", Change: "C", RequestID: "derived",
+		FromNumber: changed.Number, Operation: "apply", BaseSHA: changed.HeadSHA, HeadSHA: changed.HeadSHA, Outcome: "completed"})
+	if err != nil || derived.NoChanges || derived.Kind != "derived" {
+		t.Fatalf("derived revision: %+v %v", derived, err)
+	}
+	imported, err := ImportSource(ctx, store, runner, ImportInput{Workspace: "W", Change: "I", RequestID: "import-empty",
+		BaseSHA: base, HeadSHA: base, TreeHash: must(t, runner, "rev-parse", base+"^{tree}"), Outcome: "completed"})
+	if err != nil || !imported.NoChanges {
+		t.Fatalf("empty import: %+v %v", imported, err)
+	}
+}

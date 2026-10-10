@@ -6552,7 +6552,7 @@ components:
           description: Zero until the captured revision is recorded.
     ReviewRevision:
       type: object
-      required: [change_id, repo, number, head_sha, outcome, incomplete, applied, needs_working_area, superseded]
+      required: [change_id, repo, number, head_sha, outcome, incomplete, applied, needs_working_area, superseded, no_changes]
       properties:
         change_id:
           type: string
@@ -6578,6 +6578,9 @@ components:
         superseded:
           type: boolean
           description: True when a newer source revision of the same change exists; verdicts on it are refused.
+        no_changes:
+          type: boolean
+          description: True when the attempt changed nothing (a complete source revision whose tree equals its base). The task closed as "No changes" with no review, apply or PR; verdicts on it are refused with no_changes. Never set on derived revisions.
         date:
           type: string
           description: Commit date (ISO 8601) of the revision head, when the repo is readable.

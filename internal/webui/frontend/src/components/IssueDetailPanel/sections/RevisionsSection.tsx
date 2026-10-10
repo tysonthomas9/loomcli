@@ -144,6 +144,23 @@ export function RevisionsSection({
       {!loading && revisions.length === 0 && <p>No revisions yet.</p>}
       {current.map((revision) => {
         const key = `${revision.change_id}:${revision.number}`;
+        // An attempt that changed nothing closes the task: no review, no
+        // apply and no PR, so there is nothing to decide (the server refuses
+        // verdicts with no_changes).
+        if (revision.no_changes)
+          return (
+            <div
+              className={styles.revision}
+              key={key}
+              data-testid="revision-no-changes"
+            >
+              <div>
+                <strong>Revision {revision.number}</strong>{" "}
+                <code>{revision.head_sha.slice(0, 12)}</code>
+              </div>
+              <div>No changes</div>
+            </div>
+          );
         const disabled =
           Boolean(busy) ||
           revision.incomplete ||
