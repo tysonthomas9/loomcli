@@ -344,7 +344,7 @@ def main(root):
         fake_cases = [c for c in cases if c != "l1"]  # L1 is real-tier only
         emit(root / "suites" / f"loomgit-{suite}.test.yaml", f"loomgit-{suite}", what.replace("L1, ", ""), fake, fake_cases if body is None else cases, fake_body)
         real_cases = [c for c in cases if c != "n4"]  # N4 is fake-tier only
-        emit(root / "real-github-suites" / f"real-github-{suite}.test.yaml", f"real-github-{suite}", what.replace("N1-N4", "N1-N3"), real, real_cases if body is None else cases, real_body)
+        emit(root / "real-github-suites" / f"real-github-{suite}.test.yaml", f"rg-{suite}", what.replace("N1-N4", "N1-N3"), real, real_cases if body is None else cases, real_body)
 
 def check(root):
     """Exit 1 when the committed suites differ from what the generator writes."""

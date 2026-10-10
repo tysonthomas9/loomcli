@@ -1054,7 +1054,7 @@ if [[ -n "$AFT_REAL_GITHUB" ]]; then
     # codex process leaked, and record the kept repo in the ledger.
     bash "$SCRIPT_DIR/scripts/real-github-repo.sh" close-prs "$AFT_GITHUB_SANDBOX" || AFT_EXIT=1
     bash "$SCRIPT_DIR/scripts/live-sweep.sh" "${REAL_BIN_PATH:-}" "${LIVE_PID_BASELINE:-}" || AFT_EXIT=1
-    rg_prs="$(wc -l < "$AFT_WORK_DIR/matrix-prs.log" 2>/dev/null | tr -d ' ' || echo 0)"
+    rg_prs="$({ wc -l < "$AFT_WORK_DIR/matrix-prs.log"; } 2>/dev/null | tr -d ' ' || echo 0)"
     AFT_REPORT_DIR="$REPORT_DIR" bash "$SCRIPT_DIR/scripts/real-github-repo.sh" ledger "$AFT_GITHUB_SANDBOX" finished \
         "exit=$AFT_EXIT wall=$(( $(date +%s) - RUN_STARTED_AT ))s prs=${rg_prs:-0} work=$AFT_WORK_DIR" || true
     echo "[aft] sandbox repo kept for inspection: https://github.com/$AFT_GITHUB_SANDBOX"
