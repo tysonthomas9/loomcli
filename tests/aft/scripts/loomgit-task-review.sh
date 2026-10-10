@@ -106,6 +106,27 @@ blocked() {
   grep -q "\"$1\"" "$work-blocked.json" && ! grep -q "\"$1\"" "$work-ready.json"
 }
 
+# rebuilt <slot>: B was set aside by Rebuild; its next attempt is built on
+# A's new revision. Both are then rejected, since a task in code review
+# leaves it only through Approve or Reject and the suite's board teardown
+# could close neither.
+rebuilt() {
+  local a b
+  a="$(cat "$work-$1-a")" b="$(cat "$work-$1-b")"
+  newest "$b" >/dev/null
+  json "$work-revisions.json" 'r=[i for i in v["data"] if i["number"]==1][0]; assert r.get("verdict")=="reject", r'
+  wait_status "$b" open False
+  run_epic "$1"
+  wait_revisions "$b" 2
+  wait_status "$b" review True
+  test "$(revision_field "$b" depends_on)" = "$a"
+  test -z "$(revision_field "$b" lineage_state)"
+  verdict "$b" reject > "$work-reject-b.json"
+  wait_status "$b" open False
+  verdict "$a" reject > "$work-reject-a.json"
+  wait_status "$a" open False
+}
+
 case "$phase" in
 setup)
   git init -q --bare "$remote"
@@ -252,9 +273,10 @@ stale)
   wait_status "$b" review True
   test "$(revision_count "$b")" = 1
   ;;
-rebuild)
-  # rebuild <ws> <slot>: A's next attempt offers B a rebuild on it; Rebuild
-  # reopens B and its next attempt is built on A's new revision.
+next-a|rebuild)
+  # next-a <ws> <slot>: A's next attempt offers B a rebuild on it, and an
+  # agent may not Rebuild. rebuild also has a human Rebuild B through the API,
+  # then checks B as rebuilt does.
   a="$(cat "$work-$3-a")" b="$(cat "$work-$3-b")"
   curl -fsS -X PATCH "$api/issues/$a" -H 'Content-Type: application/json' \
     -d "{\"design\":\"STUB_CODEX_PATCH=trev-$3-a2.txt\"}" >/dev/null
@@ -267,21 +289,17 @@ rebuild)
   code="$(curl -sS -o "$work-rebuild-agent.json" -w '%{http_code}' -X POST "$api/issues/$b/rebuild" -H 'Content-Type: application/json' \
     -d '{"actor":{"kind":"agent","id":"aft-agent"}}')"
   test "$code" = 409 && grep -q '"review_required"' "$work-rebuild-agent.json"
-  curl -fsS -X POST "$api/issues/$b/rebuild" -H 'Content-Type: application/json' \
-    -d '{"actor":{"kind":"human","id":"aft-operator"}}' > "$work-rebuild.json"
-  json "$work-rebuild.json" 'd=v["data"]; assert d["rebuild_on"]==2 and d["verdict"]=="reject" and d["depends_on"]==sys.argv[2], v' "$a"
-  wait_status "$b" open False
-  run_epic "$3"
-  wait_revisions "$b" 2
-  wait_status "$b" review True
-  test "$(revision_field "$b" depends_on)" = "$a"
-  test -z "$(revision_field "$b" lineage_state)"
-  # A task in code review only leaves it through Approve or Reject, so the
-  # suite's board teardown can close neither: reject both to reopen them.
-  verdict "$b" reject > "$work-reject-b.json"
-  wait_status "$b" open False
-  verdict "$a" reject > "$work-reject-a.json"
-  wait_status "$a" open False
+  if [[ "$phase" == rebuild ]]; then
+    curl -fsS -X POST "$api/issues/$b/rebuild" -H 'Content-Type: application/json' \
+      -d '{"actor":{"kind":"human","id":"aft-operator"}}' > "$work-rebuild.json"
+    json "$work-rebuild.json" 'd=v["data"]; assert d["rebuild_on"]==2 and d["verdict"]=="reject" and d["depends_on"]==sys.argv[2], v' "$a"
+    rebuilt "$3"
+  fi
+  ;;
+rebuilt)
+  # rebuilt <ws> <slot>: after a human's Rebuild, B reopens and its next
+  # attempt is built on A's new revision.
+  rebuilt "$3"
   ;;
 no-changes)
   # no-changes <ws> <slot>: an empty attempt still closes its task.
