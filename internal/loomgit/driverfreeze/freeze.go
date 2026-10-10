@@ -40,6 +40,11 @@ type CaptureRequest struct {
 	Outcome                        string
 	Complete                       bool
 	SkipRetention                  bool
+	// ScreenTaskCopy applies the capture rules (D18) to the task copy before
+	// freezing: a left-out secret file makes the revision incomplete and its
+	// manifest records what was left out. For captures not made by Capture,
+	// such as a run that changed nothing.
+	ScreenTaskCopy bool
 }
 
 // FreezeCapture records a host capture as a source revision. The caller retains
@@ -107,10 +112,16 @@ func FreezeCaptureAt(ctx context.Context, journalPath string, in CaptureRequest)
 		if requestID == "" {
 			requestID = "driver:" + in.Attempt
 		}
+		complete := in.Complete
+		if in.ScreenTaskCopy {
+			if complete, err = screenTaskCopy(ctx, runner, in); err != nil {
+				return err
+			}
+		}
 		revision, err = changeset.FreezeSource(ctx, store, runner, changeset.SourceInput{
 			Workspace: in.Workspace, Change: change, RequestID: requestID,
 			Attempt: in.Attempt, TaskID: in.Task, BaseSHA: in.Base, CaptureSHA: captureSHA,
-			Outcome: in.Outcome, Complete: in.Complete,
+			Outcome: in.Outcome, Complete: complete,
 		})
 		if err != nil {
 			return err
@@ -124,9 +135,26 @@ func FreezeCaptureAt(ctx context.Context, journalPath string, in CaptureRequest)
 			return nil
 		}
 		return store.RecordRetainedCopy(ctx, journal.RetainedCopy{Workspace: in.Workspace, Change: revision.Change,
-			Attempt: in.Attempt, Path: in.Worktree, SourceRepo: in.SourceRepo, Complete: in.Complete})
+			Attempt: in.Attempt, Path: in.Worktree, SourceRepo: in.SourceRepo, Complete: complete})
 	})
 	return revision, err
+}
+
+// screenTaskCopy records what the task copy's capture leaves out and reports
+// whether the capture is still complete.
+func screenTaskCopy(ctx context.Context, runner *gitexec.Runner, in CaptureRequest) (bool, error) {
+	entries, err := capture.ScreenTaskCopy(ctx, runner, in.Worktree)
+	if err != nil {
+		return false, err
+	}
+	complete := in.Complete && capture.Complete(entries)
+	if len(entries) > 0 {
+		if _, err := capture.SaveManifest(ctx, runner, in.Worktree, capture.Manifest{Workspace: in.Workspace,
+			Attempt: in.Attempt, Entries: entries, Complete: complete, Retained: !complete}); err != nil {
+			return false, err
+		}
+	}
+	return complete, nil
 }
 
 func captureSHAForRequest(ctx context.Context, runner *gitexec.Runner, captureSHA string) (string, error) {

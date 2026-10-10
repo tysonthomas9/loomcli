@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -102,4 +104,34 @@ func Complete(entries []Entry) bool {
 // SaveManifest records a capture manifest where Capture saves its own.
 func SaveManifest(ctx context.Context, runner *gitexec.Runner, repo string, manifest Manifest) (string, error) {
 	return saveManifest(ctx, runner, repo, manifest)
+}
+
+// ScreenTaskCopy lists what a capture of the task copy leaves out without
+// capturing anything (D18): untracked, non-ignored secret-pattern files are
+// secret_suspect and ignored files are listed with their size. A freeze of a
+// run that changed nothing uses it so a left-out secret file still makes the
+// revision incomplete.
+func ScreenTaskCopy(ctx context.Context, runner *gitexec.Runner, repo string) ([]Entry, error) {
+	out, err := runner.Run(ctx, "ls-files", "--others", "--exclude-standard", "-z")
+	if err != nil {
+		return nil, err
+	}
+	var entries []Entry
+	for _, path := range lines(out) {
+		if !SecretPath(path) || excludedRuntimePath(repo, path, false) {
+			continue
+		}
+		entry := Entry{Path: path, Class: SecretSuspect}
+		if size, err := fileSize(filepath.Join(repo, filepath.FromSlash(path))); err == nil {
+			entry.Size = size
+		}
+		entries = append(entries, entry)
+	}
+	ignored, err := IgnoredEntries(ctx, runner, repo)
+	if err != nil {
+		return nil, err
+	}
+	entries = append(entries, ignored...)
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
+	return entries, nil
 }
