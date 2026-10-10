@@ -485,3 +485,25 @@ func (r LocalTaskWorktreeResolver) resolveTaskLineageBase(ctx context.Context, r
 	}
 	return sha, taskcopy.LineageBase{}, nil
 }
+
+// ResolveDependentBase is the frozen blocker revision a daemon-run dependent
+// task starts from (P1.28), selected and pinned as a TaskRun copy's base is.
+// found is false for a task with no local predecessor.
+func ResolveDependentBase(ctx context.Context, workspace, repo, repoPath, task string) (string, bool, error) {
+	lookup, ok := DefaultStackLineageLookup().(localPredecessorLookup)
+	if !ok {
+		return "", false, nil
+	}
+	predecessor, found, err := lookup.PredecessorForTask(ctx, workspace, repo, task)
+	if err != nil || !found {
+		return "", false, err
+	}
+	base, err := taskcopy.ResolveLineageBase(ctx, repoPath, workspace, task, predecessor, repo)
+	if err != nil {
+		return "", false, err
+	}
+	if err := taskcopy.RecordLineageBase(ctx, workspace, task, repo, base); err != nil {
+		return "", false, err
+	}
+	return base.SHA, true, nil
+}
