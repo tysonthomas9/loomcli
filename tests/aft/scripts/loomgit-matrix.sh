@@ -305,8 +305,11 @@ trap 'diagnose' ERR
 
 case "$phase" in
 setup)
-  # setup <case> [native]: one repo, one workspace and its lead.
-  native="${1:-}"
+  # setup <case> [no-native]: one repo, one workspace and its lead. GitHub always
+  # uses native stacks (D41), so the fake forge offers them unless no-native.
+  native=native
+  [[ "${1:-}" == no-native ]] && native=""
+  [[ "${1:-}" == no-native && "$forge" == github ]] && fail "no-native cannot be simulated on real GitHub"
   mkdir -p "$work"
   printf '%s\n' "$forge_repo" > "$work/forge-repo"
   if [[ "$forge" == fake ]]; then
@@ -506,6 +509,22 @@ assert hit(v), v'
   wait_until 20 "task $slot offers a rebuild" rebuild
   browser screenshot "$work/stale-$slot.png" > /dev/null
   say "$slot is stale and offers a rebuild"
+  ;;
+
+native-unavailable)
+  # native-unavailable <case> <slot>: (the UI step approved <slot>) with native
+  # stacks unavailable, publishing fails with a clear error and no PR opens;
+  # there is no fallback to Loom's own publisher (D41).
+  slot="$1"
+  settled() { revisions "$slot"; json "$work/rev-$slot.json" 'assert v.get("publish_status") not in (None, "", "pending", "publishing"), v'; }
+  wait_until 60 "publishing of $slot settled: $(cat "$work/rev-$slot.json" 2> /dev/null | head -c 500)" settled
+  pulls || fail "the forge's PR list is unreachable"
+  [[ -z "$(pull_field "$slot" number)" ]] || fail "PR #$(pull_field "$slot" number) opened without native stacks: Loom fell back to its own publisher ($(json "$work/rev-$slot.json" 'print(v.get("publish_status"), v.get("publish_reason"))'))"
+  json "$work/rev-$slot.json" 'import re; assert v.get("publish_status") != "published" and re.search(r"native stack", v.get("publish_reason") or "", re.I), v'
+  open_task "$slot"
+  browser wait --text 'native stack' > /dev/null || fail "task $slot does not show the native stacks error"
+  browser screenshot "$work/native-unavailable-$slot.png" > /dev/null
+  say "no native stacks: $(json "$work/rev-$slot.json" 'print(v.get("publish_status"), "-", v.get("publish_reason"))')"
   ;;
 
 lead-start)

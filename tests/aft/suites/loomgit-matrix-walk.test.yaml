@@ -9,8 +9,8 @@ tests:
   - name: "W1-W8 stacked PR walk-through [needs #943 dependents run]"
     intent: "Stacked PRs with Lead may approve on and Lead may merge off: a human builds A, B, C as one stack, gives B merge permission before its review fix-up cancels it, merges bottom-up, switches to PR per task with stack E-F still open, and meets a hand push on stacked E Needs the dependents-run change in #943; it fails on 8267795e0 until that lands."
     steps:
-      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" setup walk native"
-        intent: "Fixture: one repo, one Loom workspace and its lead (real tier: a clone of the run's sandbox repo)"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" setup walk"
+        intent: "Fixture: one repo with GitHub native stacks, one Loom workspace and its lead (real tier: a clone of the run's sandbox repo)"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" lead-start walk"
         intent: "Real tier: the workspace's real codex lead is started from its agent page and its controlled runtime comes up"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" settings walk stack on off"

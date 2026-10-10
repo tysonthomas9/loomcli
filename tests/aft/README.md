@@ -252,8 +252,10 @@ lead permissions) and `loomgit-matrix-variants` (L1 mid-session epic assignment
 to a running lead, N1 the lead's `loom approve` with Lead may approve off, refused with Loom's own
 text (expected red until P2.25),
 N2 Approve and merge on a red PR and its recovery, N3 the lead's merge request
-needing a human, R1 Reject → rerun → approve, D1–D3 dependents that run before
-their blocker's review) run on the fake forge with every
+needing a human, N4 no native stacks → a clear error and no fallback (fake tier
+only, expected red until D41), R1 Reject → rerun → approve, D1–D3 dependents
+that run before their blocker's review, X1 a non-clean rebuild asks to approve
+again, X2 cancelling merge after) run on the fake forge with every
 `loomgit-*` run:
 
 ```bash
@@ -274,6 +276,9 @@ for s in walk settings variants; do
 done
 # one case: add --filter "S7 PR per task, human does everything" (the cap still counts the whole file)
 ```
+
+GitHub always publishes stacks natively (D41), so every case's fake repo offers
+native stacks; there are no Loom-publisher fallback cases.
 
 A dependent starts as soon as its blocker's agent finishes, on the blocker's
 unreviewed revision; Approve, Apply and Publish still follow dependency order,

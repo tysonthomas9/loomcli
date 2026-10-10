@@ -10,7 +10,7 @@ tests:
     intent: "The seam live-interactive ll-lead-assignment leaves open: assignment delivered into a lead that is already running"
     steps:
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" setup l1"
-        intent: "Fixture: one repo, one Loom workspace and its lead (real tier: a clone of the run's sandbox repo)"
+        intent: "Fixture: one repo with GitHub native stacks, one Loom workspace and its lead (real tier: a clone of the run's sandbox repo)"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" lead-start l1"
         intent: "Real tier: the workspace's real codex lead is started from its agent page and its controlled runtime comes up"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" lead-epic-midsession l1"
@@ -19,7 +19,7 @@ tests:
     intent: "loom approve run by the lead must be refused with 'lead approval policy is off', record no verdict and leave the task in review. Expected to fail until P2.25: the CLI records a human actor whoever runs it."
     steps:
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" setup n1"
-        intent: "Fixture: one repo, one Loom workspace and its lead (real tier: a clone of the run's sandbox repo)"
+        intent: "Fixture: one repo with GitHub native stacks, one Loom workspace and its lead (real tier: a clone of the run's sandbox repo)"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" lead-start n1"
         intent: "Real tier: the workspace's real codex lead is started from its agent page and its controlled runtime comes up"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" settings n1 stack off off"
@@ -64,7 +64,7 @@ tests:
     intent: "A red PR's Approve and merge blocks; a review fix-up cancels it; approving the green fix-up merges"
     steps:
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" setup n2"
-        intent: "Fixture: one repo, one Loom workspace and its lead (real tier: a clone of the run's sandbox repo)"
+        intent: "Fixture: one repo with GitHub native stacks, one Loom workspace and its lead (real tier: a clone of the run's sandbox repo)"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" lead-start n2"
         intent: "Real tier: the workspace's real codex lead is started from its agent page and its controlled runtime comes up"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" settings n2 trunk off off"
@@ -141,7 +141,7 @@ tests:
     intent: "With Lead may merge off the lead can only request a merge; it runs after a human confirms Needs the dependents-run change in #943; it fails on 8267795e0 until that lands."
     steps:
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" setup n3"
-        intent: "Fixture: one repo, one Loom workspace and its lead (real tier: a clone of the run's sandbox repo)"
+        intent: "Fixture: one repo with GitHub native stacks, one Loom workspace and its lead (real tier: a clone of the run's sandbox repo)"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" lead-start n3"
         intent: "Real tier: the workspace's real codex lead is started from its agent page and its controlled runtime comes up"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" settings n3 stack on off"
@@ -186,7 +186,7 @@ tests:
     intent: "A rejected task runs again and its new revision opens the PR"
     steps:
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" setup r1"
-        intent: "Fixture: one repo, one Loom workspace and its lead (real tier: a clone of the run's sandbox repo)"
+        intent: "Fixture: one repo with GitHub native stacks, one Loom workspace and its lead (real tier: a clone of the run's sandbox repo)"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" lead-start r1"
         intent: "Real tier: the workspace's real codex lead is started from its agent page and its controlled runtime comes up"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" settings r1 stack off off"
@@ -251,7 +251,7 @@ tests:
     intent: "B runs on A's frozen revision before anyone reviews A; the PRs still open in dependency order Needs the dependents-run change in #943; it fails on 8267795e0 until that lands."
     steps:
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" setup d1"
-        intent: "Fixture: one repo, one Loom workspace and its lead (real tier: a clone of the run's sandbox repo)"
+        intent: "Fixture: one repo with GitHub native stacks, one Loom workspace and its lead (real tier: a clone of the run's sandbox repo)"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" lead-start d1"
         intent: "Real tier: the workspace's real codex lead is started from its agent page and its controlled runtime comes up"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" settings d1 stack on off"
@@ -326,7 +326,7 @@ tests:
     intent: "Rejecting A marks B, which ran on A's revision, stale with a rebuild offer Needs the dependents-run change in #943; it fails on 8267795e0 until that lands."
     steps:
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" setup d2"
-        intent: "Fixture: one repo, one Loom workspace and its lead (real tier: a clone of the run's sandbox repo)"
+        intent: "Fixture: one repo with GitHub native stacks, one Loom workspace and its lead (real tier: a clone of the run's sandbox repo)"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" lead-start d2"
         intent: "Real tier: the workspace's real codex lead is started from its agent page and its controlled runtime comes up"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" settings d2 stack off off"
@@ -367,7 +367,7 @@ tests:
     intent: "Approve on B before A waits for A; approving A then publishes A and B in order Needs the dependents-run change in #943; it fails on 8267795e0 until that lands."
     steps:
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" setup d3"
-        intent: "Fixture: one repo, one Loom workspace and its lead (real tier: a clone of the run's sandbox repo)"
+        intent: "Fixture: one repo with GitHub native stacks, one Loom workspace and its lead (real tier: a clone of the run's sandbox repo)"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" lead-start d3"
         intent: "Real tier: the workspace's real codex lead is started from its agent page and its controlled runtime comes up"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" settings d3 stack off off"
@@ -438,7 +438,7 @@ tests:
     intent: "When A lands with different content, B's rebuild conflicts and B's Approve and merge asks for a new approval Needs the dependents-run change in #943; it fails on 8267795e0 until that lands."
     steps:
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" setup x1"
-        intent: "Fixture: one repo, one Loom workspace and its lead (real tier: a clone of the run's sandbox repo)"
+        intent: "Fixture: one repo with GitHub native stacks, one Loom workspace and its lead (real tier: a clone of the run's sandbox repo)"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" lead-start x1"
         intent: "Real tier: the workspace's real codex lead is started from its agent page and its controlled runtime comes up"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" settings x1 stack off off"
@@ -531,7 +531,7 @@ tests:
     intent: "A human cancels B's waiting Approve and merge; A merges and B stays open Needs the dependents-run change in #943; it fails on 8267795e0 until that lands."
     steps:
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" setup x2"
-        intent: "Fixture: one repo, one Loom workspace and its lead (real tier: a clone of the run's sandbox repo)"
+        intent: "Fixture: one repo with GitHub native stacks, one Loom workspace and its lead (real tier: a clone of the run's sandbox repo)"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" lead-start x2"
         intent: "Real tier: the workspace's real codex lead is started from its agent page and its controlled runtime comes up"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" settings x2 stack off off"
