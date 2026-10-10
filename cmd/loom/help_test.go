@@ -19,6 +19,20 @@ func TestHelpListsOnlyTheSmallGitCLI(t *testing.T) {
 	if err := cli.Execute(); err != nil {
 		t.Fatal(err)
 	}
+	// No line anywhere in the help, including the hand-written overview, lists a
+	// hidden or removed command.
+	for _, line := range strings.Split(output.String(), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 || !strings.HasPrefix(line, "  ") {
+			continue
+		}
+		for _, name := range []string{"apply", "pr", "pr-stack", "pull", "reset", "restack", "push", "delivery-mode",
+			"lead-may-merge", "retention-sweep", "merge-up-to", "request-merge", "confirm-merge"} {
+			if fields[0] == name {
+				t.Fatalf("help lists %s: %q", name, line)
+			}
+		}
+	}
 	_, section, found := strings.Cut(output.String(), "Git Operations:\n")
 	if !found {
 		t.Fatalf("no Git section in help:\n%s", output.String())
