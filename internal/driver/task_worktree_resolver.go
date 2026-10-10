@@ -423,6 +423,9 @@ func (r LocalTaskWorktreeResolver) ResolveTaskWorktree(ctx context.Context, req 
 			return TaskWorktree{}, fmt.Errorf("record dependent lineage: %w", err)
 		}
 	}
+	if req.ResumeAttemptID == "" {
+		r.recordTaskStart(ctx, workspaceKey, req)
+	}
 	if hasResolution && req.ResumeAttemptID == "" {
 		if err := taskcopy.PrepareConflictResolution(ctx, revisionSource, target, workspaceKey, resolutionLead, req.TaskID, selected.Name, resolution.Change, resolution.Number); err != nil {
 			return TaskWorktree{}, fmt.Errorf("prepare conflict resolution for repo %q: %w", selected.Name, err)
@@ -799,6 +802,20 @@ func defaultTaskRunDelegation(opts TaskRunRequestOptions) (TaskRunRequestOptions
 	}
 	opts.Input, err = WithCurrentWorkspaceState(opts.Input)
 	return opts, err
+}
+
+// recordTaskStart records where this attempt started for the Changes tab's
+// "Started from" line; a failure only loses that label, so it is logged.
+func (r LocalTaskWorktreeResolver) recordTaskStart(ctx context.Context, workspaceKey string, req TaskExecRequest) {
+	lead := ""
+	if req.ParentSessionID != "" {
+		if parent, err := r.Store.AgentSessions().Get(ctx, workspaceKey, req.ParentSessionID); err == nil && parent != nil {
+			lead = parent.AgentID
+		}
+	}
+	if err := taskcopy.RecordTaskStart(ctx, workspaceKey, req.TaskID, lead); err != nil {
+		slog.Warn("task start not recorded", "task_id", req.TaskID, "err", err)
+	}
 }
 
 func (r LocalTaskWorktreeResolver) delegatedBase(ctx context.Context, req TaskExecRequest, repoPath, repoName string) (string, string, bool, error) {

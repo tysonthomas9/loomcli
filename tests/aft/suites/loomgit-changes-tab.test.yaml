@@ -1,0 +1,114 @@
+# P2.24 (D43): the agent panel has one Changes tab instead of Git and Diff.
+# A real daemon coder (the deterministic local-mode backend, paused after its
+# commit so it is still working) shows its task, status and where its attempt
+# started. When it is done the tab links to the task's own Changes. The lead's
+# tab shows how many tasks are approved and links to the PRs. Old ?tab=git and
+# ?tab=diff links open Changes. The live file list needs B8 (the daemon must
+# run the coder in its recorded checkout), so that test is skipped until then.
+suite: loomgit-changes-tab
+classification: { area: reviews, feature: agent-changes-tab, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: >-
+  set -e;
+  AFT_WITH_LEAD=1 AFT_DONE_DELAY=60 bash "$AFT_TESTS_DIR/scripts/loomgit-rerun-from-lead.sh" setup E2E-WS-CHANGES stack
+teardown: >-
+  bash "$AFT_TESTS_DIR/scripts/loomgit-rerun-from-lead.sh" teardown E2E-WS-CHANGES
+
+tests:
+  # AFT-GT1
+  - name: a task agent's Changes tab shows its task while it works and links to the task when done
+    intent: An old ?tab=git link opens Changes; the working coder shows its task, Working and Started from the lead's latest work; once done it shows Waiting for review and opens the task's own Changes; no Git or Diff tab, branch name, PR or merge button
+    steps:
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-changes-tab.sh" claimed E2E-WS-CHANGES one lead
+        intent: The coder claims a task; the API says its attempt started from the lead's latest work
+      - open: /ws/E2E-WS-CHANGES/agents/rerun-coder?tab=git
+        intent: Follow an old link to the Git tab
+      - wait:
+          fn: "document.querySelector('[data-testid=changes-tab]')?.offsetParent !== null && !!document.querySelector('[data-testid=changes-task-status]')"
+        intent: The link lands on the Changes tab with the task header
+      - wait:
+          fn: >-
+            (() => {
+              const group = document.querySelector('[data-testid=agent-editor-groups]');
+              const labels = Array.from(group?.querySelectorAll('button[draggable="true"]') ?? []).map((b) => b.textContent.trim()).filter(Boolean);
+              return JSON.stringify(labels) === JSON.stringify(["Terminal", "Info", "Changes", "Files"]);
+            })()
+        intent: The agent panel's tabs are Terminal, Info, Changes and Files, with no Git or Diff tab
+      - wait: { text: "changes tab one" }
+        intent: The header names the task
+      - wait:
+          fn: "document.querySelector('[data-testid=changes-task-status]')?.textContent.trim() === 'Working'"
+        intent: The status pill reads Working
+      - wait:
+          fn: "document.querySelector('[data-testid=changes-started-from]')?.textContent.trim() === 'Started from: the lead\\'s latest work'"
+        intent: The tab says the attempt started from the lead's latest work, as recorded when it started
+      - wait:
+          fn: >-
+            (() => {
+              const tab = document.querySelector('[data-testid=changes-tab]');
+              const text = tab?.textContent ?? '';
+              const buttons = Array.from(tab?.querySelectorAll('button') ?? []).map((b) => b.textContent.trim());
+              return !!tab && !text.includes('loom/') && !/Merge|Publish|Create PR/.test(buttons.join('|')) && !document.querySelector('[data-testid=changes-open-task]');
+            })()
+        intent: No branch name, PR or merge button, and no task link while it works
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-changes-tab.sh" done E2E-WS-CHANGES one
+        intent: The attempt finishes and the task waits for review with its revision
+      - open: /ws/E2E-WS-CHANGES/agents/rerun-coder?tab=diff
+        intent: Follow an old link to the Diff tab
+      - wait:
+          fn: "document.querySelector('[data-testid=changes-task-status]')?.textContent === 'Waiting for review'"
+        intent: The link lands on Changes and the task now waits for review
+      - wait:
+          fn: "document.querySelector('[data-testid=changes-started-from]')?.textContent.trim() === 'Started from: the lead\\'s latest work'"
+        intent: The finished task still says where it started
+      - click: { testid: changes-open-task }
+        intent: Open the task's own Changes
+      - wait:
+          fn: "[...document.querySelectorAll('[role=tab]')].some((t) => t.textContent === 'Changes' && t.getAttribute('aria-selected') === 'true') && !!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The task opens on its Changes tab
+      - wait: { text: "awaiting review" }
+        intent: The task's review bar shows it awaits review
+
+  # AFT-GT2
+  - name: the lead's Changes tab counts approved tasks and links to the PRs
+    intent: After Approve, the lead's tab reads 1 task approved with a link to the PRs, keeps it on reload and has no action buttons
+    steps:
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-changes-tab.sh" approve E2E-WS-CHANGES one
+        intent: Approve applies the task into the lead and closes it as approved
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-changes-tab.sh" approved-count E2E-WS-CHANGES 1
+        intent: The API lists one task closed as approved
+      - open: /ws/E2E-WS-CHANGES/agents/lead?tab=changes
+        intent: Open the lead's Changes tab
+      - wait:
+          fn: "document.querySelector('[data-testid=changes-lead-summary]')?.textContent.replace(/\\s+/g, ' ').trim() === '1 task approved · open PRs →'"
+        intent: The lead's tab reads 1 task approved and links to the PRs
+      - expect: { attr: { testid: changes-open-prs, name: href, equals: /ws/E2E-WS-CHANGES/prs } }
+      - reload: true
+      - wait:
+          fn: "document.querySelector('[data-testid=changes-lead-summary]')?.textContent.replace(/\\s+/g, ' ').trim() === '1 task approved · open PRs →'"
+        intent: A reload keeps the count
+      - wait:
+          fn: "document.querySelectorAll('[data-testid=changes-tab] button:not([role=button])').length === 0 && !document.querySelector('[data-testid=changes-task-header]')"
+        intent: The lead's tab has no action buttons and no task header
+      - click: { testid: changes-open-prs }
+      - expect: { url: "**/ws/E2E-WS-CHANGES/prs" }
+        intent: The link opens the PRs page
+
+  # AFT-GT1, live files: unskip once B8 lands.
+  - name: a working task agent lists its changed files live and expands a diff inline
+    intent: While the coder still works, its committed file is listed on Changes and clicking it expands the diff inline
+    skip: true
+    steps:
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-changes-tab.sh" claimed E2E-WS-CHANGES two lead
+        intent: The coder claims a second task
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-changes-tab.sh" live-files E2E-WS-CHANGES two
+        intent: The API lists the coder's committed file while it still works
+      - open: /ws/E2E-WS-CHANGES/agents/rerun-coder?tab=changes
+      - wait: { text: local-mode-agent-output.txt }
+        intent: The coder's committed file is listed while it still works
+      - click: { selector: "[data-testid=changes-file-list] [role=button]" }
+        intent: Click the file to expand its diff inline
+      - wait: { text: "local mode deterministic backend produced a committed artifact" }
+        intent: The file's diff shows inline under it
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-changes-tab.sh" done E2E-WS-CHANGES two
+        intent: The second attempt finishes before teardown

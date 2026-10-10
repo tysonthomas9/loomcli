@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => {
     showToast: vi.fn(),
     getWorkflowRun: vi.fn(),
     startWorkflowRun: vi.fn(),
+    search: "",
     localSettings: { settings: null },
     workspaceContext: { repos: [] },
     agents: [] as Array<{
@@ -39,7 +40,7 @@ vi.mock("react-router-dom", async (importOriginal) => {
     ...actual,
     useNavigate: () => mocks.navigate,
     useParams: () => ({ workspaceId: "DESKTOP-QA", agentName: "lead-1" }),
-    useSearchParams: () => [new URLSearchParams(), vi.fn()],
+    useSearchParams: () => [new URLSearchParams(mocks.search), vi.fn()],
   };
 });
 
@@ -86,11 +87,18 @@ vi.mock("@/components/AgentDetailMain/AgentDetailMain", () => ({
 }));
 
 vi.mock("@/components/AgentDetailPanel", () => ({
-  GitTab: ({ agent }: { agent: { name: string } }) => (
-    <div data-testid="git-tab" data-agent={agent.name} />
-  ),
-  DiffTab: ({ agent }: { agent: { name: string } }) => (
-    <div data-testid="diff-tab" data-agent={agent.name} />
+  ChangesTab: ({
+    agent,
+    isActive,
+  }: {
+    agent: { name: string };
+    isActive?: boolean;
+  }) => (
+    <div
+      data-testid="changes-tab"
+      data-agent={agent.name}
+      data-active={String(isActive)}
+    />
   ),
 }));
 
@@ -142,6 +150,7 @@ vi.mock("@/components/FileExplorer", () => ({
 describe("AgentsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.search = "";
     mocks.localSettings = { settings: null };
     mocks.workspaceContext = { repos: [] };
     mocks.agents = [];
@@ -287,6 +296,31 @@ describe("AgentsPage", () => {
           .getAttribute("data-active"),
       ).toBe("true");
     });
+  });
+
+  // D43: the agent panel has one Changes tab, and old ?tab=git / ?tab=diff
+  // links open it.
+  it.each(["git", "diff"])("opens Changes for a ?tab=%s link", async (tab) => {
+    mocks.agents = [
+      { name: "lead-1", role: "lead", status: "ready", branch: "agent/lead-1" },
+    ];
+    mocks.search = `tab=${tab}`;
+
+    render(<AgentsPage />);
+
+    const changes = await screen.findByTestId("changes-tab");
+    await waitFor(() =>
+      expect(changes.getAttribute("data-active")).toBe("true"),
+    );
+    const labels = screen
+      .getAllByRole("button")
+      .map((b) => b.textContent)
+      .filter((t) =>
+        ["Terminal", "Info", "Changes", "Files", "Git", "Diff"].includes(
+          t ?? "",
+        ),
+      );
+    expect(labels).toEqual(["Terminal", "Info", "Changes", "Files"]);
   });
 
   it("does not leave the retired legacy file editor module in source", () => {

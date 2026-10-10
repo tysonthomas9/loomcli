@@ -185,3 +185,27 @@ export async function cancelRevisionMerge(
   );
   if (error) throw apiErrorFromResponse(error, response);
 }
+
+export type TaskStartedFrom = {
+  kind: "blocker" | "lead" | "trunk";
+  task?: string;
+};
+
+/** Where a task's attempt starts: its blocker, the lead's work, or trunk (P2.24). */
+export async function getTaskStartedFrom(
+  workspaceId: string,
+  taskId: string,
+  lead?: string,
+): Promise<TaskStartedFrom> {
+  const { data, error, response } = await api.GET(
+    "/api/workspaces/{ws}/issues/{id}/started-from",
+    {
+      params: {
+        path: { ws: workspaceId, id: taskId },
+        ...(lead ? { query: { lead } } : {}),
+      },
+    },
+  );
+  if (error) throw apiErrorFromResponse(error, response);
+  return data?.data ?? { kind: "trunk" };
+}

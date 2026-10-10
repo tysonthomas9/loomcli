@@ -113,6 +113,10 @@ PY
   ln -sf "$AFT_LOOM_BIN" "$bin/loom"
   ln -sf "$repo_root/test/local-mode/loom-backend-localdogfood" "$bin/loom-backend-localdogfood"
   loom_cli agentdef add rerun-coder --role task --auto --backend localdogfood --repos "$repo_name" >/dev/null
+  # P2.24's Changes-tab suite also shows the lead that approves the work.
+  if [[ -n "${AFT_WITH_LEAD:-}" ]]; then
+    loom_cli agentdef add lead --role lead --backend localdogfood --repos "$repo_name" >/dev/null
+  fi
   ws_path="$(cat "$work-ws-path")"
   [[ -d "$ws_path" ]] || { echo "workspace $workspace has no local path: '$ws_path'" >&2; cat "$work-workspace.json" >&2; exit 1; }
   : > "$daemon_log"
@@ -123,6 +127,7 @@ PY
       PATH="$bin:$PATH" LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" LOOM_WORKSPACE="$workspace" \
       LOOM_SERVER_URL="${AFT_API_URL:-$AFT_BASE_URL}" LOOM_ISSUE_BACKEND=fleetdb \
       LOOM_FLEET_DB_ACTOR="loom-aft-rerun-$lower" LOOM_LOCAL_MODE_STEP_DELAY=0 \
+      LOOM_LOCAL_MODE_DONE_DELAY="${AFT_DONE_DELAY:-0}" \
       "$AFT_LOOM_BIN" daemon
   ) >>"$daemon_log" 2>&1 &
   printf '%s\n' "$!" > "$work-daemon.pid"

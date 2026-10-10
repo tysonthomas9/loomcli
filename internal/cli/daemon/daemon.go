@@ -281,6 +281,7 @@ func wireSupervisorCallbacks(sup *supervisor.Supervisor, issueBackend backend.Is
 		}
 	}
 	sup.DependentBase = driver.ResolveDependentBase
+	sup.TaskStarted = driver.RecordTaskStart
 	sup.FindRepoConfig = func(repoName string) *cfgpkg.RepoConfig {
 		if repoName == "" {
 			return nil

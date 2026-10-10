@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -320,4 +321,33 @@ func handleTaskRevisions(w http.ResponseWriter, req *http.Request) {
 		_ = closeReader()
 	}
 	handler.WriteJSON(w, http.StatusOK, map[string]any{"success": true, "data": revisions})
+}
+
+// handleStartedFrom reports where a task's attempt starts, for the agent's
+// Changes tab (P2.24). Without a journal nothing has been applied: trunk.
+func handleStartedFrom(w http.ResponseWriter, req *http.Request) {
+	store, err := review.OpenLocal()
+	if errors.Is(err, os.ErrNotExist) {
+		handler.WriteJSON(w, http.StatusOK, map[string]any{"success": true, "data": map[string]string{"kind": "trunk"}})
+		return
+	}
+	if err != nil {
+		writeReviewError(w, err)
+		return
+	}
+	defer func() { _ = store.Close() }()
+	lead := req.URL.Query().Get("lead")
+	if lead == "" {
+		lead = "lead"
+	}
+	kind, task, err := store.StartedFrom(req.Context(), req.PathValue("ws"), req.PathValue("id"), lead)
+	if err != nil {
+		writeReviewError(w, err)
+		return
+	}
+	data := map[string]string{"kind": kind}
+	if task != "" {
+		data["task"] = task
+	}
+	handler.WriteJSON(w, http.StatusOK, map[string]any{"success": true, "data": data})
 }

@@ -2624,6 +2624,24 @@ describe("IssueDetailPanel", () => {
       );
       expect(screen.queryByRole("tab", { name: "Changes" })).toBeNull();
     });
+
+    // P2.24: the agent's "Open the task's Changes" lands on this tab.
+    it("opens on Changes when asked", async () => {
+      render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={createTestIssue({ id: "t1", issue_type: "task" })}
+          onClose={() => {}}
+          initialTab="changes"
+        />,
+      );
+      await waitFor(() =>
+        expect(screen.getByRole("tab", { name: "Changes" })).toHaveAttribute(
+          "aria-selected",
+          "true",
+        ),
+      );
+    });
   });
 
   describe("tab reset on issue change", () => {

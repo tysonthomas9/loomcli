@@ -486,6 +486,12 @@ func (r LocalTaskWorktreeResolver) resolveTaskLineageBase(ctx context.Context, r
 	return sha, taskcopy.LineageBase{}, nil
 }
 
+// RecordTaskStart records where a daemon-run attempt started, for the Changes
+// tab's "Started from" line.
+func RecordTaskStart(ctx context.Context, workspace, task, lead string) error {
+	return taskcopy.RecordTaskStart(ctx, workspace, task, lead)
+}
+
 // ResolveDependentBase is the frozen blocker revision a daemon-run dependent
 // task starts from (P1.28), selected and pinned as a TaskRun copy's base is.
 // found is false for a task with no local predecessor.

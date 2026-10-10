@@ -3,7 +3,7 @@
  *
  * Layout (driven by App.tsx):
  *   [WorkspaceTree — same sidebar as kanban]
- *   [tabbed main panel — Terminal / Info / Git / Diff / Files]
+ *   [tabbed main panel — Terminal / Info / Changes / Files]
  *   [right column — either AgentWorkPanel OR inline IssueDetailPanel]
  *
  * The tabbed main panel comes from the Aether V3 design (feat/updated-UI);
@@ -33,7 +33,6 @@ import { useStore } from "zustand";
 
 import { ErrorBoundary, LoadingSkeleton } from "@/components";
 import { AgentDetailMain } from "@/components/AgentDetailMain/AgentDetailMain";
-import { GitTab } from "@/components/AgentDetailPanel";
 import { AgentWorkPanel } from "@/components/AgentWorkPanel/AgentWorkPanel";
 import { PanelWidthResizeHandle } from "@/components/AgentWorkPanel/PanelWidthResizeHandle";
 import {
@@ -61,6 +60,7 @@ import {
 import { useToast } from "@/hooks/ui/useToast";
 import { useWorkflowRunStreams } from "@/hooks/workflows/useWorkflowRunStreams";
 import { parseLoomStatus } from "@/types";
+import { isLeadRole } from "@/utils/agentRole";
 import type { Issue } from "@/types";
 import { getCompactAvatarInitials } from "@/utils/compactAvatarInitials";
 import { getAvatarColor, shouldUseWhiteText } from "@/utils/colorUtils";
@@ -76,12 +76,18 @@ import {
   saveAgentWorkPanelView,
 } from "@/utils/agentWorkPanelStorage";
 
-import { AgentEditorGroups, type AgentEditorTab } from "./AgentEditorGroups";
+import {
+  AgentEditorGroups,
+  agentTabFromParam,
+  type AgentEditorTab,
+} from "./AgentEditorGroups";
 import styles from "./AgentsPage.module.css";
 
 // Heavy tabs (CodeMirror/diff) are code-split, mirroring AgentDetailPanel.
-const DiffTab = lazy(() =>
-  import("@/components/AgentDetailPanel").then((m) => ({ default: m.DiffTab })),
+const ChangesTab = lazy(() =>
+  import("@/components/AgentDetailPanel").then((m) => ({
+    default: m.ChangesTab,
+  })),
 );
 const WorkspaceFileBrowser = lazy(() =>
   import("@/components/FileExplorer").then((m) => ({
@@ -151,6 +157,13 @@ function AgentsPageInner(): JSX.Element {
 
   // Inline task-detail selection, restored per agent from scoped storage.
   const [selectedTask, setSelectedTask] = useState<Issue | null>(null);
+  // "changes" when the task was opened from the agent's Changes tab.
+  const [taskTab, setTaskTab] = useState<"changes" | undefined>(undefined);
+  const initialTab = agentTabFromParam(searchParams.get("tab"));
+  const soleLead = useMemo(() => {
+    const leads = agents.filter((a) => isLeadRole(a.role));
+    return leads.length === 1 ? leads[0]?.name : undefined;
+  }, [agents]);
   const [pendingTerminalInput, setPendingTerminalInput] = useState<
     TerminalInputRequest | undefined
   >(undefined);
@@ -315,6 +328,16 @@ function AgentsPageInner(): JSX.Element {
 
   const handleTaskClick = useCallback(
     (task: Issue) => {
+      setTaskTab(undefined);
+      setSelectedTask(task);
+      persistSelectedTaskId(task.id);
+    },
+    [persistSelectedTaskId],
+  );
+
+  const handleOpenTaskChanges = useCallback(
+    (task: Issue) => {
+      setTaskTab("changes");
       setSelectedTask(task);
       persistSelectedTaskId(task.id);
     },
@@ -465,11 +488,11 @@ function AgentsPageInner(): JSX.Element {
               </section>
             </div>
           );
-        case "git":
+        case "changes":
           if (!selected) {
             return (
               <div className={styles.tabFallback}>
-                Select an agent to view git.
+                Select an agent to view changes.
               </div>
             );
           }
@@ -477,25 +500,18 @@ function AgentsPageInner(): JSX.Element {
             <div
               className={`${styles.realTabBody} ${styles.realTabBodyScroll}`}
             >
-              <GitTab agent={selected} isActive={isActive} />
-            </div>
-          );
-        case "diff":
-          if (!selected) {
-            return (
-              <div className={styles.tabFallback}>
-                Select an agent to view diff.
-              </div>
-            );
-          }
-          return (
-            <div className={styles.realTabBody}>
               <Suspense
                 fallback={
-                  <div className={styles.tabFallback}>Loading diff…</div>
+                  <div className={styles.tabFallback}>Loading changes…</div>
                 }
               >
-                <DiffTab agent={selected} isActive={isActive} />
+                <ChangesTab
+                  agent={selected}
+                  isActive={isActive}
+                  issues={issues}
+                  {...(soleLead ? { lead: soleLead } : {})}
+                  onOpenTaskChanges={handleOpenTaskChanges}
+                />
               </Suspense>
             </div>
           );
@@ -535,6 +551,9 @@ function AgentsPageInner(): JSX.Element {
       roleName,
       infoStats,
       statusType,
+      issues,
+      soleLead,
+      handleOpenTaskChanges,
     ],
   );
 
@@ -542,7 +561,11 @@ function AgentsPageInner(): JSX.Element {
     <div className={styles.page} data-testid="agents-page">
       {/* Main panel: Aether tab strip over the live agent surfaces */}
       <section className={styles.main} aria-label="Agent details">
-        <AgentEditorGroups resetKey={agentName} renderPane={renderAgentPane} />
+        <AgentEditorGroups
+          resetKey={agentName}
+          initialTab={initialTab}
+          renderPane={renderAgentPane}
+        />
       </section>
 
       {/* Right column: epic-runner Open Queue or inline task detail */}
@@ -568,6 +591,7 @@ function AgentsPageInner(): JSX.Element {
               onIssueUpdate={updateIssueDetails}
               onCopyLink={handleCopyLink}
               onNavigateToIssue={handleInlineTaskNavigate}
+              {...(taskTab ? { initialTab: taskTab } : {})}
             />
           </div>
         </div>

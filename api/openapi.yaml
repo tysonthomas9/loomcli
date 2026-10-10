@@ -3521,6 +3521,46 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/workspaces/{ws}/issues/{id}/started-from:
+    get:
+      operationId: getTaskStartedFrom
+      tags: [git]
+      summary: Where a task's attempt starts
+      description: "blocker: from its blocker task's revision (task names it); lead: from the lead's working area; trunk: the lead has no working area yet."
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: lead
+          in: query
+          required: false
+          description: Lead whose working area the task starts from. Defaults to "lead".
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Start point
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    required: [kind]
+                    properties:
+                      kind:
+                        type: string
+                        enum: [blocker, lead, trunk]
+                      task:
+                        type: string
+                        description: The blocker task, when kind is blocker.
   /api/workspaces/{ws}/changes/{change}/revisions/{r}/diff:
     get:
       operationId: getRevisionDiff

@@ -1268,8 +1268,11 @@ function App() {
   );
 
   // Handle task click from agent panel (opens issue panel overlay)
+  // The agent panel's "Open the task's Changes →" opens that task on Changes.
+  const [taskChangesId, setTaskChangesId] = useState<string | null>(null);
   const handleAgentTaskClick = useCallback(
-    (taskId: string) => {
+    (taskId: string, tab?: "changes") => {
+      setTaskChangesId(tab === "changes" ? taskId : null);
       // Mutual exclusivity handled by usePanelManager (closes agent panel first)
       navigate(`/ws/${workspaceId}/issues/${encodeURIComponent(taskId)}`);
       openPanel({ type: "issue", id: taskId });
@@ -1617,6 +1620,9 @@ function App() {
             onIssueUpdate={handleIssueDetailsUpdate}
             onCopyLink={handleCopyLink}
             onNavigateToIssue={handleIssueClick}
+            {...(issueDetails?.id === taskChangesId && {
+              initialTab: "changes" as const,
+            })}
           />
           <AgentDetailPanel
             isOpen={isAgentPanelOpen}
@@ -1625,6 +1631,7 @@ function App() {
             agentTasks={agentTasks}
             onClose={handleAgentPanelClose}
             onTaskClick={handleAgentTaskClick}
+            issues={issues}
           />
           <CreateIssueModal
             isOpen={showCreateIssue}

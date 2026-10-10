@@ -19,6 +19,8 @@ export interface UseDiffOptions {
   agentName: string | null;
   enabled: boolean;
   commitSignal?: number;
+  /** Re-read the file list this often (ms) while set, without a loading flash. */
+  refreshMs?: number;
 }
 
 export interface SummaryStats {
@@ -43,6 +45,7 @@ export function useDiff({
   agentName,
   enabled,
   commitSignal,
+  refreshMs,
 }: UseDiffOptions): UseDiffReturn {
   const { workspaceId } = useWorkspaceContext();
   const [files, setFiles] = useState<DiffFile[]>([]);
@@ -114,6 +117,40 @@ export function useDiff({
         }
       });
   }, [enabled, agentName, commitSignal]);
+
+  // Keep the list and any loaded patches live while the agent works; a failed
+  // refresh keeps what was shown.
+  useEffect(() => {
+    if (!enabled || !agentName || !refreshMs) return;
+    const timer = window.setInterval(() => {
+      if (fetchInProgressRef.current) return;
+      fetchDiffFiles(workspaceId, agentName, "HEAD")
+        .then((result) => {
+          if (!mountedRef.current) return;
+          setFiles(result);
+          const live = new Set(result.map((f) => f.path));
+          for (const path of patchCacheRef.current.keys()) {
+            if (!live.has(path)) {
+              setPatchCache((prev) => {
+                const next = new Map(prev);
+                next.delete(path);
+                return next;
+              });
+              continue;
+            }
+            fetchDiffFile(workspaceId, agentName, path, "HEAD")
+              .then((patch) => {
+                if (mountedRef.current) {
+                  setPatchCache((prev) => new Map(prev).set(path, patch));
+                }
+              })
+              .catch(() => undefined);
+          }
+        })
+        .catch(() => undefined);
+    }, refreshMs);
+    return () => window.clearInterval(timer);
+  }, [enabled, agentName, refreshMs, workspaceId]);
 
   const fetchPatch = useCallback(
     async (path: string): Promise<void> => {

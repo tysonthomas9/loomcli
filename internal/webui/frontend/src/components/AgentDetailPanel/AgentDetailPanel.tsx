@@ -22,7 +22,7 @@ import {
   useAgentDiffStat,
   LAYER_AGENT_PANEL,
 } from "@/hooks";
-import type { LoomAgentStatus, LoomTaskInfo } from "@/types";
+import type { Issue, LoomAgentStatus, LoomTaskInfo } from "@/types";
 import { parseLoomStatus, resolveAgentByName } from "@/types";
 
 const WorkspaceFileBrowser = lazy(() =>
@@ -31,9 +31,9 @@ const WorkspaceFileBrowser = lazy(() =>
   })),
 );
 
-const DiffTab = lazy(() =>
-  import("./DiffTab").then((m) => ({
-    default: m.DiffTab,
+const ChangesTab = lazy(() =>
+  import("./ChangesTab").then((m) => ({
+    default: m.ChangesTab,
   })),
 );
 
@@ -41,7 +41,6 @@ import { OpenInEditor } from "../OpenInEditor";
 import { RepoBadge } from "../RepoBadge";
 import styles from "./AgentDetailPanel.module.css";
 import { PendingInputBanner } from "./PendingInputBanner";
-import { GitTab } from "./GitTab";
 import {
   getAvatarColor,
   shouldUseWhiteText,
@@ -64,14 +63,16 @@ export interface AgentDetailPanelProps {
   agentTasks: Record<string, LoomTaskInfo>;
   /** Callback when panel should close */
   onClose: () => void;
-  /** Callback when task link is clicked (opens IssueDetailPanel) */
-  onTaskClick?: (taskId: string) => void;
+  /** Callback when task link is clicked (opens IssueDetailPanel, on Changes when asked) */
+  onTaskClick?: (taskId: string, tab?: "changes") => void;
+  /** Workspace tasks, for the Changes tab header */
+  issues?: Issue[];
 }
 
 /**
  * AgentDetailPanel displays detailed agent information in a slide-out panel.
  */
-type TabType = "info" | "git" | "diff" | "files";
+type TabType = "info" | "changes" | "files";
 
 export function AgentDetailPanel({
   isOpen,
@@ -80,6 +81,7 @@ export function AgentDetailPanel({
   agentTasks,
   onClose,
   onTaskClick,
+  issues = [],
 }: AgentDetailPanelProps): JSX.Element {
   const panelRef = useRef<HTMLElement>(null);
   const [activeTab, setActiveTab] = useState<TabType>("info");
@@ -109,8 +111,8 @@ export function AgentDetailPanel({
   useFocusTrap(panelRef, isOpen);
 
   const handleTaskClick = useCallback(
-    (taskId: string) => {
-      onTaskClick?.(taskId);
+    (taskId: string, tab?: "changes") => {
+      onTaskClick?.(taskId, tab);
     },
     [onTaskClick],
   );
@@ -256,25 +258,14 @@ export function AgentDetailPanel({
                 </button>
                 <button
                   type="button"
-                  className={`${styles.tab} ${activeTab === "git" ? styles.activeTab : ""}`}
-                  onClick={() => setActiveTab("git")}
-                  aria-selected={activeTab === "git"}
+                  className={`${styles.tab} ${activeTab === "changes" ? styles.activeTab : ""}`}
+                  onClick={() => setActiveTab("changes")}
+                  aria-selected={activeTab === "changes"}
                   role="tab"
-                  id="agent-panel-tab-git"
-                  aria-controls="agent-panel-tabpanel-git"
+                  id="agent-panel-tab-changes"
+                  aria-controls="agent-panel-tabpanel-changes"
                 >
-                  Git
-                </button>
-                <button
-                  type="button"
-                  className={`${styles.tab} ${activeTab === "diff" ? styles.activeTab : ""}`}
-                  onClick={() => setActiveTab("diff")}
-                  aria-selected={activeTab === "diff"}
-                  role="tab"
-                  id="agent-panel-tab-diff"
-                  aria-controls="agent-panel-tabpanel-diff"
-                >
-                  Diff
+                  Changes
                 </button>
                 <button
                   type="button"
@@ -405,32 +396,26 @@ export function AgentDetailPanel({
                   )}
                 </div>
               </div>
-            ) : activeTab === "git" ? (
-              /* Git Tab */
+            ) : activeTab === "changes" ? (
               <div
                 className={styles.scrollableContent}
-                id="agent-panel-tabpanel-git"
+                id="agent-panel-tabpanel-changes"
                 role="tabpanel"
-                aria-labelledby="agent-panel-tab-git"
-              >
-                <GitTab agent={agent} isActive={activeTab === "git"} />
-              </div>
-            ) : activeTab === "diff" ? (
-              /* Diff Tab */
-              <div
-                className={styles.scrollableContent}
-                id="agent-panel-tabpanel-diff"
-                role="tabpanel"
-                aria-labelledby="agent-panel-tab-diff"
+                aria-labelledby="agent-panel-tab-changes"
               >
                 <Suspense
                   fallback={
                     <div className={styles.loadingFallback}>
-                      Loading diff viewer...
+                      Loading changes...
                     </div>
                   }
                 >
-                  <DiffTab agent={agent} isActive={activeTab === "diff"} />
+                  <ChangesTab
+                    agent={agent}
+                    isActive={activeTab === "changes"}
+                    issues={issues}
+                    onOpenTaskChanges={(t) => handleTaskClick(t.id, "changes")}
+                  />
                 </Suspense>
               </div>
             ) : (

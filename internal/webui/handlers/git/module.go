@@ -65,6 +65,7 @@ func (m *Module) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/revisions", handleTaskRevisions)
 	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/diff", HandleTaskDiff())
 	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/rebuild", handleRebuild)
+	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/started-from", handleStartedFrom)
 	mux.HandleFunc("POST /api/workspaces/{ws}/changes/{change}/revisions/{r}/verdict", func(w http.ResponseWriter, r *http.Request) {
 		handleVerdictWithPublisher(w, r, m.epicPublish)
 	})
