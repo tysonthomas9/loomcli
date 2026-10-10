@@ -1,0 +1,135 @@
+# OR10 PR-watch register and unregister (AFT map S8, case H1), API only on the
+# deterministic tier. A Lead calls the Agent API's github/watch and
+# github/unwatch with its own bridge token (tests/aft/scripts/agent-bridge-call.py),
+# and the host GitHub connector reads fixtures/fake-github through
+# LOOM_CONNECTOR_GITHUB_BASE_URL, which run-aft.sh sets for this tier, with a
+# fixture token this suite puts in the host settings and clears afterwards.
+# OR8 (PR-watch wakes) is not built yet; its cases extend this suite later.
+suite: agents-v1-pr-watch
+classification: { area: agents, feature: agent-api-pr-watch, surface: api, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: |
+  set -e
+  : "${AFT_FAKE_GH_BASE:?fake-github is not running; run this suite on the deterministic tier}"
+  curl -sf -X POST "$AFT_FAKE_GH_BASE/__reset" >/dev/null
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-PRWATCH" >/dev/null || true
+  # Host settings are global: teardown clears this fixture token again.
+  curl -sf -X PATCH "$AFT_BASE_URL/api/local/settings" -H "Content-Type: application/json" \
+    -d '{"runtime_credentials":{"github":{"token":"aft-fixture-token"}}}' >/dev/null
+  gh="$AFT_WORK_DIR/agv1-prwatch-repo"
+  other="$AFT_WORK_DIR/agv1-prwatch-other"
+  for r in "$gh" "$other"; do
+    mkdir -p "$r"
+    git -C "$r" init -q -b main
+    git -C "$r" -c user.email=e2e@x -c user.name=e2e commit -q --allow-empty -m init
+  done
+  git -C "$gh" remote add origin https://github.com/loom-e2e/agv1-prwatch.git
+  git -C "$other" remote add origin https://gitlab.com/loom-e2e/agv1-prwatch-other.git
+  curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" \
+    -d '{"name":"e2e-agv1-prwatch","type":"empty","repos":[]}' >/dev/null
+  printf '{"repos":["%s","%s"]}' "$gh" "$other" |
+    curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-AGV1-PRWATCH/repos" -H "Content-Type: application/json" -d @- \
+    > "$AFT_WORK_DIR/agv1-prwatch-ws.json"
+  for which in gh other; do
+    python3 - "$AFT_WORK_DIR/agv1-prwatch-ws.json" "$which" "agv1-prwatch-$which-${RUN_ID:-local}" \
+      > "$AFT_WORK_DIR/agv1-prwatch-$which-create.json" <<'PY'
+  import json, sys
+  host = {"gh": "https://github.com/", "other": "https://gitlab.com/"}[sys.argv[2]]
+  repos = [r for r in json.load(open(sys.argv[1]))["data"]["repos"] if r["remote_url"].startswith(host)]
+  assert len(repos) == 1, repos
+  r = repos[0]
+  print(json.dumps({"preset": "lead", "name": sys.argv[3], "repo": r["path"], "base_ref": r["default_branch"], "overrides": {"harness": "opencode"}}))
+  PY
+    curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-AGV1-PRWATCH/v1/agents" -H "Content-Type: application/json" \
+      -H "Idempotency-Key: agv1-prwatch-$which-${RUN_ID:-local}" -d @"$AFT_WORK_DIR/agv1-prwatch-$which-create.json" |
+      python3 -c 'import json,sys; print(json.load(sys.stdin)["agent_id"])' > "$AFT_WORK_DIR/agv1PrWatch-$which-Id"
+  done
+teardown: |
+  set +e
+  curl -s -X PATCH "$AFT_BASE_URL/api/local/settings" -H "Content-Type: application/json" \
+    -d '{"runtime_credentials":{"github":{"token":""}}}' >/dev/null
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-PRWATCH" >/dev/null
+
+tests:
+  - name: H1a a Lead registers a watch on a PR of its own GitHub repo
+    intent: A Lead whose repo's origin is on GitHub watches PR 7 and gets the watch on that repo with the host viewer; watching it again keeps the one watch, and every GitHub read went to that repo only
+    steps:
+      - run: |
+          set -e
+          curl -sf -X POST "$AFT_FAKE_GH_BASE/__reset" >/dev/null
+          call="$AFT_TESTS_DIR/scripts/agent-bridge-call.py"
+          id="$(cat "$AFT_WORK_DIR/agv1PrWatch-gh-Id")"
+          "$call" E2E-AGV1-PRWATCH "$id" github/watch '{"number":7}' > "$AFT_WORK_DIR/agv1-prwatch-h1a-1.json"
+          "$call" E2E-AGV1-PRWATCH "$id" github/watch '{"number":7}' > "$AFT_WORK_DIR/agv1-prwatch-h1a-2.json"
+          curl -sf "$AFT_FAKE_GH_BASE/__requests" > "$AFT_WORK_DIR/agv1-prwatch-h1a-gh.json"
+          python3 - "$AFT_WORK_DIR" <<'PY'
+          import json, sys
+          d = sys.argv[1]
+          first = json.load(open(d + "/agv1-prwatch-h1a-1.json"))
+          again = json.load(open(d + "/agv1-prwatch-h1a-2.json"))
+          want = {"owner": "loom-e2e", "repo": "agv1-prwatch", "number": 7, "viewer": "aft-viewer"}
+          assert first["status"] == 200, first
+          assert first["body"] == dict(want, created=True), first
+          assert again["status"] == 200, again
+          assert again["body"] == want, "a second watch must keep the one watch (no created): %r" % again
+          reqs = json.load(open(d + "/agv1-prwatch-h1a-gh.json"))
+          paths = [r["url"].split("?")[0] for r in reqs]
+          assert all(r["method"] == "GET" for r in reqs), reqs
+          assert "/repos/loom-e2e/agv1-prwatch/pulls/7" in paths, paths
+          assert "/user" in paths, paths
+          others = [p for p in paths if p != "/user" and not p.startswith("/repos/loom-e2e/agv1-prwatch/")]
+          assert not others, "PR-watch reads outside the registered repo: %r" % others
+          PY
+        intent: "Watch PR 7 twice as the Lead on the GitHub repo, and check the watch and the GitHub reads"
+
+  - name: H1b a PR watch on another repo is refused
+    intent: A Lead whose repo is not a GitHub repo of the workspace is refused as github_denied with no GitHub read, and a Lead that names another owner and repo in the body still watches only its own repo
+    steps:
+      - run: |
+          set -e
+          curl -sf -X POST "$AFT_FAKE_GH_BASE/__reset" >/dev/null
+          call="$AFT_TESTS_DIR/scripts/agent-bridge-call.py"
+          "$call" E2E-AGV1-PRWATCH "$(cat "$AFT_WORK_DIR/agv1PrWatch-other-Id")" github/watch '{"number":7}' \
+            > "$AFT_WORK_DIR/agv1-prwatch-h1b-other.json"
+          curl -sf "$AFT_FAKE_GH_BASE/__requests" > "$AFT_WORK_DIR/agv1-prwatch-h1b-gh-other.json"
+          "$call" E2E-AGV1-PRWATCH "$(cat "$AFT_WORK_DIR/agv1PrWatch-gh-Id")" github/watch \
+            '{"number":7,"owner":"octo-elsewhere","repo":"elsewhere"}' > "$AFT_WORK_DIR/agv1-prwatch-h1b-named.json"
+          curl -sf "$AFT_FAKE_GH_BASE/__requests" > "$AFT_WORK_DIR/agv1-prwatch-h1b-gh-named.json"
+          python3 - "$AFT_WORK_DIR" <<'PY'
+          import json, sys
+          d = sys.argv[1]
+          other = json.load(open(d + "/agv1-prwatch-h1b-other.json"))
+          assert other["status"] == 403, other
+          assert other["body"]["code"] == "github_denied", other
+          assert "is not a GitHub repo of workspace" in other["body"]["error"], other
+          assert json.load(open(d + "/agv1-prwatch-h1b-gh-other.json")) == [], "a refused watch read GitHub"
+          named = json.load(open(d + "/agv1-prwatch-h1b-named.json"))
+          assert named["status"] == 200, named
+          assert (named["body"]["owner"], named["body"]["repo"]) == ("loom-e2e", "agv1-prwatch"), named
+          paths = [r["url"].split("?")[0] for r in json.load(open(d + "/agv1-prwatch-h1b-gh-named.json"))]
+          assert paths and not [p for p in paths if "elsewhere" in p], paths
+          PY
+        intent: "Watch as the Lead on the GitLab repo, then as the GitHub Lead naming another repo, and check both"
+
+  - name: H1c unregister clears the watch
+    intent: The Lead's unwatch removes its watch on PR 7, a second unwatch finds none, and watching again makes a new watch
+    steps:
+      - run: |
+          set -e
+          call="$AFT_TESTS_DIR/scripts/agent-bridge-call.py"
+          id="$(cat "$AFT_WORK_DIR/agv1PrWatch-gh-Id")"
+          "$call" E2E-AGV1-PRWATCH "$id" github/watch '{"number":7}' > "$AFT_WORK_DIR/agv1-prwatch-h1c-0.json"
+          "$call" E2E-AGV1-PRWATCH "$id" github/unwatch '{"number":7}' > "$AFT_WORK_DIR/agv1-prwatch-h1c-1.json"
+          "$call" E2E-AGV1-PRWATCH "$id" github/unwatch '{"number":7}' > "$AFT_WORK_DIR/agv1-prwatch-h1c-2.json"
+          "$call" E2E-AGV1-PRWATCH "$id" github/watch '{"number":7}' > "$AFT_WORK_DIR/agv1-prwatch-h1c-3.json"
+          "$call" E2E-AGV1-PRWATCH "$id" github/unwatch '{"number":7}' > "$AFT_WORK_DIR/agv1-prwatch-h1c-4.json"
+          python3 - "$AFT_WORK_DIR" <<'PY'
+          import json, sys
+          r = [json.load(open("%s/agv1-prwatch-h1c-%d.json" % (sys.argv[1], i))) for i in range(5)]
+          assert all(x["status"] == 200 for x in r), r
+          assert r[1]["body"] == {"number": 7, "removed": True}, r[1]
+          assert r[2]["body"] == {"number": 7}, "a second unwatch must find no watch: %r" % r[2]
+          assert r[3]["body"].get("created") is True, "watching again after unwatch must make a new watch: %r" % r[3]
+          assert r[4]["body"] == {"number": 7, "removed": True}, r[4]
+          PY
+        intent: "Watch, unwatch twice, watch again and unwatch as the GitHub Lead, and check each answer"

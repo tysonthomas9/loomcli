@@ -523,9 +523,10 @@ FAKE_GH_PID=""
 FAKE_GH_BASE=""
 
 # A GitHub-shaped REST fixture, so the PR-review tier can exercise the real
-# connector path without touching github.com. Only started for the live PR tier —
-# every other tier keeps the degraded/no-credential contract the existing suites
-# assert. Started BEFORE serve so its base URL can be injected into the server env.
+# connector path without touching github.com. Started for the live PR tier and
+# the deterministic tier (see below); suites that set no GitHub token keep the
+# degraded/no-credential contract. Started BEFORE serve so its base URL can be
+# injected into the server env.
 start_fake_github() {
     local log="$REPORT_DIR/fake-github.log" port
     : > "$log"
@@ -786,8 +787,12 @@ echo "$$" > "$STACK_LOCK"
 LOCK_WRITTEN=1
 
 
-# PR-review live tier only: every other tier keeps the degraded-connector contract.
-if [[ -n "$AFT_LIVE" && "${AFT_LIVE_SUITE_KIND:-}" == "prreview" ]]; then
+# The PR-review live tier, and the deterministic tier for the PR-watch suite
+# (agents-v1-pr-watch). The deterministic tier strips every host GitHub token,
+# so suites that set none keep the degraded-connector contract; the fake only
+# replaces github.com for a suite that sets a fixture token itself.
+if [[ -n "$AFT_LIVE" && "${AFT_LIVE_SUITE_KIND:-}" == "prreview" ]] ||
+    [[ -z "$AFT_LIVE" && -z "${AFT_REAL_BACKEND:-}" ]]; then
     start_fake_github || exit 1
 fi
 echo "[aft] starting e2e stack (api :${E2E_PORT}, frontend :${E2E_FRONTEND_PORT}; log: $REPORT_DIR/server.log)..."

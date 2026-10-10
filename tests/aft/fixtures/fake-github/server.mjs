@@ -119,6 +119,19 @@ const server = createServer(async (req, res) => {
   const reviews = path.match(/^\/repos\/([^/]+)\/([^/]+)\/pulls\/(\d+)\/reviews$/);
   if (reviews && req.method === "POST") return send(res, 201, { id: 1, state: "COMMENTED" });
 
+  // The reads a PR-watch registration makes (internal/prwatch Observe): the
+  // host viewer, the head's check runs and commit status, and the PR's
+  // comments, reviews and review comments, all empty, on one page.
+  if (path === "/user" && req.method === "GET") return send(res, 200, { login: "aft-viewer", id: 1, type: "User" });
+  const checkRuns = path.match(/^\/repos\/([^/]+)\/([^/]+)\/commits\/([^/]+)\/check-runs$/);
+  if (checkRuns && req.method === "GET") return send(res, 200, { total_count: 0, check_runs: [] });
+  const status = path.match(/^\/repos\/([^/]+)\/([^/]+)\/commits\/([^/]+)\/status$/);
+  if (status && req.method === "GET") {
+    return send(res, 200, { state: "success", sha: status[3], total_count: 0, statuses: [] });
+  }
+  const prLists = path.match(/^\/repos\/([^/]+)\/([^/]+)\/(?:issues\/\d+\/comments|pulls\/\d+\/(?:reviews|comments))$/);
+  if (prLists && req.method === "GET") return send(res, 200, []);
+
   const comments = path.match(/^\/repos\/([^/]+)\/([^/]+)\/issues\/(\d+)\/comments$/);
   if (comments && req.method === "POST") return send(res, 201, { id: 2 });
 
