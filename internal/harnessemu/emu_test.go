@@ -842,3 +842,28 @@ func TestEmulatorSessionInstructionEntries(t *testing.T) {
 		t.Fatalf("PUT on a missing session = %d %s", code, b)
 	}
 }
+
+// TestEmulatorFailSessionCreate: while the test-owned flag file beside the
+// scenario file exists, creating a session answers 503 and keeps no
+// session; once it is removed, creating works again (S3 C2 drives
+// create_retrying with it).
+func TestEmulatorFailSessionCreate(t *testing.T) {
+	sc := scenarios(t, nil)
+	_, url, _ := emuURL(t, filepath.Join(t.TempDir(), "state.json"), sc)
+	flag := sc + harnessemu.FailSessionCreate
+	if err := os.WriteFile(flag, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code, b := send(t, "POST", url+"/api/session", `{"id":"ses_flagged"}`); code != http.StatusServiceUnavailable {
+		t.Fatalf("POST /api/session with the flag = %d %s; want 503", code, b)
+	}
+	if code, b := send(t, "GET", url+"/api/session/ses_flagged", ""); code != http.StatusNotFound {
+		t.Fatalf("GET of the refused session = %d %s; want 404", code, b)
+	}
+	if err := os.Remove(flag); err != nil {
+		t.Fatal(err)
+	}
+	if code, b := send(t, "POST", url+"/api/session", `{"id":"ses_flagged"}`); code != http.StatusOK {
+		t.Fatalf("POST /api/session without the flag = %d %s; want 200", code, b)
+	}
+}

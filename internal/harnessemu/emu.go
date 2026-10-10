@@ -227,6 +227,11 @@ func (s *Server) save() {
 	}
 }
 
+// FailSessionCreate is the suffix of a test-owned flag file beside the
+// scenario file: while it exists, creating a session answers 503, so a
+// Create's start fails as a retryable harness error (S3 C2).
+const FailSessionCreate = ".fail-session-create"
+
 // next is the session's next scripted turn, or an echo of text.
 func (s *Server) next(ss *session, text string) Turn {
 	var m map[string][]Turn
@@ -706,6 +711,11 @@ func (s *Server) Handler() http.Handler {
 		reply(w, 200, map[string]any{"data": out})
 	})
 	mux.HandleFunc("POST /api/session", func(w http.ResponseWriter, r *http.Request) {
+		if _, err := os.Stat(s.scenarios + FailSessionCreate); s.scenarios != "" && err == nil {
+			reply(w, http.StatusServiceUnavailable, map[string]any{"name": "UnknownError",
+				"data": map[string]any{"message": "emulator: session create refused by " + FailSessionCreate}})
+			return
+		}
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		s.mu.Lock()

@@ -1,4 +1,4 @@
-# Delete of OpenCode Leads (DEL1, OR4a), on the real OpenCode
+# Delete and Create retry of OpenCode Leads (DEL1, OR4a), on the real OpenCode
 # build with the model scripted by 2.0d's fake model (see agents-v1-lead), or
 # on the emulator with LOOM_HARNESS_EMU=1.
 #
@@ -11,9 +11,10 @@
 # that 500, so only a run on the real OpenCode build covers DEL1's fix; on
 # the emulator these cases check the Delete journey alone.
 #
-# C2 (Create retry) follows in its own change: a refused or stopped OpenCode
+# C2 (Create retry) runs on the emulator only. A refused or stopped OpenCode
 # makes Create answer 503 harness_unavailable before it writes a row (by
-# design), so it needs an emulator knob that fails the session start.
+# design), so C2 uses the emulator's fail-session-create flag file to fail
+# the start after the row is written.
 suite: agents-v1-delete-create-retry
 classification: { area: agents, feature: agent-api-lifecycle, surface: mixed, purpose: journey }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
@@ -40,6 +41,7 @@ teardown: |
   # put the AFT service's own back so later suites have OpenCode.
   saved="$AFT_WORK_DIR/agv1-delrestart-opencode-service.json"
   if [ -f "$saved" ] && grep -q '"aft-old"' "$AFT_OPENCODE_SERVICE" 2>/dev/null; then cp "$saved" "$AFT_OPENCODE_SERVICE"; fi
+  [ "${LOOM_HARNESS_EMU:-}" = 1 ] && [ -n "${AFT_EMU_SCENARIOS:-}" ] && rm -f "$AFT_EMU_SCENARIOS.fail-session-create"
   curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-DELRETRY" >/dev/null
 
 tests:
@@ -246,3 +248,86 @@ tests:
             (() => { const nav = document.querySelector('nav[aria-label=Agents]'); const t = nav?.textContent || '';
               return !!nav && t.includes('agv1-delctl-${RUN_ID:-local}') && !t.includes('agv1-delrestart-${RUN_ID:-local}') && !nav.querySelector('[role=alert]'); })()
         intent: "Wait until the sidebar lists the control Lead and no row for the deleted Lead"
+
+  # C2, emulator only: real OpenCode has no supported way to fail a session
+  # start on demand. Every step exits 0 at once unless LOOM_HARNESS_EMU=1 and
+  # the runner set AFT_EMU_SCENARIOS.
+  - name: on the emulator, a Lead whose start fails is retried and starts once OpenCode answers again
+    intent: While the emulator refuses to create sessions, a Lead's Create writes its row but its start fails, and the chat shows the retrying start Attention; once the emulator creates sessions again the reconcile queue finishes it without a second POST, it becomes idle with the Attention gone, and its first message reaches the model once
+    steps:
+      - run: |
+          set -e
+          [ "${LOOM_HARNESS_EMU:-}" = 1 ] && [ -n "${AFT_EMU_SCENARIOS:-}" ] || exit 0
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" \
+            -d '{"steps":[{"text":"AGV1-RETRY-FIRST-REPLY"}]}' >/dev/null
+          touch "$AFT_EMU_SCENARIOS.fail-session-create"
+          name="agv1-retry-${RUN_ID:-local}"
+          printf '{"preset":"lead","name":"%s","repo":"%s","base_ref":"main","overrides":{"harness":"opencode"},"first_message":"first message after the retry"}' \
+            "$name" "$AFT_WORK_DIR/agv1-delretry-repo" > "$AFT_WORK_DIR/agv1-retry-body.json"
+          code="$(curl -s --max-time 60 -o "$AFT_WORK_DIR/agv1-retry-create.json" -w '%{http_code}' -X POST \
+            -H "Content-Type: application/json" -H "Idempotency-Key: agv1-retry-${RUN_ID:-local}" \
+            --data @"$AFT_WORK_DIR/agv1-retry-body.json" "$AFT_API_URL/api/workspaces/E2E-AGV1-DELRETRY/v1/agents")"
+          echo "Create answered $code: $(cat "$AFT_WORK_DIR/agv1-retry-create.json")"
+          [ "$code" != 201 ] || { echo "Create finished while the emulator refused sessions" >&2; exit 1; }
+          curl -sf "$AFT_API_URL/api/workspaces/E2E-AGV1-DELRETRY/v1/agents?name=$name" > "$AFT_WORK_DIR/agv1-retry-list.json"
+          python3 - "$AFT_WORK_DIR/agv1-retry-list.json" "$name" "$AFT_WORK_DIR/agv1RetryId" <<'PY'
+          import json, sys
+          agents = [a for a in json.load(open(sys.argv[1]))["agents"] if a["name"] == sys.argv[2]]
+          assert len(agents) == 1, f"{len(agents)} agents named {sys.argv[2]}; want the one row the Create wrote"
+          a = agents[0]
+          assert a.get("attention_reason") == "create_retrying" and a.get("state") != "idle", \
+              f"state {a.get('state')}, attention {a.get('attention_reason')}; want create_retrying before idle"
+          open(sys.argv[3], "w").write(a["agent_id"])
+          PY
+        intent: "Make the emulator refuse sessions, create the Lead with a first message once, and check that the Create fails, one row exists and it shows create_retrying"
+      - run: |
+          set -e
+          [ "${LOOM_HARNESS_EMU:-}" = 1 ] && [ -n "${AFT_EMU_SCENARIOS:-}" ] || exit 0
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-DELRETRY/chat/$(cat "$AFT_WORK_DIR/agv1RetryId")" >/dev/null
+          agent-browser --session "$AFT_SESSION" wait --fn "(() => { const b = document.querySelector('section[aria-label=\"Agent chat\"] [data-testid=agent-attention-banner]'); if (!b) return false; const r = b.getBoundingClientRect(); const t = b.textContent || ''; return r.width > 0 && r.height > 0 && t.includes('Needs attention: retrying start…') && !t.includes('create_retrying'); })()" >/dev/null
+          curl -sf "$AFT_API_URL/api/workspaces/E2E-AGV1-DELRETRY/v1/agents/$(cat "$AFT_WORK_DIR/agv1RetryId")" |
+            python3 -c 'import json,sys; r=json.load(sys.stdin).get("attention_reason"); sys.exit(0 if r=="create_retrying" else "attention %s while retrying" % r)'
+        budget: 60000
+        intent: "Open the Lead's chat and wait until its Attention banner shows the retrying start label, not the raw reason, while the emulator still refuses sessions"
+      - run: |
+          set -e
+          [ "${LOOM_HARNESS_EMU:-}" = 1 ] && [ -n "${AFT_EMU_SCENARIOS:-}" ] || exit 0
+          rm -f "$AFT_EMU_SCENARIOS.fail-session-create"
+          id="$(cat "$AFT_WORK_DIR/agv1RetryId")"
+          for _ in $(seq 1 90); do
+            curl -sf "$AFT_API_URL/api/workspaces/E2E-AGV1-DELRETRY/v1/agents/$id" |
+              python3 -c 'import json,sys; a=json.load(sys.stdin); sys.exit(0 if a.get("state") in ("idle","active") and not a.get("attention_reason") else 1)' && exit 0
+            sleep 1
+          done
+          curl -s "$AFT_API_URL/api/workspaces/E2E-AGV1-DELRETRY/v1/agents/$id" >&2
+          echo "the reconcile queue did not finish the Create" >&2
+          exit 1
+        budget: 120000
+        intent: "Let the emulator create sessions again and wait until the reconcile queue finishes the Create with no Attention"
+      - run: |
+          set -e
+          [ "${LOOM_HARNESS_EMU:-}" = 1 ] && [ -n "${AFT_EMU_SCENARIOS:-}" ] || exit 0
+          agent-browser --session "$AFT_SESSION" wait --fn "(() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || ''; const h = document.querySelector('section[aria-label=\"Agent chat\"] header')?.textContent || ''; return t.includes('first message after the retry') && t.includes('AGV1-RETRY-FIRST-REPLY') && h.includes('idle') && !document.querySelector('section[aria-label=\"Agent chat\"] [data-testid=agent-attention-banner]'); })()" >/dev/null
+          agent-browser --session "$AFT_SESSION" reload >/dev/null
+          agent-browser --session "$AFT_SESSION" wait --fn "(() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || ''; return t.split('first message after the retry').length === 2 && t.split('AGV1-RETRY-FIRST-REPLY').length === 2 && !document.querySelector('section[aria-label=\"Agent chat\"] [data-testid=agent-attention-banner]'); })()" >/dev/null
+        budget: 120000
+        intent: "Wait until the chat shows the first message and its reply with the Lead idle and no Attention banner, then reload and check each shows once"
+      - run: |
+          set -e
+          [ "${LOOM_HARNESS_EMU:-}" = 1 ] && [ -n "${AFT_EMU_SCENARIOS:-}" ] || exit 0
+          id="$(cat "$AFT_WORK_DIR/agv1RetryId")"
+          curl -sf "$AFT_API_URL/api/workspaces/E2E-AGV1-DELRETRY/v1/agents?name=agv1-retry-${RUN_ID:-local}" > "$AFT_WORK_DIR/agv1-retry-list-after.json"
+          curl -sf "$AFT_FAKE_MODEL_URL/__requests" > "$AFT_WORK_DIR/agv1-retry-requests.json"
+          python3 - "$AFT_WORK_DIR/agv1-retry-list-after.json" "$AFT_WORK_DIR/agv1-retry-requests.json" "$id" <<'PY'
+          import json, sys
+          agents = [a for a in json.load(open(sys.argv[1]))["agents"] if a["name"].startswith("agv1-retry-")]
+          assert [a["agent_id"] for a in agents] == [sys.argv[3]], f"want one agent for the one Create, got {[a['agent_id'] for a in agents]}"
+          reqs = json.load(open(sys.argv[2]))["requests"]
+          def users(r):
+              return [json.dumps(m.get("content")) for m in r.get("messages", []) if m.get("role") == "user"]
+          sent = [r for r in reqs if users(r) and "first message after the retry" in users(r)[-1]]
+          assert len(sent) == 1, f"the first message started {len(sent)} model requests; want 1"
+          assert sum("first message after the retry" in u for u in users(sent[0])) == 1, "the first message was delivered twice"
+          PY
+        intent: "Check that the one Create made one agent and its first message reached the model once"
