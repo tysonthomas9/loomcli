@@ -288,6 +288,9 @@ func (s *Service) endTurn(ctx context.Context, a loomstore.Agent, e loomharness.
 	if err := s.endTurnAsks(ctx, a, e.TurnID); err != nil {
 		return a, false, err
 	}
+	if err := s.limitTurnEnded(ctx, a, e); err != nil {
+		return a, false, err
+	}
 	a, err = s.setState(ctx, a, d.To)
 	return a, err == nil, err
 }
@@ -411,6 +414,7 @@ func (s *Service) follow(ctx context.Context, sub *BusSubscription, l *loop) {
 			l.took()
 			s.resync(ctx, false)
 			s.reconcileDue(ctx)
+			s.sweepLimitResumes(ctx)
 		case <-s.queueWake:
 			l.took()
 			s.reconcileDue(ctx)

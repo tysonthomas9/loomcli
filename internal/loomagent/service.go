@@ -157,6 +157,8 @@ type Service struct {
 	// backoff timer: time's own, or a test's.
 	tick  ticker
 	after func(time.Duration) <-chan time.Time
+	// now is the usage-limit resume clock (OR7): time's own, or a test's.
+	now func() time.Time
 	// queue is the reconcile queue by agent ID, under mu; queueWake tells
 	// the dispatcher it changed.
 	queue     map[string]*queued
@@ -170,7 +172,7 @@ func New(cfg ServiceConfig) *Service {
 		interrupt: cfg.Interrupt, purge: cfg.Purge, harnesses: cfg.Harnesses, launch: cfg.Launch,
 		retire: cfg.Retire, workspaceID: cfg.WorkspaceID, presets: cfg.Presets, backend: cfg.DefaultBackend, bridge: cfg.Bridge,
 		inputKey: cfg.InputKey, catalogWait: 15 * time.Second, catalogPoll: 250 * time.Millisecond,
-		catalogWarmUp: cfg.CatalogWarmUp, listed: map[string]time.Time{}, tick: realTicker, after: time.After,
+		catalogWarmUp: cfg.CatalogWarmUp, listed: map[string]time.Time{}, tick: realTicker, after: time.After, now: time.Now,
 		queue: map[string]*queued{}, queueWake: make(chan struct{}, 1),
 		locks: map[string]*sync.Mutex{}, asks: map[string]map[string]Ask{}, calls: map[string]map[string]string{}, resumed: map[string]map[loomharness.NativeRef]bool{}}
 	if cfg.RecoverFirst {

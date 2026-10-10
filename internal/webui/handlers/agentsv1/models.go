@@ -104,6 +104,25 @@ func putCustomModels(w http.ResponseWriter, r *http.Request, s *loomagent.Servic
 	return http.StatusOK, CustomModels{Harness: harness, Models: ids}, err
 }
 
+// LimitResume is GET and PUT /settings/limit-resume: whether this workspace
+// auto-resumes agents after a usage limit (OR7). A PUT sets it.
+type LimitResume struct {
+	Enabled bool `json:"enabled"`
+}
+
+func getLimitResume(_ http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
+	on, err := s.LimitResume(r.Context())
+	return http.StatusOK, LimitResume{Enabled: on}, err
+}
+
+func putLimitResume(w http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
+	var body LimitResume
+	if _, err := envelope(w, r, &body); err != nil {
+		return 0, nil, err
+	}
+	return http.StatusOK, body, s.SetLimitResume(r.Context(), body.Enabled)
+}
+
 func modelOut(m loomharness.Model) Model {
 	out := Model{ID: m.ID, Name: m.Name, ContextLimit: m.ContextLimit, Input: m.Input, IsDefault: m.Default,
 		OptionDescriptors: []OptionDescriptor{}, Source: "harness"}

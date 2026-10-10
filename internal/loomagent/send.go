@@ -86,7 +86,15 @@ func (s *Service) Send(ctx context.Context, req SendRequest) (SendResult, error)
 		}
 	}
 	defer s.lockReady(ctx, req.AgentID)()
-	if a, err = s.live(ctx, req.AgentID); err != nil {
+	return s.sendLocked(ctx, req)
+}
+
+// sendLocked is Send's body under req.AgentID's lock, which the caller
+// holds; req is checked and its Actor set. The usage-limit sweep (OR7)
+// sends through it, as it holds the lock while it re-checks eligibility.
+func (s *Service) sendLocked(ctx context.Context, req SendRequest) (SendResult, error) {
+	a, err := s.live(ctx, req.AgentID)
+	if err != nil {
 		return SendResult{}, err
 	}
 	if err := sendable(a); err != nil {
@@ -172,7 +180,7 @@ func decideSend(in sendInput) (sendDecision, error) {
 		d.Events[i].Time = in.Now
 	}
 	d.Slot = loomstore.SlotSend{AgentID: a.AgentID, Sender: sender, RequestID: req.RequestID, Body: req.Text,
-		Source: req.Source, Reopen: reopen, First: in.Interrupted != nil && *in.Interrupted}
+		Source: req.Source, Reopen: reopen, First: in.Interrupted != nil && *in.Interrupted, LimitResume: sender == limitResumeSender}
 	return d, nil
 }
 

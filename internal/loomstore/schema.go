@@ -258,7 +258,22 @@ CREATE TABLE IF NOT EXISTS pr_watches (
   PRIMARY KEY (agent_id, owner, repo, number)
 );
 CREATE INDEX IF NOT EXISTS pr_watches_workspace ON pr_watches(workspace_id);
-`, historyRepair}
+`, historyRepair, `
+-- OR7: usage-limit auto-resume. A workspace's opt-in (off by default), and
+-- each agent's one resume owed: its latest turn ended on a usage limit, the
+-- attempt-th in a row, so a resume is due at due_at. A Send consumes it in
+-- its own transaction, and any other turn end drops it.
+CREATE TABLE IF NOT EXISTS agent_workspace_settings (
+  workspace_id TEXT PRIMARY KEY,
+  limit_resume INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS agent_limit_resumes (
+  agent_id TEXT PRIMARY KEY REFERENCES agents(agent_id),
+  turn_id  TEXT NOT NULL,
+  attempt  INTEGER NOT NULL,
+  due_at   TEXT NOT NULL
+);
+`}
 
 // historyRepair (OR11) is the one-time scan of histories saved before a state
 // change and its events were one write: it is run again with no effect. An

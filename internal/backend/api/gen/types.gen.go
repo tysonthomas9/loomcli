@@ -1917,6 +1917,11 @@ type AgentV1HarnessInfo struct {
 // AgentV1HarnessInfoAccountKind Absent until the first good probe
 type AgentV1HarnessInfoAccountKind string
 
+// AgentV1LimitResume Whether the workspace auto-resumes agents after a usage limit.
+type AgentV1LimitResume struct {
+	Enabled bool `json:"enabled"`
+}
+
 // AgentV1List defines model for AgentV1List.
 type AgentV1List struct {
 	Agents []AgentV1 `json:"agents"`
@@ -4372,3 +4377,6 @@ type SendAgentV1JSONRequestBody = AgentV1SendBody
 
 // SetHarnessCustomModelsV1JSONRequestBody defines body for SetHarnessCustomModelsV1 for application/json ContentType.
 type SetHarnessCustomModelsV1JSONRequestBody = AgentV1CustomModels
+
+// SetLimitResumeV1JSONRequestBody defines body for SetLimitResumeV1 for application/json ContentType.
+type SetLimitResumeV1JSONRequestBody = AgentV1LimitResume

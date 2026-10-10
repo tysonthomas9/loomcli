@@ -61,6 +61,12 @@ type SlotSend struct {
 	// Result builds the Send's result JSON, stored as its receipt. replaced
 	// reports that this Send replaced the sender's waiting text.
 	Result func(replaced bool) (string, error)
+	// LimitResume marks this Send a usage-limit resume (OR7). In the Send's
+	// transaction a resume marks the agent's resume owed sent, keeping its
+	// attempt count, so its receipt and the consumed eligibility commit
+	// together; any other Send drops it, ending the episode. A retry changes
+	// neither.
+	LimitResume bool
 }
 
 // ErrSlotBusy means the sender's slot holds a message this Send would lose:
@@ -128,6 +134,13 @@ func sendTx(ctx context.Context, tx *sql.Tx, in SlotSend) (r Receipt, saved []Ev
 		_, err = tx.ExecContext(ctx, `INSERT INTO agent_send_receipts (agent_id, request_id, sender, result_json, created_at,
 			body, native_key, notices) VALUES (?,?,?,?,?,?,?,'{}')`, r.AgentID, r.RequestID, r.Sender, r.ResultJSON, r.CreatedAt, in.Body, nativeKey)
 		if err != nil {
+			return err
+		}
+		q := `DELETE FROM agent_limit_resumes WHERE agent_id = ?`
+		if in.LimitResume {
+			q = `UPDATE agent_limit_resumes SET due_at = '' WHERE agent_id = ?`
+		}
+		if _, err = tx.ExecContext(ctx, q, in.AgentID); err != nil {
 			return err
 		}
 		saved, err = sendEvents(ctx, tx, in, rev)
