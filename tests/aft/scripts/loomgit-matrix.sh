@@ -516,9 +516,15 @@ lead-start)
   # from its agent page and waits for its controlled runtime.
   if [[ "$forge" == fake ]]; then say "fake tier: lead actions use the API stand-in"; exit 0; fi
   browser open "$AFT_BASE_URL/ws/$workspace/agents/lead" > /dev/null
-  browser wait '[data-testid="terminal-wrapper"] .wterm' > /dev/null
+  # Bounded polls (agent-browser's own wait has no timeout) that keep a screenshot
+  # and the terminal text when the lead does not come up.
+  mounted() { browser eval "!!document.querySelector('[data-testid=terminal-wrapper] .wterm')" 2> /dev/null | grep -q true; }
   started() { lead_terminal_text; grep -qE 'Launching controlled .*lead session' "$work/lead-terminal.txt"; }
-  wait_until 110 "real lead runtime started: $(tail -c 400 "$work/lead-terminal.txt" 2> /dev/null)" started
+  if ! (wait_until 20 "lead terminal mounted" mounted && wait_until 85 "real lead runtime started" started); then
+    browser screenshot "$work/lead-start-failed.png" > /dev/null 2>&1 || true
+    lead_terminal_text
+    fail "real lead did not start (screenshot $work/lead-start-failed.png); terminal: $(tail -c 600 "$work/lead-terminal.txt" 2> /dev/null)"
+  fi
   browser screenshot "$work/lead-started.png" > /dev/null
   say "real codex lead is running"
   ;;
