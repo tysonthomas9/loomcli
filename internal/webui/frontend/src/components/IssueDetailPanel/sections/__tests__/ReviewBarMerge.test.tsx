@@ -70,7 +70,7 @@ describe("ReviewBar Approve and merge (D29)", () => {
   it("an approved bottom PR's next step is Approve code & merge", async () => {
     bar(open);
     expect(screen.getByTestId("review-status")).toHaveTextContent(
-      "✅ Approved · Applied to lead · PR #3 open",
+      "✅ Approved · Applied to lead · PR #3 is open",
     );
     fireEvent.click(
       screen.getByRole("button", { name: "Approve code & merge" }),
@@ -94,7 +94,7 @@ describe("ReviewBar Approve and merge (D29)", () => {
       merge_reason: "merges after #1, #2",
     });
     expect(screen.getByTestId("review-status")).toHaveTextContent(
-      "PR #3 open · merges after #1, #2",
+      "PR #3 is open · merges after #1, #2",
     );
     fireEvent.click(screen.getByRole("button", { name: "Cancel auto-merge" }));
     await waitFor(() =>
@@ -127,7 +127,7 @@ describe("ReviewBar Approve and merge (D29)", () => {
     delete (rebuilt as Partial<ReviewRevision>).verdict;
     bar(rebuilt);
     expect(screen.getByTestId("merge-status")).toHaveTextContent(
-      "PR #3 open · not merged: the rebuild after the PRs below merged was not clean; approve again",
+      "PR #3 is open · not merged: the rebuild after the PRs below merged was not clean; approve again",
     );
     fireEvent.click(
       screen.getByRole("button", { name: "Approve code & merge" }),

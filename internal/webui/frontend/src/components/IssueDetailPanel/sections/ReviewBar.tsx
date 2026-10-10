@@ -37,6 +37,10 @@ export type NextAction =
 export interface StatusLine {
   tone: "ok" | "warn" | "bad" | "plain";
   text: string;
+  /** The task's PR and its state ("is open", "was merged", "was closed"). */
+  pr?: { number: number; url?: string | undefined; state: string } | undefined;
+  /** Shown after the PR, such as where its merge stands. */
+  after?: string | undefined;
   /** A second line that explains the state (feedback, reasons). */
   detail?: string | undefined;
   action?: NextAction | undefined;
@@ -175,28 +179,29 @@ export function statusLine(
   }
   if (revision.pr_number) {
     // A PR that merged or closed ends the review, decided or not.
-    const pr = `PR #${revision.pr_number}`;
     const state = prStateOf(revision);
     if (state === "merged" || revision.merge_status === "merged")
-      return { tone: "ok", text: `✅ Merged · ${pr}` };
+      return {
+        tone: "ok",
+        text: "✅ Merged",
+        pr: prOf(revision, "was merged"),
+      };
     if (state === "closed")
       return {
         tone: "warn",
-        text: `${isApproval(verdict) ? "Approved · " : ""}${pr} was closed`,
+        text: isApproval(verdict) ? "Approved" : "",
+        pr: prOf(revision, "was closed"),
       };
   }
   if (!isApproval(verdict)) return null;
   const feedback = revision.feedback_status ? feedbackText(revision) : "";
   if (revision.pr_number) {
-    const pr = `PR #${revision.pr_number}`;
     const merge = mergeState(revision, true);
-    const parts = ["✅ Approved"];
-    if (revision.applied) parts.push("Applied to lead");
-    parts.push(`${pr} open`);
-    if (merge.status) parts.push(merge.status);
     const line: StatusLine = {
       tone: "ok",
-      text: parts.join(" · "),
+      text: revision.applied ? "✅ Approved · Applied to lead" : "✅ Approved",
+      pr: prOf(revision, "is open"),
+      after: merge.status || undefined,
       detail: revision.feedback_merge_cancelled
         ? "Auto-merge cancelled because the code changed. Approve again to merge."
         : feedback || undefined,
@@ -264,6 +269,51 @@ export function statusLine(
   };
 }
 
+function prOf(revision: ReviewRevision, state: string): StatusLine["pr"] {
+  return { number: revision.pr_number ?? 0, url: revision.pr_url, state };
+}
+
+/** A status line as one string (the Details tab, tests). */
+export function lineText(line: StatusLine): string {
+  return [
+    line.text,
+    line.pr && `PR #${line.pr.number} ${line.pr.state}`,
+    line.after,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/** A status line's text, with its PR as a link. */
+function LineText({ line }: { line: StatusLine }): JSX.Element {
+  const parts: (string | JSX.Element)[] = [];
+  if (line.text) parts.push(line.text);
+  if (line.pr)
+    parts.push(
+      <span key="pr" data-testid="revision-pr">
+        {line.pr.url ? (
+          <a href={line.pr.url} target="_blank" rel="noreferrer">
+            PR #{line.pr.number}
+          </a>
+        ) : (
+          `PR #${line.pr.number}`
+        )}{" "}
+        {line.pr.state}
+      </span>,
+    );
+  if (line.after) parts.push(line.after);
+  return (
+    <>
+      {parts.map((part, i) => (
+        <span key={i}>
+          {i > 0 && " · "}
+          {part}
+        </span>
+      ))}
+    </>
+  );
+}
+
 /** The newest revision of each change, in list order. */
 export function newestRevisions(revisions: ReviewRevision[]): ReviewRevision[] {
   const newest = new Map<string, number>();
@@ -282,7 +332,9 @@ export function reviewSummary(
   if (lines.some(({ line }) => line === null)) return "Code awaiting review";
   const multi = current.length > 1;
   return lines
-    .map(({ r, line }) => (multi ? `${r.repo}: ${line!.text}` : line!.text))
+    .map(({ r, line }) =>
+      multi ? `${r.repo}: ${lineText(line!)}` : lineText(line!),
+    )
     .join("; ");
 }
 
@@ -523,20 +575,7 @@ export function ReviewBar({
           >
             <span>
               {multi && <strong>{r.repo}: </strong>}
-              {line.text}
-              {r.pr_url && (
-                <>
-                  {" "}
-                  <a
-                    href={r.pr_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    data-testid="revision-pr"
-                  >
-                    Open PR #{r.pr_number}
-                  </a>
-                </>
-              )}
+              <LineText line={line} />
             </span>
             {line.action && (
               <button
@@ -580,20 +619,31 @@ export function ReviewBar({
           data-testid="merge-status"
         >
           {multi && <strong>{r.repo}: </strong>}
-          {[`PR #${r.pr_number} open`, mergeState(r, false).status]
-            .filter(Boolean)
-            .join(" · ")}
+          <LineText
+            line={{
+              tone: "plain",
+              text: "",
+              pr: prOf(r, "is open"),
+              after: mergeState(r, false).status || undefined,
+            }}
+          />
           {r.feedback_merge_cancelled &&
             " · Auto-merge cancelled because the code changed. Approve again to merge."}
         </div>
       ))}
       {undecided.length > 0 && (
+        <div
+          className={styles.line}
+          data-tone="plain"
+          data-testid="review-awaiting"
+        >
+          {incomplete
+            ? "Capture incomplete: this attempt can't be approved."
+            : "Code awaiting review"}
+        </div>
+      )}
+      {undecided.length > 0 && (
         <div className={styles.actions}>
-          {incomplete && (
-            <span className={styles.note} role="status">
-              Capture incomplete: this attempt can&apos;t be approved.
-            </span>
-          )}
           {!merging && (
             <button
               type="button"

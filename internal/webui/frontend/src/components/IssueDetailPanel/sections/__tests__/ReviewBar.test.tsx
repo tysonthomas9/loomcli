@@ -109,6 +109,9 @@ describe("ReviewBar awaiting review", () => {
     expect(header).toHaveAttribute("title", `commit ${revision.head_sha}`);
     const bar = screen.getByTestId("revisions-section");
     expect(bar).not.toHaveTextContent(/Revision|a23a6acac6a1/);
+    expect(screen.getByTestId("review-awaiting")).toHaveTextContent(
+      "Code awaiting review",
+    );
     expect(primary()).toBeEnabled();
     expect(screen.getByRole("button", { name: "Reject" })).toBeEnabled();
     expect(
@@ -251,9 +254,12 @@ describe("ReviewBar status line after a decision", () => {
       },
     ]);
     expect(status()).toHaveTextContent(
-      "✅ Approved · Applied to lead · PR #4 open",
+      "✅ Approved · Applied to lead · PR #4 is open",
     );
-    expect(screen.getByTestId("revision-pr")).toHaveAttribute(
+    expect(screen.getByTestId("revision-pr")).toHaveTextContent(
+      "PR #4 is open",
+    );
+    expect(screen.getByRole("link", { name: "PR #4" })).toHaveAttribute(
       "href",
       "https://github.com/o/r/pull/4",
     );
@@ -438,7 +444,7 @@ describe("ReviewBar for a task that changes several repos", () => {
     const lines = screen.getAllByTestId("review-status");
     expect(lines[0]).toHaveTextContent("api: ⚠️ Approved · Couldn't apply");
     expect(lines[1]).toHaveTextContent(
-      "web: ✅ Approved · Applied to lead · PR #9 open",
+      "web: ✅ Approved · Applied to lead · PR #9 is open",
     );
   });
 });
@@ -452,7 +458,7 @@ describe("review summary for Details", () => {
       reviewSummary([
         { ...revision, verdict: "approve", applied: true, pr_number: 4 },
       ]),
-    ).toBe("✅ Approved · Applied to lead · PR #4 open");
+    ).toBe("✅ Approved · Applied to lead · PR #4 is open");
     expect(reviewSummary([])).toBe("");
     expect(statusLine(revision)).toBeNull();
   });
