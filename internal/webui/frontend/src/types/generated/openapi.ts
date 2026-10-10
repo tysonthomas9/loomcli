@@ -8157,6 +8157,15 @@ export interface operations {
           "application/json": Record<string, never>;
         };
       };
+      /** @description Loom refused the verdict and recorded nothing. `error` is the stable code (for example review_required or stale_subject) and `message` the reason (for example "lead approval policy is off"). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": Record<string, never>;
+        };
+      };
     };
   };
   getMergeApproval: {
