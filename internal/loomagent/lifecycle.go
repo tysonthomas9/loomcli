@@ -39,17 +39,7 @@ func (s *Service) Archive(ctx context.Context, req ArchiveRequest) error {
 		return s.finishArchive(ctx, a, deref(a.ArchiveReason))
 	}
 	if req.Reason == ArchiveCancelled {
-		if a, err = s.stop(ctx, a, &archiveCols{reason: sp(req.Reason)}); err != nil {
-			return err
-		}
-		if a.Mode == "single_task" {
-			to := a.StateOf()
-			to.Outcome = sp(ArchiveCancelled)
-			if a, err = s.setState(ctx, a, to); err != nil {
-				return err
-			}
-		}
-		return s.finishArchive(ctx, a, req.Reason)
+		return s.archiveCancelled(ctx, a)
 	}
 	switch {
 	case a.Mode == "single_task" && a.State != StateFinished:
@@ -63,6 +53,24 @@ func (s *Service) Archive(ctx context.Context, req ArchiveRequest) error {
 		return nil
 	}
 	return s.finishArchive(ctx, a, req.Reason)
+}
+
+// archiveCancelled stops a, saving the reason with the move to stopping,
+// gives a single task the cancelled outcome and archives it. Each step is
+// safe to repeat, so settle finishes one a crash left stopping.
+func (s *Service) archiveCancelled(ctx context.Context, a loomstore.Agent) error {
+	a, err := s.stop(ctx, a, &archiveCols{reason: sp(ArchiveCancelled)})
+	if err != nil {
+		return err
+	}
+	if a.Mode == "single_task" {
+		to := a.StateOf()
+		to.Outcome = sp(ArchiveCancelled)
+		if a, err = s.setState(ctx, a, to); err != nil {
+			return err
+		}
+	}
+	return s.finishArchive(ctx, a, ArchiveCancelled)
 }
 
 // finishArchive moves a through stopping to archived and starts the R29

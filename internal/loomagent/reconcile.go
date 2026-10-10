@@ -353,8 +353,9 @@ func (s *Service) resumeOnce(ctx context.Context, a loomstore.Agent) (loomstore.
 	return s.resume(ctx, a)
 }
 
-// settle runs after the backfill: it ends agentID's running turn if the
-// harness no longer runs it, else dispatches, which first puts saved
+// settle runs after the backfill: it finishes an Archive(cancelled) a crash
+// left stopping, ends agentID's running turn if the harness no longer runs
+// it, else dispatches, which first puts saved
 // task_completed records in its slots and settles a message left handed.
 // An error no retry can clear (an unwired harness, an unrecorded session,
 // a bad request) is permanent.
@@ -366,6 +367,9 @@ func (s *Service) settle(ctx context.Context, agentID string) error {
 	}
 	if a, err = s.finishSwitch(ctx, a); err != nil {
 		return err
+	}
+	if a.State == StateStopping && deref(a.ArchiveReason) == ArchiveCancelled { // a crash cut its Archive short
+		return s.archiveCancelled(ctx, a)
 	}
 	sess, _, err := s.current(ctx, a)
 	gone := err == nil && sess == nil || errors.Is(err, errUnrecorded) // no retry wires the harness or records the session
