@@ -51,7 +51,7 @@ func (s *Service) switchHarness(ctx context.Context, a loomstore.Agent, req Upda
 		Launch: launch, Preset: cfg.Open, Dir: deref(a.WorktreePath), Model: model, Rules: rules,
 		Metadata: map[string]string{"agent_id": a.AgentID}})
 	if err != nil {
-		return failed(s.leftover(ctx, a.AgentID, req.Harness, ref, harnessErr(err)))
+		return failed(s.leftover(ctx, ctx, a.AgentID, req.Harness, ref, harnessErr(err)))
 	}
 	dispatchCrash("switch_opened")
 	if err := s.owned(ctx, a.AgentID, req.Harness, ref); err != nil {

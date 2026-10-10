@@ -914,11 +914,10 @@ func TestReconcileCreateHungOpen(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background()) // ends a Create still hung at the test's end
 			t.Cleanup(cancel)
 			fh := e.h.Harness.(*fake.Harness)
+			e.h.hang.Store(true)
 			if tc.leave {
 				fh.FailOpen(errors.New("create timed out; remove failed"), true)
 				e.h.stuck.Store(true)
-			} else {
-				e.h.hang.Store(true)
 			}
 			req := leadReq("r1")
 			req.Overrides.Harness, req.FirstMessage = harness, "hello"
@@ -926,11 +925,14 @@ func TestReconcileCreateHungOpen(t *testing.T) {
 			go func() { _, err := s.Create(ctx, req); done <- err }()
 			select {
 			case err := <-done:
-				if err == nil || !tc.leave && !strings.Contains(err.Error(), "did not open") {
+				if err == nil || !strings.Contains(err.Error(), "did not open") {
 					t.Fatalf("Create = %v; want the hung Open given up", err)
 				}
 			case <-time.After(drainGuard):
 				t.Fatal("Create still hung in the harness Open")
+			}
+			if e.h.fresh.Load() {
+				t.Fatal("the leftover purge got time of its own after the Open's ran out")
 			}
 			retrying(t, onlyRow(t, e), "hung open")
 			if r := deref(onlyRow(t, e).AttentionReason); r != AttentionCreateRetrying {
