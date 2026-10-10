@@ -130,7 +130,7 @@ type Supervisor struct {
 	// head. The daemon wires driver.ResolveDependentBase.
 	DependentBase func(ctx context.Context, workspace, repo, repoPath, task string) (sha string, found bool, err error)
 	// TaskStarted records where a cold-started attempt began, for the Changes
-	// tab's "Started from" line. The daemon wires taskcopy.RecordTaskStart.
+	// tab's "Started from" line. The daemon wires driver.RecordTaskStart.
 	TaskStarted  func(ctx context.Context, workspace, task, lead string) error
 	NodeID       string
 	NodeTTL      time.Duration

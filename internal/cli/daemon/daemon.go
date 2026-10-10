@@ -15,7 +15,6 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/daemon/supervisor"
 	"github.com/tysonthomas9/loomcli/internal/driver"
 	"github.com/tysonthomas9/loomcli/internal/events"
-	"github.com/tysonthomas9/loomcli/internal/loomgit/taskcopy"
 	"github.com/tysonthomas9/loomcli/internal/notify"
 	"github.com/tysonthomas9/loomcli/internal/store"
 )
@@ -282,7 +281,7 @@ func wireSupervisorCallbacks(sup *supervisor.Supervisor, issueBackend backend.Is
 		}
 	}
 	sup.DependentBase = driver.ResolveDependentBase
-	sup.TaskStarted = taskcopy.RecordTaskStart
+	sup.TaskStarted = driver.RecordTaskStart
 	sup.FindRepoConfig = func(repoName string) *cfgpkg.RepoConfig {
 		if repoName == "" {
 			return nil
