@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
@@ -112,6 +113,28 @@ func printVerdictPlan(out io.Writer, verb string, actor commandActor, lead strin
 	return nil
 }
 
+// pinReviewedHeads refuses, as stale, a target whose head is not one the
+// reviewer pinned with --head (S4): a new attempt arrived after they looked.
+// A pinned head may be abbreviated to at least 7 characters.
+func pinReviewedHeads(targets []verdictTarget, heads []string) error {
+	if len(heads) == 0 {
+		return nil
+	}
+	for _, target := range targets {
+		pinned := false
+		for _, head := range heads {
+			if head == target.HeadSHA || (len(head) >= 7 && strings.HasPrefix(target.HeadSHA, head)) {
+				pinned = true
+			}
+		}
+		if !pinned {
+			return staleVerdictError(target, loomgit.NewError(loomgit.StaleSubject,
+				"its head "+shortSHA(target.HeadSHA)+" is not the reviewed head "+strings.Join(heads, ", "), nil))
+		}
+	}
+	return nil
+}
+
 // refuseOwnTask refuses a task agent deciding its own task (D42). Review also
 // refuses an agent approving a revision it authored.
 func refuseOwnTask(verb string, actor commandActor, task string) error {
@@ -124,7 +147,7 @@ func refuseOwnTask(verb string, actor commandActor, task string) error {
 // staleVerdictError explains a refusal because the code moved after it was shown.
 func staleVerdictError(target verdictTarget, err error) error {
 	if errors.Is(err, loomgit.NewError(loomgit.StaleSubject, "", nil)) || errors.Is(err, loomgit.NewError(loomgit.RevisionSuperseded, "", nil)) {
-		return fmt.Errorf("stale: %s revision %d at %s is no longer the code under review (%w); nothing was recorded for it, run the command again to see the new attempt",
+		return fmt.Errorf("stale: %s revision %d at %s is not the code that was reviewed (%w); nothing was recorded for it, run the command with --dry-run to see the new attempt",
 			target.Change, target.Number, shortSHA(target.HeadSHA), err)
 	}
 	return fmt.Errorf("%s revision %d: %w", target.Change, target.Number, err)

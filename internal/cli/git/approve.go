@@ -18,6 +18,8 @@ var approveLead string
 var approveOnly bool
 var approveChange string
 var approveRevision int
+var approveDryRun bool
+var approveHeads []string
 var approveResolver = cli.NewResolver
 var approveLocal = func(ctx context.Context, workspace, lead, change string, revision int, headSHA string, actor review.Actor) (apply.FollowResult, error) {
 	return apply.ApproveLocalPinned(ctx, workspace, lead, change, revision, headSHA, actor, !approveOnly)
@@ -31,6 +33,8 @@ var approveCmd = &cobra.Command{
 Loom prints exactly what it approves and pins that code; if a new attempt
 arrives in between, the approval is refused as stale and nothing is recorded.
 <change> <revision> (or --change and --revision) approves one revision.
+--dry-run only prints what would be approved; --head <sha> approves only if
+the code is still at the head you reviewed.
 
 The approval records whoever runs it (D42): a normal shell is a human, the
 lead's session is the lead (refused while Lead may approve is off) and a task
@@ -49,6 +53,8 @@ func init() {
 	approveCmd.Flags().BoolVar(&approveOnly, "only", false, "Approve only: apply without opening a PR")
 	approveCmd.Flags().StringVar(&approveChange, "change", "", "Approve this change (advanced; needs --revision)")
 	approveCmd.Flags().IntVar(&approveRevision, "revision", 0, "Revision of --change to approve (advanced)")
+	approveCmd.Flags().BoolVar(&approveDryRun, "dry-run", false, "Print what would be approved and record nothing")
+	approveCmd.Flags().StringSliceVar(&approveHeads, "head", nil, "Approve only if the code is at this reviewed head (repeat for each repo)")
 	cli.RegisterCommand(approveCmd)
 }
 
@@ -81,7 +87,14 @@ func runApprove(cmd *cobra.Command, args []string) error {
 	if err := refuseOwnTask("approve", actor, task); err != nil {
 		return err
 	}
-	if err := printVerdictPlan(cmd.OutOrStdout(), "Approving", actor, lead, targets); err != nil {
+	if err := pinReviewedHeads(targets, approveHeads); err != nil {
+		return err
+	}
+	verb := "Approving"
+	if approveDryRun {
+		verb = "Would approve"
+	}
+	if err := printVerdictPlan(cmd.OutOrStdout(), verb, actor, lead, targets); err != nil || approveDryRun {
 		return err
 	}
 	for _, target := range targets {

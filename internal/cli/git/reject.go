@@ -15,6 +15,8 @@ var rejectLead string
 var rejectReason string
 var rejectChange string
 var rejectRevision int
+var rejectDryRun bool
+var rejectHeads []string
 var rejectResolver = cli.NewResolver
 var rejectLocal = func(ctx context.Context, workspace, lead, change string, revision int, headSHA, reason string, actor review.Actor) error {
 	store, err := review.OpenLocal()
@@ -33,6 +35,8 @@ var rejectCmd = &cobra.Command{
 Loom prints exactly what it rejects and pins that code; if a new attempt
 arrives in between, the rejection is refused as stale and nothing is recorded.
 <change> <revision> (or --change and --revision) rejects one revision.
+--dry-run only prints what would be rejected; --head <sha> rejects only if
+the code is still at the head you reviewed.
 
 The rejection records whoever runs it (D42): a normal shell is a human, the
 lead's session is the lead and a task agent is an agent.`,
@@ -47,6 +51,8 @@ func init() {
 	rejectCmd.Flags().StringVar(&rejectReason, "reason", "", "What to fix")
 	rejectCmd.Flags().StringVar(&rejectChange, "change", "", "Reject this change (advanced; needs --revision)")
 	rejectCmd.Flags().IntVar(&rejectRevision, "revision", 0, "Revision of --change to reject (advanced)")
+	rejectCmd.Flags().BoolVar(&rejectDryRun, "dry-run", false, "Print what would be rejected and record nothing")
+	rejectCmd.Flags().StringSliceVar(&rejectHeads, "head", nil, "Reject only if the code is at this reviewed head (repeat for each repo)")
 	cli.RegisterCommand(rejectCmd)
 }
 
@@ -67,7 +73,14 @@ func runReject(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := printVerdictPlan(cmd.OutOrStdout(), "Rejecting", actor, lead, targets); err != nil {
+	if err := pinReviewedHeads(targets, rejectHeads); err != nil {
+		return err
+	}
+	verb := "Rejecting"
+	if rejectDryRun {
+		verb = "Would reject"
+	}
+	if err := printVerdictPlan(cmd.OutOrStdout(), verb, actor, lead, targets); err != nil || rejectDryRun {
 		return err
 	}
 	for _, target := range targets {

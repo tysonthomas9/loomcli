@@ -31,11 +31,14 @@ func stubVerdictStore(t *testing.T, env map[string]string) {
 	t.Helper()
 	oldEnv, oldTask, oldRevision, oldOwner := verdictEnv, verdictTaskRevisions, verdictRevision, verdictTaskForChange
 	oldChange, oldNumber, oldRejectChange, oldRejectNumber := approveChange, approveRevision, rejectChange, rejectRevision
+	oldDry, oldHeads, oldRejectDry, oldRejectHeads := approveDryRun, approveHeads, rejectDryRun, rejectHeads
 	t.Cleanup(func() {
 		verdictEnv, verdictTaskRevisions, verdictRevision, verdictTaskForChange = oldEnv, oldTask, oldRevision, oldOwner
 		approveChange, approveRevision, rejectChange, rejectRevision = oldChange, oldNumber, oldRejectChange, oldRejectNumber
+		approveDryRun, approveHeads, rejectDryRun, rejectHeads = oldDry, oldHeads, oldRejectDry, oldRejectHeads
 	})
 	approveChange, approveRevision, rejectChange, rejectRevision = "", 0, "", 0
+	approveDryRun, approveHeads, rejectDryRun, rejectHeads = false, nil, false, nil
 	setVerdictEnv(env)
 	verdictTaskRevisions = func(_ context.Context, workspace, task string) ([]review.TaskRevision, error) {
 		if workspace != "workspace-1" || task != "task-1" {
@@ -267,5 +270,35 @@ func TestConfirmMergeRefusesTaskAgent(t *testing.T) {
 	setVerdictEnv(map[string]string{"USER": "tyson", "LOOM_TASK_RUN_ID": "run-1"})
 	if _, err := humanMergeActor(); err == nil || !strings.Contains(err.Error(), "LOOM_TASK_RUN_ID") {
 		t.Fatalf("task agent confirmed a merge: %v", err)
+	}
+}
+
+func TestApproveDryRunRecordsNothing(t *testing.T) {
+	stubApprovePublish(t, func(context.Context, string, string) ([]publish.ApprovalOutcome, error) { return nil, nil })
+	calls := captureApprovals(t)
+	approveDryRun = true
+	var out bytes.Buffer
+	approveCmd.SetOut(&out)
+	t.Cleanup(func() { approveCmd.SetOut(nil) })
+	if err := runApprove(approveCmd, []string{"task-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(*calls) != 0 || !strings.Contains(out.String(), "Would approve as human tyson") || !strings.Contains(out.String(), "change-1 revision 2 in api at head-2") {
+		t.Fatalf("dry run approved %v, printed %q", *calls, out.String())
+	}
+}
+
+// A new attempt arrived after the reviewer looked: --head pins what they saw.
+func TestApproveHeadPinRefusesANewAttempt(t *testing.T) {
+	stubApprovePublish(t, func(context.Context, string, string) ([]publish.ApprovalOutcome, error) { return nil, nil })
+	calls := captureApprovals(t)
+	approveHeads = []string{"head-c2-1", "head-2"}
+	err := runApprove(approveCmd, []string{"task-1"})
+	if err == nil || !strings.HasPrefix(err.Error(), "stale: change-2 revision 3 at head-c2-3") || len(*calls) != 0 {
+		t.Fatalf("approval of an unseen attempt: err=%v calls=%v", err, *calls)
+	}
+	approveHeads = []string{"head-c2-3", "head-2"}
+	if err := runApprove(approveCmd, []string{"task-1"}); err != nil || len(*calls) != 2 {
+		t.Fatalf("approval of the reviewed heads: err=%v calls=%v", err, *calls)
 	}
 }
