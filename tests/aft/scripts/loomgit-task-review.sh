@@ -191,7 +191,7 @@ approve)
   # approve <ws> <slot>: Approve applies the code and closes the task without
   # the label; the dependent becomes ready.
   task="$(cat "$work-$3-task")"
-  verdict "$task" approve ',"approve_only":true' > "$work-approve.json"
+  verdict "$task" approve '' > "$work-approve.json"
   grep -q '"status":"applied"' "$work-approve.json" || { cat "$work-approve.json" >&2; exit 1; }
   wait_status "$task" closed False
   python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["data"]; r=d.get("close_reason"); assert r in (None, "", "Approved: code applied"), r' "$work-issue.json"

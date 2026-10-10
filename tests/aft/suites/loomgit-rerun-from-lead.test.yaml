@@ -23,7 +23,7 @@ tests:
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-rerun-from-lead.sh" attempt E2E-WS-RERUN
         intent: The daemon's coder commits its file and its attempt freezes revision 1
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-rerun-from-lead.sh" approve E2E-WS-RERUN 1
-        intent: Approve only applies revision 1 into the lead's working area
+        intent: Approve applies revision 1 into the lead's working area
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-rerun-from-lead.sh" unapply E2E-WS-RERUN
         intent: Unapply removes the layer; the file leaves the lead
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-rerun-from-lead.sh" rerun E2E-WS-RERUN
@@ -38,7 +38,7 @@ tests:
           "$AFT_BASE_URL/ws/E2E-WS-RERUN/issues/$(cat "$AFT_WORK_DIR/E2E-WS-RERUN-task")"
         intent: Open the rerun task
       - click: { role: tab, name: Changes, exact: true }
-      - wait: { text: "Awaiting review" }
+      - wait: { text: "awaiting review" }
         intent: Revision 2 waits for review
       - wait: { text: local-mode-agent-output.txt }
         intent: Its diff adds the whole file the lead does not have
@@ -58,7 +58,7 @@ tests:
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-rerun-from-lead.sh" attempt E2E-WS-RERUN-TRUNK
         intent: The daemon's coder commits its file and its attempt freezes revision 1
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-rerun-from-lead.sh" approve E2E-WS-RERUN-TRUNK 1
-        intent: Approve only applies revision 1 into the lead's working area
+        intent: Approve applies revision 1 into the lead's working area
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-rerun-from-lead.sh" unapply E2E-WS-RERUN-TRUNK
         intent: Unapply removes the layer; the file leaves the lead
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-rerun-from-lead.sh" rerun E2E-WS-RERUN-TRUNK

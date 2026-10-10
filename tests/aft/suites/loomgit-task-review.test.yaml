@@ -4,8 +4,8 @@
 # attempt still closes as "No changes". While it waits a dependent in its stack
 # starts on its frozen code (Tyson, 2026-10-09): approving the dependent first
 # waits for it, and rejecting it makes the dependent stale until a Rebuild. A
-# dependent outside its stack stays blocked until it closes. The task
-# page shows Review, and only the Revisions panel offers Approve/Reject. Real
+# dependent outside its stack stays blocked until it closes. The task page
+# shows Review, and only the review bar on Changes offers Approve/Reject. Real
 # TaskRuns record the revisions.
 suite: loomgit-task-review
 classification: { area: reviews, feature: task-review, surface: mixed, purpose: journey }
@@ -20,7 +20,7 @@ teardown: >-
 
 tests:
   - name: stacked, a task with code waits in review until Approve closes it
-    intent: The finished attempt leaves its task in review with its dependent outside the stack blocked; the task page offers Approve only in the Revisions panel; Approve closes the task and unblocks the dependent
+    intent: The finished attempt leaves its task in review with its dependent outside the stack blocked; the task page offers Approve in the review bar on Changes; Approve closes the task and unblocks the dependent
     steps:
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" attempt E2E-WS-TREV approve trev-approve.txt
         intent: A real TaskRun writes a file and records its revision
@@ -45,11 +45,11 @@ tests:
           fn: "!document.querySelector('[data-testid=review-action-bar]') && !document.querySelector('[data-testid=panel-approve-button]')"
         intent: The header offers no plan Approve/Reject for code awaiting review
       - click: { role: tab, name: Changes, exact: true }
-      - wait: { text: "Awaiting review" }
+      - wait: { text: "awaiting review" }
       - wait: { text: trev-approve.txt }
       - wait:
-          fn: "[...document.querySelectorAll('[data-testid=task-changes-tab] button')].some(b => b.textContent === 'Approve and create PR')"
-        intent: The Revisions panel owns Approve
+          fn: "[...document.querySelectorAll('[data-testid=task-changes-tab] button')].some(b => b.textContent === 'Approve code & create PR')"
+        intent: The review bar on Changes owns Approve
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" approve E2E-WS-TREV approve
         intent: Approve applies the code and closes the task without the label; the dependent becomes ready
       - run: >-

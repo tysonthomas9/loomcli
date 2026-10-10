@@ -150,12 +150,12 @@ attempt)
   wait_status "$task" review
   ;;
 approve)
-  # approve <ws> <number>: Approve only applies the revision into the lead's
+  # approve <ws> <number>: Approve applies the revision into the lead's
   # working area, with no conflict, and the lead then holds the agent's file.
   task="$(cat "$work-task")"
   read -r change head < <(revision "$task" "$3")
   curl -fsS -X POST "$api/changes/$change/revisions/$3/verdict" -H 'Content-Type: application/json' \
-    -d "{\"head_sha\":\"$head\",\"verdict\":\"approve\",\"approve_only\":true,\"reason\":\"aft\",\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}" \
+    -d "{\"head_sha\":\"$head\",\"verdict\":\"approve\",\"reason\":\"aft\",\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}" \
     > "$work-approve-$3.json" || { cat "$work-approve-$3.json" >&2; exit 1; }
   grep -q '"status":"applied"' "$work-approve-$3.json" || { cat "$work-approve-$3.json" >&2; exit 1; }
   git -C "$repo" cat-file -e "$(lead_head):$output_file"

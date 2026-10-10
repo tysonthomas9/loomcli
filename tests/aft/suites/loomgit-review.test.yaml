@@ -67,9 +67,11 @@ tests:
           agent-browser --session "$AFT_SESSION" open
           "$AFT_BASE_URL/ws/E2E-WS-REVIEW/issues/$(cat "$AFT_WORK_DIR/reviewTaskId")"
         intent: "Open the recorded task through the same browser session using its runtime ID"
-      - wait: { text: Revisions }
-      - expect: { visible: { testid: revisions-section } }
-      - click: { role: button, name: Approve, exact: true }
+      - click: { role: tab, name: Changes, exact: true }
+      - wait:
+          fn: "!!document.querySelector('[data-testid=approve-create-pr]:not([disabled])')"
+        intent: "P2.23: the one review bar sits on Changes, above the diff"
+      - click: { testid: approve-create-pr }
       - api:
           method: "GET"
           path: "/api/workspaces/E2E-WS-REVIEW/issues/${var:reviewTaskId}/revisions"
