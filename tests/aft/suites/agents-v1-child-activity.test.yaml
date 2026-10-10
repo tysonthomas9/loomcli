@@ -82,8 +82,8 @@ teardown: |
   curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-ACT" >/dev/null
 
 tests:
-  - name: I1 DF2 activity line - a working child's tray row shows each step in turn, a command, a file read and a thinking line, with the turn's time, and never falls back to Working… once a step shows
-    intent: An operator's OpenCode lead starts one child that keeps working. Its tray row reads "Working…" until its first step, then "▸ Ran command · npm test", then "▸ Read file · src/routes.ts", then "💭 Thinking · Checking the routes table", each with the turn's elapsed time. Once a step has shown, the row never reads "Working…" again, checked by a MutationObserver for the whole run. When the child finishes it leaves the tray.
+  - name: I1 DF2 activity line - a working child's tray row shows each step in turn, a command, a file read and a thinking line, with the turn's time, and never falls back to Working… within a turn
+    intent: An operator's OpenCode lead starts one child that keeps working. Its tray row reads "Working…" until its first step, then "▸ Ran command · npm test", then "▸ Read file · src/routes.ts", then "💭 Thinking · Checking the routes table", each with the turn's elapsed time. Within a turn the row never falls back to "Working…" once a step has shown; a new turn reads "Working…" only until its first step (DF2b restarts the turn's time and step). A MutationObserver checks this for the whole run. When the child finishes it leaves the tray.
     steps:
       - run: |
           set -e
@@ -139,11 +139,18 @@ tests:
                 const seen = [line()];
                 const bad = [];
                 const look = () => { const r = row(); if (!r) return; const l = r.lastElementChild?.textContent || '';
-                  if (l === 'Working…' || l === '') bad.push(l || '(empty)');
+                  if (l === '') bad.push('(empty)');
                   if (seen[seen.length - 1] !== l) seen.push(l); };
                 const obs = new MutationObserver(look);
                 obs.observe(document.body, { subtree: true, childList: true, characterData: true });
-                window.__df2 = { seen, bad, obs };
+                // Working… may show only between two different steps: a new
+                // turn has no step yet (DF2b), but a turn never falls back.
+                const isStep = (l) => l.startsWith('▸ ') || l.startsWith('💭 ');
+                const kind = (l) => l.split(' · ').slice(0, -1).join(' · ');
+                const fallbacks = () => seen.map((l, i) => [l, i]).filter(([l]) => l === 'Working…').filter(([, i]) => {
+                  const before = seen.slice(0, i).filter(isStep).pop(), after = seen.slice(i + 1).find(isStep);
+                  return !before || !after || kind(before) === kind(after); }).length;
+                window.__df2 = { seen, bad, obs, fallbacks };
               }
               return ok; })()
         budget: 30000
@@ -177,9 +184,9 @@ tests:
           fn: >-
             (() => { const w = window.__df2; if (!w) return false;
               const kinds = ['▸ Ran command', '▸ Read file', '💭 Thinking'].filter((k) => w.seen.some((l) => l.startsWith(k)));
-              return kinds.length === 3 && w.bad.length === 0 &&
+              return kinds.length === 3 && w.bad.length === 0 && w.fallbacks() === 0 &&
                 document.querySelector('[data-testid=agent-tray] [data-tray-row] [data-status=running]')?.lastElementChild?.textContent !== 'Working…'; })()
-        intent: "Check the row showed all three steps, two tool kinds and a thinking line, and never read Working… or went blank after its first step"
+        intent: "Check the row showed all three steps, two tool kinds and a thinking line, never went blank, and read Working… only between two different steps, never as a fallback within a turn"
       - run: |
           set -e
           "$AFT_WORK_DIR/act-send" "$(cat "$AFT_WORK_DIR/actDf2Kid")" "agv1-act-df2-stop-${RUN_ID:-local}" ""
@@ -188,9 +195,13 @@ tests:
           fn: >-
             (() => { const r = document.querySelector('[data-testid=completion-record]');
               return !!r && r.textContent.includes('agv1-act-kid-${RUN_ID:-local}') && r.dataset.delivery === 'delivered' &&
-                !document.querySelector('[data-testid=agent-tray]') && window.__df2?.bad.length === 0; })()
+                !document.querySelector('[data-testid=agent-tray]') && window.__df2?.bad.length === 0 && window.__df2.fallbacks() === 0; })()
         budget: 90000
-        intent: "Wait until the finished child's result is delivered to the Lead and the child has left the tray, still with no Working… after its first step"
+        intent: "Wait until the finished child's result is delivered to the Lead and the child has left the tray, still with no fallback to Working… within a turn"
+      - run: |
+          set -e
+          agent-browser --session "$AFT_SESSION" eval 'JSON.stringify(window.__df2.seen.map((l) => l.replace(/ · \d+:\d\d$/, "")).filter((l, i, a) => l !== a[i - 1]))'
+        intent: "Log the lines the row showed, in order, without the clock"
 
   - name: I6 UI5 UI6 streamed reply - a long reply streams in without shrinking or shifting the layout, with a caret only while it streams, no motion under reduced motion, and the agent message shows the same hover pill as the user message
     intent: An operator asks an OpenCode lead a question and its long reply streams in word by word. While it streams, the text never gets shorter, a pulsing caret ends it, and the layout-shift score stays at or below 0.05; once it ends, the caret is gone. With prefers-reduced-motion, a second streamed reply runs no animation in the transcript. Hovering the agent's reply shows the same pill as the user's message, the time and a copy button; it is hidden at rest and shows on hover and on keyboard focus.
