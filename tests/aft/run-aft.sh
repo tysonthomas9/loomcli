@@ -848,8 +848,10 @@ elif [[ "$AFT_SUITE_GLOB" == loomgit-* ]]; then
 elif [[ -n "$AFT_REAL_GITHUB" ]]; then
     # An owned global config with an identity and no credential helper, and no
     # system config: nothing the server starts can borrow the operator's keychain.
+    # Without the system config git init falls back to master (Xcode's git sets
+    # main there), and the e2e workspace's trunk is main.
     export AFT_GIT_CONFIG_GLOBAL="$REPORT_DIR/operator.gitconfig"
-    printf '[user]\n\tname = AFT Operator\n\temail = aft-operator@example.test\n' > "$AFT_GIT_CONFIG_GLOBAL"
+    printf '[user]\n\tname = AFT Operator\n\temail = aft-operator@example.test\n[init]\n\tdefaultBranch = main\n' > "$AFT_GIT_CONFIG_GLOBAL"
     AFT_GITHUB_SANDBOX="$(bash "$SCRIPT_DIR/scripts/real-github-repo.sh" create)" || { echo "[aft] could not create the sandbox repo" >&2; exit 1; }
     export AFT_GITHUB_SANDBOX AFT_MATRIX_FORGE=github AFT_REAL_CODEX_BIN="$REAL_BIN_PATH"
     AFT_REPORT_DIR="$REPORT_DIR" bash "$SCRIPT_DIR/scripts/real-github-repo.sh" ledger "$AFT_GITHUB_SANDBOX" created "cases=$LIVE_CASE_COUNT cap=$AFT_MAX_REAL_CASES"
