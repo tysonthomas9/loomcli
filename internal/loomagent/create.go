@@ -580,7 +580,9 @@ func (s *Service) openSession(ctx context.Context, a loomstore.Agent, cfg Config
 // would otherwise leave the agent creating with no Attention and its lock
 // held. The failure is retried (create_retrying), and Open is idempotent by
 // key, so the retry gets the same session. It is above the harnesses' own
-// server start bound (a minute), so a cold start is not cut short.
+// server start bound (a minute), so a cold start is not cut short. OpenCode's
+// Open then spends up to its own 10 s removing a session it made, so there
+// the Attention can come about 100 s after the start.
 var openWait = 90 * time.Second
 
 // timedOut makes err, from a harness call that set up a session, a
