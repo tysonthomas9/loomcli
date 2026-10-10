@@ -17,7 +17,7 @@ import {
 
 import { useStore } from "zustand";
 
-import { useParams, useNavigate, Outlet } from "react-router-dom";
+import { useParams, useNavigate, useLocation, Outlet } from "react-router-dom";
 
 import { updateIssue, addComment, closeIssue } from "@/api";
 import {
@@ -160,6 +160,21 @@ function App() {
     agentName?: string;
   }>();
   const navigate = useNavigate();
+  const locationKey = useLocation().key;
+
+  // The phone's agents drawer (MOB2) closes on any navigation, a row's
+  // included, and when the window grows past phone width.
+  const [agentsOpen, setAgentsOpen] = useState(false);
+  useEffect(() => setAgentsOpen(false), [locationKey]);
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const phone = window.matchMedia("(width <= 768px)");
+    const onChange = () => {
+      if (!phone.matches) setAgentsOpen(false);
+    };
+    phone.addEventListener("change", onChange);
+    return () => phone.removeEventListener("change", onChange);
+  }, []);
 
   // Theme state
   const { theme, toggleTheme } = useTheme();
@@ -1490,6 +1505,8 @@ function App() {
     />
   );
 
+  const closeAgents = useCallback(() => setAgentsOpen(false), []);
+
   // Views that bring their own left tree suppress the workspace sidebar, so
   // the page owns its chrome instead of showing two trees side by side.
   const viewOwnsChrome =
@@ -1535,9 +1552,13 @@ function App() {
               activeWorkspaceId={workspaceId}
               onWorkspaceSwitch={handleWorkspaceSwitcherSelect}
               onAddWorkspace={() => setShowCreateWorkspace(true)}
+              onAgentsToggle={() => setAgentsOpen((o) => !o)}
+              agentsOpen={agentsOpen}
             />
           }
-          sidebar={viewOwnsChrome ? null : sidebarContent}
+          sidebar={viewOwnsChrome && !agentsOpen ? null : sidebarContent}
+          sidebarOpen={agentsOpen}
+          onSidebarClose={closeAgents}
         >
           <div
             className={

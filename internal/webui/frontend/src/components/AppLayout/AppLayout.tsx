@@ -3,6 +3,7 @@
  * Provides a consistent structure with fixed header and main content area.
  */
 
+import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 
 import { LiveRegion } from "@/components/LiveRegion/LiveRegion";
@@ -23,6 +24,13 @@ export interface AppLayoutProps {
   actions?: ReactNode;
   /** Optional element to render in the left sidebar */
   sidebar?: ReactNode;
+  /**
+   * On a phone the sidebar is hidden; when this is set it shows as a drawer
+   * instead (MOB2), opened by the control with aria-controls="agents-drawer".
+   */
+  sidebarOpen?: boolean;
+  /** Close the phone drawer: Escape or a tap outside it. */
+  onSidebarClose?: () => void;
   /**
    * Optional full-width notice rendered between the header and the content
    * (e.g. the claim-hold banner). Passed in rather than imported so this
@@ -48,11 +56,31 @@ export function AppLayout({
   navigation,
   actions,
   sidebar,
+  sidebarOpen = false,
+  onSidebarClose,
   banner,
   title = "Loom",
   onTitleClick,
   className,
 }: AppLayoutProps): JSX.Element {
+  // Closing gives focus back to the control that opened the drawer.
+  const close = (): void => {
+    onSidebarClose?.();
+    document
+      .querySelector<HTMLElement>('[aria-controls="agents-drawer"]')
+      ?.focus();
+  };
+  const closeRef = useRef(close);
+  closeRef.current = close;
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") closeRef.current();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [sidebarOpen]);
+
   const rootClassName = className
     ? `${styles.appLayout} ${className}`
     : styles.appLayout;
@@ -90,7 +118,25 @@ export function AppLayout({
       {banner}
       <div className={styles.contentWrapper}>
         {navRail}
-        {sidebar && <aside className={styles.sidebarSlot}>{sidebar}</aside>}
+        {sidebar && (
+          <aside
+            id="agents-drawer"
+            className={styles.sidebarSlot}
+            data-open={sidebarOpen || undefined}
+            aria-label={sidebarOpen ? "Agents" : undefined}
+          >
+            {sidebar}
+          </aside>
+        )}
+        {sidebar && sidebarOpen && (
+          <button
+            type="button"
+            className={styles.drawerScrim}
+            aria-label="Close agents"
+            tabIndex={-1}
+            onClick={close}
+          />
+        )}
         <main className={styles.main} role="main" id="main-content">
           {children}
         </main>

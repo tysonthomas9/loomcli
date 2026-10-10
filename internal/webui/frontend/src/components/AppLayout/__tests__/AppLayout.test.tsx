@@ -6,8 +6,8 @@
  * Unit tests for AppLayout component.
  */
 
-import { render, screen } from "@testing-library/react";
-import { describe, it, expect } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
 
 import { AppLayout } from "../AppLayout";
@@ -667,6 +667,52 @@ describe("AppLayout", () => {
       expect(
         screen.getByRole("button", { name: "Action" }),
       ).toBeInTheDocument();
+    });
+  });
+
+  describe("phone drawer (MOB2)", () => {
+    const opener = (
+      <button type="button" aria-controls="agents-drawer">
+        Agents
+      </button>
+    );
+
+    it("has no backdrop or name while closed", () => {
+      render(
+        <AppLayout navRail={opener} sidebar={<div>tree</div>}>
+          <p>content</p>
+        </AppLayout>,
+      );
+      expect(
+        screen.queryByRole("button", { name: "Close agents" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("complementary", { name: "Agents" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("closes on the backdrop and on Escape, and refocuses its opener", () => {
+      const onSidebarClose = vi.fn();
+      render(
+        <AppLayout
+          navRail={opener}
+          sidebar={<div>tree</div>}
+          sidebarOpen
+          onSidebarClose={onSidebarClose}
+        >
+          <p>content</p>
+        </AppLayout>,
+      );
+      expect(
+        screen.getByRole("complementary", { name: "Agents" }),
+      ).toHaveTextContent("tree");
+      fireEvent.click(screen.getByRole("button", { name: "Close agents" }));
+      expect(onSidebarClose).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole("button", { name: "Agents" })).toHaveFocus();
+      screen.getByRole("button", { name: "Close agents" }).focus();
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(onSidebarClose).toHaveBeenCalledTimes(2);
+      expect(screen.getByRole("button", { name: "Agents" })).toHaveFocus();
     });
   });
 });

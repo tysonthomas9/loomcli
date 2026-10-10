@@ -667,4 +667,38 @@ describe("NavRail", () => {
       ).not.toBeInTheDocument();
     });
   });
+
+  describe("agents drawer button (MOB2)", () => {
+    it("is absent without onAgentsToggle", () => {
+      render(<NavRail activeView="home" onChange={() => {}} />);
+      expect(
+        screen.queryByRole("button", { name: "Agents" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("toggles the drawer and reports whether it is open", () => {
+      const onAgentsToggle = vi.fn();
+      const { rerender } = render(
+        <NavRail
+          activeView="home"
+          onChange={() => {}}
+          onAgentsToggle={onAgentsToggle}
+        />,
+      );
+      const button = screen.getByRole("button", { name: "Agents" });
+      expect(button).toHaveAttribute("aria-expanded", "false");
+      expect(button).toHaveAttribute("aria-controls", "agents-drawer");
+      fireEvent.click(button);
+      expect(onAgentsToggle).toHaveBeenCalledTimes(1);
+      rerender(
+        <NavRail
+          activeView="home"
+          onChange={() => {}}
+          onAgentsToggle={onAgentsToggle}
+          agentsOpen
+        />,
+      );
+      expect(button).toHaveAttribute("aria-expanded", "true");
+    });
+  });
 });

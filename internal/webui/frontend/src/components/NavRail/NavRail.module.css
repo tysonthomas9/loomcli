@@ -37,6 +37,11 @@
     box-shadow var(--transition-fast);
 }
 
+/* The sidebar shows the agents above phone width (MOB2). */
+.agentsButton {
+  display: none;
+}
+
 .navButton:hover {
   background-color: var(--color-bg-hover);
   color: var(--color-text-primary);
@@ -310,7 +315,7 @@
     width: 100%;
     min-width: unset;
     height: var(--nav-bottom-height);
-    padding: 0 var(--space-2);
+    padding: 0 var(--space-1);
     position: fixed;
     bottom: 0;
     left: 0;
@@ -321,10 +326,18 @@
     justify-content: space-around;
   }
 
+  /* With the Agents button the row is full on phones: the buttons give up
+     some width (never height) so the switcher keeps one whole item and room
+     for its chevrons. */
   .navButton {
-    flex-shrink: 0;
+    flex: 0 1 auto;
     width: var(--touch-target-min);
+    min-width: 36px;
     height: var(--touch-target-min);
+  }
+
+  .agentsButton {
+    display: inline-flex;
   }
 
   .spacer,
@@ -343,7 +356,7 @@
     flex: 1 1 0;
     align-items: center;
     justify-content: center;
-    min-width: 0;
+    min-width: 62px;
     container-type: inline-size;
   }
 

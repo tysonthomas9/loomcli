@@ -68,7 +68,7 @@ const ok = (route: Route, data: unknown) =>
 // The app's API only: a glob like **/api/** also matches Vite's /src/api/ modules.
 const API = (path: string) => new RegExp(`^https?://[^/]+/api/${path}`);
 
-async function open(page: Page) {
+async function open(page: Page, agents = [agent]) {
   // Playwright matches the last route first: the catch-all goes first so no
   // request reaches a real server.
   await page.route(API(""), (r) => json(r, { error: "not found" }, 404));
@@ -96,14 +96,17 @@ async function open(page: Page) {
     } as unknown as typeof EventSource;
   });
   await page.route(API("workspaces/w1/v1/agents(\\?.*)?$"), (r) =>
-    json(r, { agents: [agent], next: "" }),
+    json(r, { agents, next: "" }),
   );
-  await page.route(API("workspaces/w1/v1/agents/a1/events"), (r) =>
-    json(r, { events: [], snapshot_seq: 0, next: 0, more: false }),
-  );
-  await page.route(API("workspaces/w1/v1/agents/a1(\\?.*)?$"), (r) =>
-    json(r, agent),
-  );
+  for (const a of agents) {
+    await page.route(API(`workspaces/w1/v1/agents/${a.agent_id}/events`), (r) =>
+      json(r, { events: [], snapshot_seq: 0, next: 0, more: false }),
+    );
+    await page.route(
+      API(`workspaces/w1/v1/agents/${a.agent_id}(\\?.*)?$`),
+      (r) => json(r, a),
+    );
+  }
   await page.goto("/ws/w1/chat/a1");
   await expect(page.getByRole("heading", { name: NAME })).toBeVisible();
   await expect(page.getByPlaceholder("Ask anything...")).toBeVisible();
@@ -397,3 +400,112 @@ for (const size of [
     if (size.width < 557) expect(max).toBeGreaterThan(0);
   });
 }
+
+// MOB2: on a phone the sidebar is hidden, so the bottom rail's Agents button
+// opens the same agent list as a drawer (MOB2_SHOTS=<dir> saves screenshots).
+const other = { ...agent, agent_id: "a2", name: "docs-writer" };
+for (const size of [
+  { width: 390, height: 844 },
+  { width: 557, height: 844 },
+]) {
+  test(`agents drawer at ${size.width}px: the rail's Agents button opens the agent list`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(size);
+    await open(page, [agent, other]);
+    const rail = page.locator('nav[aria-label="Primary"]');
+    const button = rail.getByRole("button", { name: "Agents" });
+    const row = page.getByRole("link", { name: /^docs-writer / });
+    await expect(button).toBeVisible();
+    await expect(button).toHaveAttribute("aria-expanded", "false");
+    await expect(row).toBeHidden();
+
+    await button.click();
+    await expect(button).toHaveAttribute("aria-expanded", "true");
+    await expect(row).toBeVisible();
+    // The open chat's row is marked as the current one.
+    await expect(
+      page.getByRole("link", { name: new RegExp(`^${NAME} `) }),
+    ).toHaveAttribute("aria-current", "page");
+    // The drawer sits between the header and the rail, inside the screen,
+    // and its rows can be clicked (nothing on top of them).
+    const drawer = page.getByRole("complementary", { name: "Agents" });
+    const d = (await drawer.boundingBox())!;
+    const r = (await rail.boundingBox())!;
+    expect(d.x).toBeGreaterThanOrEqual(0);
+    expect(d.x + d.width).toBeLessThanOrEqual(size.width);
+    expect(d.y + d.height).toBeLessThanOrEqual(r.y + 0.5);
+    expect(d.y).toBeGreaterThan(0);
+    await row.click({ trial: true });
+    expect((await overflowing(page)).out, "with the drawer open").toEqual([]);
+    if (process.env.MOB2_SHOTS)
+      for (const theme of ["light", "dark"]) {
+        await page.evaluate((t) => {
+          document.documentElement.dataset.theme = t;
+        }, theme);
+        await page.screenshot({
+          path: `${process.env.MOB2_SHOTS}/mob2-${size.width}-${theme}.png`,
+        });
+      }
+
+    // A row opens that agent's chat, as on the desktop, and the drawer closes.
+    await row.click();
+    await expect(page).toHaveURL(/\/ws\/w1\/chat\/a2$/);
+    await expect(
+      page.getByRole("heading", { name: "docs-writer" }),
+    ).toBeVisible();
+    await expect(row).toBeHidden();
+    await expect(button).toHaveAttribute("aria-expanded", "false");
+
+    // Escape closes it and gives focus back to the button.
+    await button.click();
+    await expect(row).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(row).toBeHidden();
+    await expect(button).toBeFocused();
+
+    // So does a tap outside it.
+    await button.click();
+    await expect(row).toBeVisible();
+    await page.mouse.click(size.width - 5, size.height / 2);
+    await expect(row).toBeHidden();
+
+    // Tapping the button again closes it too.
+    await button.click();
+    await expect(row).toBeVisible();
+    await button.click();
+    await expect(row).toBeHidden();
+  });
+}
+
+// Files and Settings bring their own tree and hide the sidebar; the drawer
+// still opens there, and a row still leads back to a chat.
+test("agents drawer at 390px: opens on a view without the sidebar", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await open(page, [agent, other]);
+  const rail = page.locator('nav[aria-label="Primary"]');
+  await rail.getByRole("button", { name: "Settings" }).click();
+  await expect(page).toHaveURL(/\/ws\/w1\/settings/);
+  const row = page.getByRole("link", { name: /^docs-writer / });
+  await expect(row).toBeHidden();
+  await rail.getByRole("button", { name: "Agents" }).click();
+  await expect(row).toBeVisible();
+  await row.click();
+  await expect(page).toHaveURL(/\/ws\/w1\/chat\/a2$/);
+  await expect(row).toBeHidden();
+});
+
+test("agents drawer: no Agents button on the desktop, where the sidebar shows", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await open(page, [agent, other]);
+  await expect(page.getByRole("link", { name: /^docs-writer / })).toBeVisible();
+  await expect(
+    page
+      .locator('nav[aria-label="Primary"]')
+      .getByRole("button", { name: "Agents" }),
+  ).toBeHidden();
+});

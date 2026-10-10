@@ -36,6 +36,10 @@ export interface NavRailProps {
   onWorkspaceSwitch?: (id: string) => void;
   /** Open the create-workspace flow. */
   onAddWorkspace?: () => void;
+  /** Toggle the agents drawer; adds the phone-only Agents button (MOB2). */
+  onAgentsToggle?: () => void;
+  /** Whether the agents drawer is open. */
+  agentsOpen?: boolean;
 }
 
 type NavItem = {
@@ -277,6 +281,8 @@ export function NavRail({
   activeWorkspaceId,
   onWorkspaceSwitch,
   onAddWorkspace,
+  onAgentsToggle,
+  agentsOpen = false,
 }: NavRailProps): JSX.Element {
   const rootClassName = [styles.navRail, className].filter(Boolean).join(" ");
   const activeWorkspaceRef = useRef<HTMLButtonElement>(null);
@@ -382,6 +388,29 @@ export function NavRail({
 
   return (
     <nav className={rootClassName} aria-label="Primary">
+      {onAgentsToggle && (
+        <button
+          type="button"
+          className={`${styles.navButton} ${styles.agentsButton}`}
+          data-active={agentsOpen || undefined}
+          onClick={onAgentsToggle}
+          aria-label="Agents"
+          aria-expanded={agentsOpen}
+          aria-controls="agents-drawer"
+        >
+          <span className={styles.icon}>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M4 6h16M4 12h16M4 18h16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
+            </svg>
+          </span>
+        </button>
+      )}
       {TOP_ITEMS.map(renderButton)}
       <div className={styles.spacer} />
       {hasWorkspaceAvatars && (
