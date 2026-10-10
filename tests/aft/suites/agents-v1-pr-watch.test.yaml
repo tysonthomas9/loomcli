@@ -13,29 +13,31 @@ setup: |
   : "${AFT_FAKE_GH_BASE:?fake-github is not running; run this suite on the deterministic tier}"
   curl -sf -X POST "$AFT_FAKE_GH_BASE/__reset" >/dev/null
   curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-PRWATCH" >/dev/null || true
-  # Host settings are global: teardown clears this fixture token again.
+  # Host settings are global: the last case (and teardown) clears this fixture token.
   curl -sf -X PATCH "$AFT_BASE_URL/api/local/settings" -H "Content-Type: application/json" \
     -d '{"runtime_credentials":{"github":{"token":"aft-fixture-token"}}}' >/dev/null
   gh="$AFT_WORK_DIR/agv1-prwatch-repo"
+  sib="$AFT_WORK_DIR/agv1-prwatch-sib"
   other="$AFT_WORK_DIR/agv1-prwatch-other"
-  for r in "$gh" "$other"; do
+  for r in "$gh" "$sib" "$other"; do
     mkdir -p "$r"
     git -C "$r" init -q -b main
     git -C "$r" -c user.email=e2e@x -c user.name=e2e commit -q --allow-empty -m init
   done
   git -C "$gh" remote add origin https://github.com/loom-e2e/agv1-prwatch.git
+  git -C "$sib" remote add origin https://github.com/loom-e2e/agv1-prwatch-sib.git
   git -C "$other" remote add origin https://gitlab.com/loom-e2e/agv1-prwatch-other.git
   curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" \
     -d '{"name":"e2e-agv1-prwatch","type":"empty","repos":[]}' >/dev/null
-  printf '{"repos":["%s","%s"]}' "$gh" "$other" |
+  printf '{"repos":["%s","%s","%s"]}' "$gh" "$sib" "$other" |
     curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-AGV1-PRWATCH/repos" -H "Content-Type: application/json" -d @- \
     > "$AFT_WORK_DIR/agv1-prwatch-ws.json"
   for which in gh other; do
     python3 - "$AFT_WORK_DIR/agv1-prwatch-ws.json" "$which" "agv1-prwatch-$which-${RUN_ID:-local}" \
       > "$AFT_WORK_DIR/agv1-prwatch-$which-create.json" <<'PY'
   import json, sys
-  host = {"gh": "https://github.com/", "other": "https://gitlab.com/"}[sys.argv[2]]
-  repos = [r for r in json.load(open(sys.argv[1]))["data"]["repos"] if r["remote_url"].startswith(host)]
+  url = {"gh": "https://github.com/loom-e2e/agv1-prwatch", "other": "https://gitlab.com/loom-e2e/agv1-prwatch-other"}[sys.argv[2]]
+  repos = [r for r in json.load(open(sys.argv[1]))["data"]["repos"] if r["remote_url"].removesuffix(".git") == url]
   assert len(repos) == 1, repos
   r = repos[0]
   print(json.dumps({"preset": "lead", "name": sys.argv[3], "repo": r["path"], "base_ref": r["default_branch"], "overrides": {"harness": "opencode"}}))
@@ -47,7 +49,7 @@ setup: |
 teardown: |
   set +e
   curl -s -X PATCH "$AFT_BASE_URL/api/local/settings" -H "Content-Type: application/json" \
-    -d '{"runtime_credentials":{"github":{"token":""}}}' >/dev/null
+    -d '{"runtime_credentials":{"github":{"clear":true}}}' >/dev/null
   curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-PRWATCH" >/dev/null
 
 tests:
@@ -83,7 +85,7 @@ tests:
         intent: "Watch PR 7 twice as the Lead on the GitHub repo, and check the watch and the GitHub reads"
 
   - name: H1b a PR watch on another repo is refused
-    intent: A Lead whose repo is not a GitHub repo of the workspace is refused as github_denied with no GitHub read, and a Lead that names another owner and repo in the body still watches only its own repo
+    intent: A Lead whose repo is not a GitHub repo of the workspace is refused as github_denied with no GitHub read, and a Lead that names the workspace's other GitHub repo in the body still watches, and reads, only its own repo
     steps:
       - run: |
           set -e
@@ -93,7 +95,7 @@ tests:
             > "$AFT_WORK_DIR/agv1-prwatch-h1b-other.json"
           curl -sf "$AFT_FAKE_GH_BASE/__requests" > "$AFT_WORK_DIR/agv1-prwatch-h1b-gh-other.json"
           "$call" E2E-AGV1-PRWATCH "$(cat "$AFT_WORK_DIR/agv1PrWatch-gh-Id")" github/watch \
-            '{"number":7,"owner":"octo-elsewhere","repo":"elsewhere"}' > "$AFT_WORK_DIR/agv1-prwatch-h1b-named.json"
+            '{"number":7,"owner":"loom-e2e","repo":"agv1-prwatch-sib"}' > "$AFT_WORK_DIR/agv1-prwatch-h1b-named.json"
           curl -sf "$AFT_FAKE_GH_BASE/__requests" > "$AFT_WORK_DIR/agv1-prwatch-h1b-gh-named.json"
           python3 - "$AFT_WORK_DIR" <<'PY'
           import json, sys
@@ -107,9 +109,11 @@ tests:
           assert named["status"] == 200, named
           assert (named["body"]["owner"], named["body"]["repo"]) == ("loom-e2e", "agv1-prwatch"), named
           paths = [r["url"].split("?")[0] for r in json.load(open(d + "/agv1-prwatch-h1b-gh-named.json"))]
-          assert paths and not [p for p in paths if "elsewhere" in p], paths
+          assert "/repos/loom-e2e/agv1-prwatch/pulls/7" in paths, paths
+          others = [p for p in paths if p != "/user" and not p.startswith("/repos/loom-e2e/agv1-prwatch/")]
+          assert not others, "a watch naming another repo read outside the Lead's own repo: %r" % others
           PY
-        intent: "Watch as the Lead on the GitLab repo, then as the GitHub Lead naming another repo, and check both"
+        intent: "Watch as the Lead on the GitLab repo, then as the GitHub Lead naming the sibling GitHub repo, and check both"
 
   - name: H1c unregister clears the watch
     intent: The Lead's unwatch removes its watch on PR 7, a second unwatch finds none, and watching again makes a new watch
@@ -133,3 +137,14 @@ tests:
           assert r[4]["body"] == {"number": 7, "removed": True}, r[4]
           PY
         intent: "Watch, unwatch twice, watch again and unwatch as the GitHub Lead, and check each answer"
+
+  - name: H1z the host GitHub fixture token is cleared
+    intent: Host settings are global, so the suite removes its fixture GitHub token and later suites see GitHub unconfigured again
+    steps:
+      - run: |
+          set -e
+          curl -sf -X PATCH "$AFT_BASE_URL/api/local/settings" -H "Content-Type: application/json" \
+            -d '{"runtime_credentials":{"github":{"clear":true}}}' >/dev/null
+          curl -sf "$AFT_BASE_URL/api/local/settings" |
+            python3 -c 'import json,sys; g=json.load(sys.stdin)["data"]["runtime_credentials"]["github"]; assert g["configured"] is False, g'
+        intent: "Clear the fixture GitHub token and check the host reports GitHub unconfigured"
