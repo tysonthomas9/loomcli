@@ -169,7 +169,7 @@ def settings_cases():
         "b": lead_create_pr(c, "b", "main") + run(f"checks {c} b red", "B's required check is red"),
         "c": lead_create_pr(c, "c", "b") + run(f"hold-open {c} 10 b c", "The lead stops at red B; C waits")})
     st += run(f"comment {c} b 'The check fails: remove the line FAIL from matrix-s3-b.txt and keep the rest.'", "A reviewer asks for B's fix") + \
-        run(f"fixup {c} b green", "The feedback agent removes FAIL") + run(f"fixup-pushed {c} b c", "B's PR is updated and C replayed") + \
+        run(f"fixup {c} b green", "The feedback agent removes FAIL") + run(f"fixup-pushed {c} b c may-merge", "B's PR is updated and C replayed (the lead may already have merged the green fix-up)") + \
         run(f"merged {c} b c", "The lead merges B, then C") + run(f"ui {c} c merged", "Task C shows its PR merged")
     out += case("S3 Stacked, lead may approve on, lead may merge when green", "The lead merges green PRs bottom-up by itself, stops at red B and continues after B's fix", st)
 

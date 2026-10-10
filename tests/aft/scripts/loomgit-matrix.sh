@@ -938,14 +938,19 @@ fixup)
   ;;
 
 fixup-pushed)
-  # fixup-pushed <case> <slot> [above-slot]: Loom pushed the fix-up to the
-  # task's PR with no Approve, and the PR above now contains it.
-  slot="$1" above="${2:-}"
+  # fixup-pushed <case> <slot> [above-slot] [may-merge]: Loom pushed the fix-up to
+  # the task's PR with no Approve, and the PR above now contains it. With
+  # may-merge (Lead may merge when green), the lead may already have merged the
+  # green fix-up; that counts when the PR merged at the fix-up head.
+  slot="$1" above="${2:-}" may_merge="${3:-}"
   pushed() { revisions "$slot"; json "$work/rev-$slot.json" 'assert v.get("feedback_status")=="pushed" and v.get("verdict")=="feedback", v'; }
   wait_until $((45 * scale)) "fix-up of $slot pushed: $(cat "$work/rev-$slot.json" 2> /dev/null)" pushed
   new_head="$(pull_field "$slot" sha)"
   [[ "$new_head" != "$(cat "$work/pr-$slot.sha")" ]] || fail "PR of $slot did not move"
-  [[ "$(pull_field "$slot" state)" == open ]] || fail "PR of $slot is not open"
+  if [[ "$(pull_field "$slot" state)" != open ]]; then
+    [[ "$may_merge" == may-merge && "$(pull_field "$slot" merged)" == True ]] || fail "PR of $slot is not open"
+    say "PR of $slot already merged by the lead at the fix-up head $new_head"
+  fi
   if [[ -n "$above" ]]; then
     contains() {
       if [[ "$forge" == fake ]]; then
