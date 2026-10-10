@@ -255,22 +255,45 @@ now() { if [ -n "${EPOCHREALTIME:-}" ]; then printf '%s\n' "$EPOCHREALTIME"; els
       ts="${raw%% *}" line="${raw#* }"
       printf '%s\n' "$line" >> "$boot"
       if [ "$line" = "[local-mode] ready" ]; then
-        # Each request's send time is bounded from above by curl's own timers:
-        # it went out at (exit time - time_total + time_pretransfer), and the
-        # host clock is read only after curl exits, so the bound is never early.
-        mw="$(curl -sS -o "$T/k1-models.json" -w '%{http_code} %{time_pretransfer} %{time_total}' --max-time 1 \
-          "$prefix/harnesses/opencode/models" 2>"$T/k1-models.err" || true)"; m_end="$(now)"
-        body="$(jq -nc --arg m "$model" '{preset:"lead",name:"s15-wu1-first",repo:"source-repo",base_ref:"main",overrides:{harness:"opencode",model:$m}}')"
-        pw="$(curl -sS -o "$T/k1-create.json" -w '%{http_code} %{time_pretransfer} %{time_total}' --max-time 60 -X POST \
-          -H 'Content-Type: application/json' -H "Idempotency-Key: s15-wu1-$$" -d "$body" "$prefix/agents" 2>"$T/k1-create.err" || true)"; p_end="$(now)"
+        # Both requests go out from one python3 process. Each send time is read
+        # after request() has written every byte to the socket (headers and
+        # body), so it is a confirmed-transmission time, never early.
+        python3 - "$api" "/api/workspaces/LOCALMODE/v1" "$model" "s15-wu1-$$" "$T" > "$T/k1-sends" 2>"$T/k1-requests.err" <<'PY3'
+import http.client, json, sys, time
+from urllib.parse import urlsplit
+api, base, model, key, out = sys.argv[1:]
+u = urlsplit(api)
+res = {}
+def call(name, method, path, body, timeout, headers):
+    c = http.client.HTTPConnection(u.hostname, u.port, timeout=timeout)
+    try:
+        c.connect()
+        c.request(method, path, body=body, headers=headers)
+        res[name + "_sent"] = time.time()
+        r = c.getresponse()
+        data = r.read()
+        res[name + "_http"] = str(r.status)
+    except Exception as e:
+        data = str(e).encode()
+        res.setdefault(name + "_sent", None)
+        res[name + "_http"] = "error"
+    with open(f"{out}/k1-{name}.json", "wb") as f:
+        f.write(data)
+    c.close()
+call("models", "GET", base + "/harnesses/opencode/models", None, 1, {})
+body = json.dumps({"preset": "lead", "name": "s15-wu1-first", "repo": "source-repo", "base_ref": "main",
+                   "overrides": {"harness": "opencode", "model": model}})
+call("create", "POST", base + "/agents", body, 60, {"Content-Type": "application/json", "Idempotency-Key": key})
+print(json.dumps(res))
+PY3
         h0="$(now)"; vm="$(podman exec "$ctr" date +%s.%N 2>/dev/null)"; h1="$(now)"
-        python3 - "$ts" "$mw" "$m_end" "$pw" "$p_end" "$h0" "$vm" "$h1" > "$T/k1-timing" <<'PY2'
+        python3 - "$ts" "$T/k1-sends" "$h0" "$vm" "$h1" > "$T/k1-timing" <<'PY2'
 import datetime, json, re, sys
-ts, mw, m_end, pw, p_end, h0, vm, h1 = sys.argv[1:]
-code, m_pre, m_tot = (mw.split() + ["", "nan", "nan"])[:3]
-ccode, p_pre, p_tot = (pw.split() + ["", "nan", "nan"])[:3]
-t_models = float(m_end) - float(m_tot) + float(m_pre)
-t_post = float(p_end) - float(p_tot) + float(p_pre)
+ts, sends, h0, vm, h1 = sys.argv[1:]
+r = json.load(open(sends))
+code, ccode = r.get("models_http", ""), r.get("create_http", "")
+t_models = r.get("models_sent") or float("nan")
+t_post = r.get("create_sent") or float("nan")
 # Python 3.9 fromisoformat: at most 6 fraction digits and no trailing Z.
 t = re.sub(r"Z$", "+00:00", ts)
 m = re.match(r"(.*\.\d{1,6})\d*(.*)$", t)
@@ -340,7 +363,7 @@ check "K1 the created Lead carries $model" \
 
 if [ "$FAIL_COUNT" -ne 0 ]; then
   echo "--- evidence (paths only, no db contents) ---"
-  for f in k2a-up.log k2b-up.log k1-timing k1-models.err k1-create.json k1-create.err; do
+  for f in k2a-up.log k2b-up.log k1-timing k1-sends k1-requests.err k1-create.json; do
     [ -s "$T/$f" ] && { echo "## $f"; tail -40 "$T/$f"; }
   done
   echo "## boot.log (tail)"; tail -40 "$boot"
