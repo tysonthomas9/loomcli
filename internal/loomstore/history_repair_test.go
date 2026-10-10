@@ -238,15 +238,21 @@ func TestHistoryRepairSkipsPurged(t *testing.T) {
 		c.Mode, c.ParentAgentID, c.Attempt = "single_task", ptr(parent), 1
 		f.add(c, "idle", "active", "finished", "active")
 	}
-	f.exec(`UPDATE agents SET archived_at = ? WHERE agent_id = 'purged'`, Stamp(time.Now()))
-	if err := f.s.MarkHistoryPurged(ctx, "purged", time.Now().Add(HistoryRetention+time.Hour)); err != nil {
-		t.Fatal(err)
+	f.add(withState(agent("L", "interactive"), "idle"), "idle")
+	pc := withState(agent("pc", "interactive"), "archived") // a purged child of a live parent
+	pc.Mode, pc.ParentAgentID, pc.Attempt = "single_task", ptr("L"), 1
+	f.add(pc, "idle", "active", "finished", "active", "finished", "archived")
+	f.exec(`UPDATE agents SET archived_at = ? WHERE agent_id IN ('purged', 'pc')`, Stamp(time.Now()))
+	for _, id := range []string{"purged", "pc"} {
+		if err := f.s.MarkHistoryPurged(ctx, id, time.Now().Add(HistoryRetention+time.Hour)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := f.s.Tombstone(ctx, "deleted", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	f.upgrade()
-	for _, id := range []string{"purged", "deleted"} {
+	for _, id := range []string{"purged", "deleted", "pc"} {
 		if got := f.events(id); len(got) != 0 {
 			t.Fatalf("%s history = %+v; want none", id, got)
 		}
@@ -256,11 +262,12 @@ func TestHistoryRepairSkipsPurged(t *testing.T) {
 	}
 }
 
-// TestHistoryRepairRecordsIrreparable: a child attempt that ended (the child
-// was reopened since) with no task_completed on its parent and none owed
-// can't be rebuilt, as its outcome, head and summary are gone: it is
-// recorded, and nothing is appended for it. An attempt whose record is saved
-// or still owed by a marker is not.
+// TestHistoryRepairRecordsIrreparable: what can't be rebuilt is recorded and
+// nothing is appended for it: a saved transition whose from is not the state
+// saved before it, and a child attempt that ended (the child was reopened
+// since) with no task_completed on its parent and none owed, as its outcome,
+// head and summary are gone. An attempt whose record is saved or still owed
+// by a marker is not.
 func TestHistoryRepairRecordsIrreparable(t *testing.T) {
 	ctx := context.Background()
 	f := newRepairFixture(t)
@@ -277,12 +284,17 @@ func TestHistoryRepairRecordsIrreparable(t *testing.T) {
 	}
 	f.exec(`INSERT INTO agent_completion_markers (child_agent_id, attempt, parent_agent_id, outcome, branch, created_at)
 		VALUES ('o', 0, 'L', 'end_turn', '', ?)`, Stamp(time.Now()))
-	before := len(f.events("L"))
-	f.upgrade()
-	if got := f.unrepaired(); fmt.Sprint(got) != "[L task_completed c:1]" {
-		t.Fatalf("unrepaired = %v; want [L task_completed c:1]", got)
+	f.add(withState(agent("m", "interactive"), "finished"), "idle") // idle -> active lost before active -> finished
+	if _, err := f.s.AppendEvent(ctx, Event{AgentID: "m", EventID: "legacy:m:2", Kind: "agent.state_changed",
+		Payload: json.RawMessage(`{"from":"active","to":"finished"}`)}); err != nil {
+		t.Fatal(err)
 	}
-	if n := len(f.events("L")); n != before {
-		t.Fatalf("parent events %d -> %d; want nothing appended", before, n)
+	before, mBefore := len(f.events("L")), len(f.events("m"))
+	f.upgrade()
+	if got := f.unrepaired(); fmt.Sprint(got) != "[L task_completed c:1 m state 2]" {
+		t.Fatalf("unrepaired = %v; want [L task_completed c:1 m state 2]", got)
+	}
+	if n, m := len(f.events("L")), len(f.events("m")); n != before || m != mBefore {
+		t.Fatalf("events L %d -> %d, m %d -> %d; want nothing appended", before, n, mBefore, m)
 	}
 }
