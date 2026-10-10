@@ -258,4 +258,43 @@ CREATE TABLE IF NOT EXISTS pr_watches (
   PRIMARY KEY (agent_id, owner, repo, number)
 );
 CREATE INDEX IF NOT EXISTS pr_watches_workspace ON pr_watches(workspace_id);
-`}
+`, historyRepair}
+
+// historyRepair (OR11) is the one-time scan of histories saved before a state
+// change and its events were one write: it is run again with no effect. An
+// agent's current state with no saved transition to it gets one
+// history.repaired event: its current state and the state its history last
+// shows (creating when none), never a transition. A child attempt that ended
+// with no task_completed on its parent and none owed can't be rebuilt (its
+// outcome, head and summary are gone), so it is recorded in
+// agent_history_unrepaired instead. Deleted agents and purged histories are
+// empty on purpose: they are never repaired, reported or owed a record.
+const historyRepair = `
+CREATE TABLE IF NOT EXISTS agent_history_unrepaired (
+  agent_id   TEXT NOT NULL,
+  gap        TEXT NOT NULL,   -- task_completed: detail is <child>:<attempt>
+  detail     TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (agent_id, gap, detail)
+);
+INSERT OR IGNORE INTO agent_events (agent_id, seq, event_id, kind, redacted_payload, created_at)
+SELECT agent_id, (SELECT COALESCE(MAX(seq), 0) + 1 FROM agent_events e WHERE e.agent_id = a.agent_id),
+  'history.repaired:' || agent_id || ':' || revision, 'history.repaired',
+  json_object('agentId', agent_id, 'type', 'history.repaired', 'state', state, 'reason', state_reason,
+    'outcome', outcome, 'attempt', attempt, 'after', seen),
+  strftime('%Y-%m-%dT%H:%M:%f', 'now') || '000000Z'
+FROM (SELECT a.*, COALESCE((SELECT CASE e.kind WHEN 'history.repaired' THEN json_extract(e.redacted_payload, '$.state')
+    ELSE json_extract(e.redacted_payload, '$.to') END FROM agent_events e
+    WHERE e.agent_id = a.agent_id AND e.kind IN ('agent.state_changed', 'history.repaired')
+    ORDER BY e.seq DESC LIMIT 1), 'creating') AS seen
+  FROM agents a WHERE a.deleted_at IS NULL AND a.history_purged_at IS NULL) a
+WHERE state != seen;
+INSERT OR IGNORE INTO agent_history_unrepaired (agent_id, gap, detail, created_at)
+WITH RECURSIVE n(k) AS (SELECT 0 UNION ALL SELECT k + 1 FROM n WHERE k + 1 < (SELECT MAX(attempt) FROM agents))
+SELECT p.agent_id, 'task_completed', c.agent_id || ':' || n.k, strftime('%Y-%m-%dT%H:%M:%f', 'now') || '000000Z'
+FROM agents c JOIN agents p ON p.agent_id = c.parent_agent_id JOIN n ON n.k < c.attempt
+WHERE c.mode = 'single_task' AND c.deleted_at IS NULL AND p.deleted_at IS NULL AND p.history_purged_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM agent_events e WHERE e.agent_id = p.agent_id
+    AND e.event_id = 'task_completed:' || c.agent_id || ':' || n.k)
+  AND NOT EXISTS (SELECT 1 FROM agent_completion_markers m WHERE m.child_agent_id = c.agent_id AND m.attempt = n.k);
+`
