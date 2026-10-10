@@ -468,7 +468,9 @@ func (s *Service) commitCreated(ctx context.Context, a loomstore.Agent) (loomsto
 	}
 	call := ""
 	if ctx.Value(byParent{}) != nil && a.ParentAgentID != nil {
-		call = s.runningCall(*a.ParentAgentID)
+		if parent, err := s.live(ctx, *a.ParentAgentID); err == nil {
+			call = s.runningCall(parent)
+		}
 	}
 	more, err := created(a, call)
 	if err != nil {

@@ -506,41 +506,42 @@ func (s *Service) ingest(ctx context.Context, harness string, e loomharness.Even
 	return true, s.HarnessEvent(ctx, id, e)
 }
 
-// trackCall notes a's tool call e starting while a turn runs, or its item
-// completing; e is of a's current session. endTurn ends all a's calls.
+// trackCall notes a's tool call e starting in a's running turn, forgetting
+// calls of a's earlier turns, or its item completing; e is of a's current
+// session.
 func (s *Service) trackCall(a loomstore.Agent, e loomharness.Event) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	switch {
-	case e.Type == loomharness.EventItemStarted && e.ItemKind == "tool" && e.ItemID != "" && a.RunningTurnID != nil:
-		if s.calls[a.AgentID] == nil {
-			s.calls[a.AgentID] = map[string]bool{}
+	case e.Type == loomharness.EventItemStarted && e.ItemKind == "tool" && e.ItemID != "" && e.TurnID != "" &&
+		e.TurnID == deref(a.RunningTurnID):
+		calls := map[string]string{e.ItemID: e.TurnID}
+		for id, turn := range s.calls[a.AgentID] {
+			if turn == e.TurnID {
+				calls[id] = turn
+			}
 		}
-		s.calls[a.AgentID][e.ItemID] = true
+		s.calls[a.AgentID] = calls
 	case e.Type == loomharness.EventItemCompleted:
 		delete(s.calls[a.AgentID], e.ItemID)
 	}
 }
 
-// endCalls forgets agentID's running tool calls, as its turn ended.
-func (s *Service) endCalls(agentID string) {
+// runningCall is a's one running tool call in its running turn, or "" when
+// it runs none or more than one.
+func (s *Service) runningCall(a loomstore.Agent) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.calls, agentID)
-}
-
-// runningCall is agentID's one running tool call, or "" when it runs none
-// or more than one.
-func (s *Service) runningCall(agentID string) string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if len(s.calls[agentID]) != 1 {
+	call, n := "", 0
+	for id, turn := range s.calls[a.AgentID] {
+		if a.RunningTurnID != nil && turn == *a.RunningTurnID {
+			call, n = id, n+1
+		}
+	}
+	if n != 1 {
 		return ""
 	}
-	for id := range s.calls[agentID] {
-		return id
-	}
-	return ""
+	return call
 }
 
 // withText sets a message.delivered event's Text and Sender to the text Loom

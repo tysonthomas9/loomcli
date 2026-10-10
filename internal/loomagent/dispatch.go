@@ -288,11 +288,8 @@ func (s *Service) endTurn(ctx context.Context, a loomstore.Agent, e loomharness.
 	if err := s.endTurnAsks(ctx, a, e.TurnID); err != nil {
 		return a, false, err
 	}
-	if a, err = s.setState(ctx, a, d.To); err != nil {
-		return a, false, err
-	}
-	s.endCalls(a.AgentID)
-	return a, true, nil
+	a, err = s.setState(ctx, a, d.To)
+	return a, err == nil, err
 }
 
 // turnInput is what decideTurnCompleted decides from: the agent's row, its

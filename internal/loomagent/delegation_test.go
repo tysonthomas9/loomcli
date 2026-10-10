@@ -312,18 +312,26 @@ func TestChildCreatedNamesItsCall(t *testing.T) {
 		return nil
 	}
 	byLead := ActorRef{Kind: "agent", ID: lead.AgentID}
-	// A tool start while no turn runs, or from another session, is no call.
+	// A tool start while no turn runs, of another turn, or from the
+	// lead's older session, is no call.
 	tool(loomharness.EventItemStarted, "idle")
-	other := ref
-	other.NativeID += "-old"
-	if _, err := s.ingest(ctx, "opencode", loomharness.Event{Type: loomharness.EventItemStarted, Session: other,
-		TurnID: "T1", ItemID: "stale", ItemKind: "tool"}); err != nil {
-		t.Fatal(err)
-	}
 	to := s.get(t, lead.AgentID).StateOf()
 	to.State, to.RunningTurn = StateActive, sp("T1")
 	if _, err := s.setState(ctx, s.get(t, lead.AgentID), to); err != nil {
 		t.Fatal(err)
+	}
+	old := loomharness.NativeRef{Root: ref.Root, NativeID: ref.NativeID + "-old"}
+	if err := s.store.RecordNativeSession(ctx, loomstore.NativeSession{AgentID: lead.AgentID, Harness: "opencode",
+		NativeRoot: old.Root, NativeID: old.NativeID}); err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range []loomharness.Event{
+		{Type: loomharness.EventItemStarted, Session: old, TurnID: "T1", ItemID: "old", ItemKind: "tool"},
+		{Type: loomharness.EventItemStarted, Session: ref, TurnID: "T0", ItemID: "late", ItemKind: "tool"},
+	} {
+		if _, err := s.ingest(ctx, "opencode", ev); err != nil {
+			t.Fatal(err)
+		}
 	}
 	tool(loomharness.EventItemStarted, "call1")
 	if got := call(create("c1", byLead)); got != "call1" {
@@ -344,11 +352,30 @@ func TestChildCreatedNamesItsCall(t *testing.T) {
 	if got := call(create("c5", byLead)); got != nil {
 		t.Fatalf("c5, no call running, call = %v", got)
 	}
-	// The running turn's end, live or by a replay, ends its calls.
+	// A call left running when its turn ended, however it ended, is not
+	// the next turn's.
 	tool(loomharness.EventItemStarted, "call3")
 	finishTurn(t, s, lead.AgentID, "cancelled")
 	if got := call(create("c6", byLead)); got != nil {
 		t.Fatalf("c6, after the turn ended, call = %v", got)
+	}
+	// A turn a harness switch stops never ends through endTurn.
+	run := func(turn, item string) {
+		t.Helper()
+		to := s.get(t, lead.AgentID).StateOf()
+		to.State, to.RunningTurn = StateActive, sp(turn)
+		if _, err := s.setState(ctx, s.get(t, lead.AgentID), to); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.ingest(ctx, "opencode", loomharness.Event{Type: loomharness.EventItemStarted, Session: ref,
+			TurnID: turn, ItemID: item, ItemKind: "tool"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run("T2", "stopped")
+	run("T3", "call4")
+	if got := call(create("c7", byLead)); got != "call4" {
+		t.Fatalf("c7 call = %v, want call4", got)
 	}
 }
 
