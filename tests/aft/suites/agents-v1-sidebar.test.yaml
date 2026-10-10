@@ -64,7 +64,6 @@ tests:
           fn: >-
             (() => { const names = Array.from(document.querySelectorAll('nav[aria-label=Agents] [data-testid=sortable-agent-row] > a[href] [data-testid=agent-list-name]')).map((x) => x.textContent.trim());
               return names.join('|') === ['a', 'b', 'c'].map((x) => 'agv1-sbe1-' + x + '-${RUN_ID:-local}').join('|'); })()
-        budget: 60000
         intent: "Wait until the sidebar lists the three Leads in creation order"
       - run: '"$AFT_TESTS_DIR/scripts/agents-v1-sidebar.sh" menu "$(cat "$AFT_WORK_DIR/sbe1B")"'
         intent: "Open the second Lead's sidebar context menu"
@@ -92,6 +91,9 @@ tests:
                 (document.querySelector('section[aria-label="Agent chat"] header h2')?.textContent || '').trim() === 'agv1-sbe1-b-${RUN_ID:-local}' &&
                 names.join('|') === ['a', 'c'].map((x) => 'agv1-sbe1-' + x + '-${RUN_ID:-local}').join('|'); })()
         intent: "Wait until the reloaded chat shows the Lead archived with Unarchive, while the sidebar still leaves it out"
+      - run: |
+          agent-browser --session "$AFT_SESSION" eval "window.__sbUnarchiveAt = performance.now(); true" >/dev/null
+        intent: "Note when Unarchive is pressed, to bound how soon the row returns"
       - click: { testid: agent-unarchive }
       - wait:
           fn: >-
@@ -99,9 +101,9 @@ tests:
               const names = rows.map((a) => a.querySelector('[data-testid=agent-list-name]')?.textContent.trim());
               const b = rows[names.indexOf('agv1-sbe1-b-${RUN_ID:-local}')];
               return names.join('|') === ['a', 'b', 'c'].map((x) => 'agv1-sbe1-' + x + '-${RUN_ID:-local}').join('|') &&
-                b?.getAttribute('aria-current') === 'page' && !document.querySelector('[data-testid=agent-archived-notice]'); })()
-        budget: 10000
-        intent: "Wait until, without a reload, the unarchived Lead is back in the sidebar between the other two and marked current"
+                b?.getAttribute('aria-current') === 'page' && !document.querySelector('[data-testid=agent-archived-notice]') &&
+                performance.now() - window.__sbUnarchiveAt < 5000; })()
+        intent: "Wait until, without a reload and within 5 s of Unarchive, the Lead is back in the sidebar between the other two and marked current"
       - reload: true
       - wait:
           fn: >-
@@ -158,7 +160,6 @@ tests:
               return (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-SBE2-STARTED') &&
                 (document.querySelector('section[aria-label="Agent chat"] header')?.textContent || '').includes('idle') &&
                 kids.length === 1 && kids[0].textContent.startsWith('agv1-sbe2-kid-${RUN_ID:-local}'); })()
-        budget: 90000
         intent: "Wait until the Lead's turn ends idle and its working child shows nested under it"
       - click: { role: button, name: "Collapse workspace tree" }
       - wait:
@@ -220,14 +221,13 @@ tests:
               const label = (n) => items.filter((x) => (x.getAttribute('aria-label') || '').startsWith(n + ' '));
               return items.length === 2 && label('agv1-sbe2-a-${RUN_ID:-local}').length === 1 && label('agv1-sbe2-b-${RUN_ID:-local}').length === 1 &&
                 label('agv1-sbe2-kid-${RUN_ID:-local}').length === 0; })()
-        budget: 90000
         intent: "Wait until the finished child leaves the rail and both Leads stay"
       - run: |
           set -e
           kid="$(cat "$AFT_WORK_DIR/sbe2Kid")"
           state="$(curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-SBE2/v1/agents/$kid" | python3 -c 'import json,sys; print(json.load(sys.stdin)["state"])')"
-          case "$state" in creating|active|waiting|stopping) echo "the child is still at work ($state)" >&2; exit 1 ;; esac
-        intent: "Check that the API no longer reports the child at work"
+          [ "$state" = finished ] || { echo "the child is $state, want finished" >&2; exit 1; }
+        intent: "Check that the API reports the child finished"
       - click: { role: button, name: "Expand workspace tree" }
 
   - name: E3 sidebar reorder, archive and underline - a keyboard drag moves a Lead and its child above another and persists, rows show no underline on hover, and both Archive paths remove a row
@@ -279,7 +279,6 @@ tests:
               return (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-SBE3-STARTED') &&
                 top.join('|') === ['a', 'b', 'c'].map((x) => 'agv1-sbe3-' + x + '-${RUN_ID:-local}').join('|') &&
                 kids.length === 1 && kids[0].textContent.startsWith('agv1-sbe3-kid-${RUN_ID:-local}'); })()
-        budget: 90000
         intent: "Wait until the three Leads show in creation order with the working child nested under the second"
       - run: '"$AFT_TESTS_DIR/scripts/agents-v1-sidebar.sh" drag-up "agv1-sbe3-b-${RUN_ID:-local}"'
         intent: "Keyboard-drag the second Lead above the first: focus its drag handle, lift with Space, move up, drop with Space"

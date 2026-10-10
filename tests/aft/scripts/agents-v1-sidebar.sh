@@ -10,14 +10,15 @@
 #       working until it is stopped.
 #   child-id <workspace> <lead id> <child name>   Print the child's agent id.
 #   stop <workspace> <lead id> <child name>       Interrupt the working child,
-#       which ends its task.
+#       which ends its task, and wait until the API no longer has it at work.
 #   menu <agent id>          Open the sidebar row's context menu, as a right
 #       click on the row does.
-#   hover <agent id> <name>  Hover the sidebar row; wait until it shows no
-#       underline and its "Archive <name>" action is visible.
+#   hover <agent id> <name>  Hover the sidebar row; wait until neither the row
+#       nor its name is underlined and its "Archive <name>" action is visible.
 #   hover-archive <agent id> <name>   Hover the row and press its Archive action.
 #   drag-up <name>           Keyboard-drag the named top-level row up one place:
-#       focus its drag handle, lift with Space, ArrowUp, drop with Space.
+#       focus its drag handle, lift with Space, ArrowUp, drop with Space,
+#       each key once the drag shows the previous one.
 #   rail-ids                 Print the collapsed rail's Agent API ids, in order,
 #       comma-separated.
 set -eu
@@ -47,6 +48,16 @@ stop)
     id="$("$0" child-id "$1" "$2" "$3")"
     curl -sf -X POST "$AFT_BASE_URL/api/workspaces/$1/v1/agents/$id/messages" -H "Content-Type: application/json" \
         -H "Idempotency-Key: sidebar-stop-$id" -d '{"text":"","delivery":"interrupt"}' >/dev/null
+    # The interrupt is accepted before the turn ends: wait until the child is
+    # no longer at work.
+    i=0
+    while :; do
+        state="$(curl -sf "$AFT_BASE_URL/api/workspaces/$1/v1/agents/$id" | python3 -c 'import json,sys; print(json.load(sys.stdin)["state"])')"
+        case "$state" in creating|active|waiting|stopping) ;; *) break ;; esac
+        i=$((i + 1))
+        [ "$i" -lt 120 ] || { echo "child $id still $state after its interrupt" >&2; exit 1; }
+        sleep 0.5
+    done
     ;;
 menu)
     ab eval "(() => { const a = document.querySelector(\"$(row "$1")\");
@@ -58,7 +69,9 @@ hover)
     ab hover "$(row "$1")"
     ab wait --fn "(() => { const a = document.querySelector(\"$(row "$1")\");
       const b = a?.parentElement?.querySelector(':scope > [data-testid=agent-row-archive]');
+      const n = a?.querySelector('[data-testid=agent-list-name]');
       return !!a && a.matches(':hover') && getComputedStyle(a).textDecorationLine === 'none' &&
+        !!n && getComputedStyle(n).textDecorationLine === 'none' &&
         !!b && b.getAttribute('aria-label') === 'Archive $2' && Number(getComputedStyle(b).opacity) > 0.9; })()" >/dev/null
     ;;
 hover-archive)
@@ -68,10 +81,12 @@ hover-archive)
 drag-up)
     ab eval "(() => { const h = document.querySelector('nav[aria-label=Agents] [aria-label=\"Drag to reorder $1\"]');
       if (!h) throw Error('drag handle missing'); h.focus(); return document.activeElement === h; })()" | grep -q true
+    item="document.querySelector('nav[aria-label=Agents] [aria-label=\"Drag to reorder $1\"]').closest('[data-testid=sortable-agent-item]')"
     ab press Space
-    sleep 0.3
+    ab wait --fn "!!$item.querySelector(':scope > [data-testid=sortable-agent-row][data-dragging]')" >/dev/null
+    ab eval "(() => { const it = $item; window.__sbDragTop = it.getBoundingClientRect().top; return true; })()" >/dev/null
     ab press ArrowUp
-    sleep 0.3
+    ab wait --fn "$item.getBoundingClientRect().top < window.__sbDragTop - 4" >/dev/null
     ab press Space
     ;;
 rail-ids)
