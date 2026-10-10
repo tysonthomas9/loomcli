@@ -2652,6 +2652,8 @@ export interface components {
     };
     StackCardLayer: {
       change: string;
+      /** @description The Loom task the change belongs to, if known. */
+      task?: string;
       pr_number: number;
       pr_url: string;
       /** @enum {string} */

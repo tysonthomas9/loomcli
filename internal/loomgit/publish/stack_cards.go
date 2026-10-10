@@ -2,6 +2,8 @@ package publish
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
@@ -26,7 +28,9 @@ type StackCard struct {
 // StackCardLayer is one PR of a stack. State is one of draft, needs_review,
 // approved, checks_failing, ready, merging, merged or diverged.
 type StackCardLayer struct {
-	Change   string `json:"change"`
+	Change string `json:"change"`
+	// Task is the Loom task the change belongs to, if known.
+	Task     string `json:"task,omitempty"`
 	PRNumber int    `json:"pr_number"`
 	PRURL    string `json:"pr_url"`
 	State    string `json:"state"`
@@ -88,6 +92,10 @@ func stackCard(ctx context.Context, store *journal.SQLite, forge prStatusForge, 
 	if err != nil {
 		return card, err
 	}
+	mergedBy, err := mergedByMachine(ctx, store, workspace, stackID, state.Backend)
+	if err != nil {
+		return card, err
+	}
 	inMerge := merging && entry.Phase != "blocked"
 	for _, publication := range publications {
 		if publication.PRNumber == 0 || (publication.Phase != "done" && publication.Phase != "drift") {
@@ -95,12 +103,15 @@ func stackCard(ctx context.Context, store *journal.SQLite, forge prStatusForge, 
 		}
 		card.Repo = publication.Slug
 		layer := StackCardLayer{Change: publication.Change, PRNumber: publication.PRNumber, PRURL: publication.PRURL}
+		if layer.Task, err = store.TaskForChange(ctx, workspace, publication.Change); err != nil {
+			return card, err
+		}
 		landed, err := store.IsLanded(ctx, workspace, publication.Change)
 		if err != nil {
 			return card, err
 		}
 		switch {
-		case landed:
+		case landed || mergedBy[publication.Change]:
 			layer.State = "merged"
 		case inMerge:
 			layer.State = "merging"
@@ -111,6 +122,36 @@ func stackCard(ctx context.Context, store *journal.SQLite, forge prStatusForge, 
 		card.Layers = append(card.Layers, layer)
 	}
 	return card, nil
+}
+
+// mergedByMachine lists the changes the stack's merge machine has merged:
+// trunk's landing record can trail the provider's merge by a reconcile pass.
+func mergedByMachine(ctx context.Context, store *journal.SQLite, workspace, stackID, backend string) (map[string]bool, error) {
+	merged := map[string]bool{}
+	if backend == "native" {
+		merge, err := store.NativeMerge(ctx, workspace, stackID)
+		if errors.Is(err, sql.ErrNoRows) || (err == nil && merge.Phase != "done") {
+			return merged, nil
+		}
+		for _, change := range merge.Changes {
+			merged[change] = true
+		}
+		return merged, err
+	}
+	merge, err := store.LoomMerge(ctx, workspace, stackID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return merged, nil
+	}
+	if err != nil || merge.Phase != "done" {
+		return merged, err
+	}
+	for _, layer := range merge.Layers {
+		merged[layer.Change] = true
+		if layer.Change == merge.Target {
+			break
+		}
+	}
+	return merged, nil
 }
 
 // openLayerState is an open PR's one state: Loom's code approval at the PR's

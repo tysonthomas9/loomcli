@@ -77,6 +77,7 @@ function StackRow({
       className={styles.row}
       data-testid="stack-row"
       data-change={layer.change}
+      data-task={layer.task}
       data-state={layer.state}
     >
       <span className={styles.position} data-merged={merged || undefined}>
@@ -85,7 +86,7 @@ function StackRow({
       <div className={styles.rowMain}>
         <Link
           className={styles.rowTitle}
-          to={`/ws/${workspaceId}/issues/${encodeURIComponent(layer.change)}?tab=changes`}
+          to={`/ws/${workspaceId}/issues/${encodeURIComponent(layer.task || layer.change)}?tab=changes`}
           data-testid="stack-row-changes"
         >
           {title}
@@ -213,7 +214,7 @@ function StackCardView({
               card={card}
               layer={layer}
               index={index}
-              title={titles.get(layer.change) ?? layer.change}
+              title={titles.get(layer.task || layer.change) ?? layer.change}
               onMerge={(change) => void merge(change)}
               busy={busy}
             />
@@ -241,7 +242,7 @@ export function StackView({
       {stacks.map((card) => {
         const epic =
           card.layers
-            .map((layer) => byId.get(layer.change)?.parent_title)
+            .map((layer) => byId.get(layer.task || layer.change)?.parent_title)
             .find(Boolean) ?? "";
         return (
           <StackCardView

@@ -93,6 +93,8 @@ export interface QueuedMerge {
 /** One PR row of a stack card; state is the row's one pill. */
 export interface StackCardLayer {
   change: string;
+  /** The Loom task the change belongs to, if known. */
+  task?: string;
   pr_number: number;
   pr_url: string;
   state:

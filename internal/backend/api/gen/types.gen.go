@@ -3356,6 +3356,9 @@ type StackCardLayer struct {
 	PrNumber int                 `json:"pr_number"`
 	PrUrl    string              `json:"pr_url"`
 	State    StackCardLayerState `json:"state"`
+
+	// Task The Loom task the change belongs to, if known.
+	Task *string `json:"task,omitempty"`
 }
 
 // StackCardLayerState defines model for StackCardLayer.State.
