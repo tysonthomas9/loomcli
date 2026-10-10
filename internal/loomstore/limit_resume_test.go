@@ -136,3 +136,41 @@ func TestLimitResumeSendChecksInItsTransaction(t *testing.T) {
 		}
 	}
 }
+
+// TestStopReceiptCommitsWithItsMark (OR7): a bare Stop's receipt and its
+// usage-limit mark commit together: a crash before the commit leaves
+// neither, and the resume owed stays.
+func TestStopReceiptCommitsWithItsMark(t *testing.T) {
+	ctx := context.Background()
+	s, path := newSlotStore(t)
+	owed := LimitResume{AgentID: "a1", TurnID: "t1", Attempt: 1, Session: "x", DueAt: due0(t)}
+	if err := s.PutLimitResume(ctx, owed); err != nil {
+		t.Fatal(err)
+	}
+	r := Receipt{AgentID: "a1", RequestID: "stop1", Sender: "user:u", ResultJSON: "{}"}
+	mark := LimitResume{AgentID: "a1", TurnID: "t2", Attempt: 7, Session: "x"}
+	commitStateCrash = func() { panic("crash") }
+	t.Cleanup(func() { commitStateCrash = func() {} })
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("did not crash")
+			}
+		}()
+		_, _ = s.SaveStopReceipt(ctx, r, mark)
+	}()
+	commitStateCrash = func() {}
+	s = openAt(t, path)
+	if _, err := s.GetReceipt(ctx, "a1", "stop1"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("receipt after a crash before the commit: %v", err)
+	}
+	if got, err := s.GetLimitResume(ctx, "a1"); err != nil || got != owed {
+		t.Fatalf("owed after a crash before the commit = %+v, %v; want %+v", got, err, owed)
+	}
+	if _, err := s.SaveStopReceipt(ctx, r, mark); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.GetLimitResume(ctx, "a1"); err != nil || got != mark {
+		t.Fatalf("owed after the Stop = %+v, %v; want the mark %+v", got, err, mark)
+	}
+}

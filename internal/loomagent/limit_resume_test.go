@@ -169,7 +169,7 @@ func TestUsageLimitScheduleAndCap(t *testing.T) {
 		l.advance(time.Second)
 		l.wantResumes("at due", i+1)
 	}
-	if r := l.owed(); r != nil {
+	if r := l.owed(); r != nil && r.DueAt != "" {
 		t.Fatalf("the seventh limit in a row owes %+v; want none", r)
 	}
 	l.advance(24 * time.Hour)
@@ -359,8 +359,8 @@ func TestUsageLimitStopEndsEpisode(t *testing.T) {
 	stop := sendReq(l.a.AgentID, "stop1", "", user)
 	stop.Delivery = DeliveryInterrupt
 	mustSendMsg(t, l.s, stop)
-	if r := l.owed(); r != nil {
-		t.Fatalf("owed after a Stop = %+v; want dropped", r)
+	if r := l.owed(); r != nil && r.DueAt != "" {
+		t.Fatalf("owed after a Stop = %+v; want none due", r)
 	}
 	l.advance(24 * time.Hour)
 	l.wantResumes("after a Stop", 0)
@@ -376,7 +376,7 @@ func TestUsageLimitHarnessSwitchDrops(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := e.s.store.PutLimitResume(ctx, loomstore.LimitResume{AgentID: "a1", TurnID: "t1", Attempt: 1,
-		Session: e.old.NativeID, DueAt: loomstore.Stamp(time.Now().Add(-time.Second))}); err != nil {
+		Session: sessionKey(e.s.get(t, "a1")), DueAt: loomstore.Stamp(time.Now().Add(-time.Second))}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.s.Update(ctx, switchReq("sw", 1, "fb")); err != nil {
@@ -388,5 +388,66 @@ func TestUsageLimitHarnessSwitchDrops(t *testing.T) {
 	}
 	if _, err := e.s.store.GetLimitResume(ctx, "a1"); !errors.Is(err, loomstore.ErrNotFound) {
 		t.Fatalf("owed after a harness switch: %v; want dropped", err)
+	}
+}
+
+// TestUsageLimitCapSurvivesReplay (OR7): the end of the seventh limit in a
+// row leaves a marker, not nothing, so a replay of that end (a crash before
+// the turn's end committed) still owes no resume.
+func TestUsageLimitCapSurvivesReplay(t *testing.T) {
+	l := newLimitEnv(t, "opencode", true)
+	ctx := context.Background()
+	a := l.s.get(t, l.a.AgentID)
+	if err := l.s.store.PutLimitResume(ctx, loomstore.LimitResume{AgentID: a.AgentID, TurnID: "t6", Attempt: 6,
+		Session: sessionKey(a)}); err != nil { // the sixth resume was sent
+		t.Fatal(err)
+	}
+	seventh := loomharness.Event{Type: loomharness.EventTurnCompleted, TurnID: "t7", StopReason: "failed", Failure: usageLimit}
+	for range 2 { // the end, then its replay
+		if err := l.s.limitTurnEnded(ctx, a, seventh); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if due, err := l.s.store.DueLimitResumes(ctx, "ws", l.at.Add(48*time.Hour)); err != nil || len(due) != 0 {
+		t.Fatalf("due after the capped end and its replay = %+v, %v; want none", due, err)
+	}
+}
+
+// TestUsageLimitSessionIncludesHarness (OR7): a resume is bound to its
+// harness and session root, not only the native ID, which two harnesses
+// may share.
+func TestUsageLimitSessionIncludesHarness(t *testing.T) {
+	a := loomstore.Agent{Harness: "claude", HarnessSessionRoot: sp("/root/claude"), HarnessSessionID: sp("s1")}
+	r := loomstore.LimitResume{Session: sessionKey(a)}
+	if resumeVoid(a, r) {
+		t.Fatal("void on its own session")
+	}
+	b := a
+	b.Harness, b.HarnessSessionRoot = "codex", sp("/root/codex")
+	if !resumeVoid(b, r) {
+		t.Fatal("not void after a switch to a session with the same native ID")
+	}
+}
+
+// TestUsageLimitStopBeforeLimitEnd (OR7): a Stop while a turn runs marks
+// that turn, so its usage-limit end, if the feed applies it after the Stop,
+// owes no resume.
+func TestUsageLimitStopBeforeLimitEnd(t *testing.T) {
+	l := newLimitEnv(t, "opencode", true)
+	l.fh.Script(l.a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "hold"}}})
+	mustSendMsg(t, l.s, sendReq(l.a.AgentID, "u1", "go", user))
+	drained(t, l.s, "the turn runs", func() bool { return l.s.get(t, l.a.AgentID).RunningTurnID != nil })
+	l.stop() // the feed lags: the turn's end is not applied before the Stop
+	a := l.s.get(t, l.a.AgentID)
+	turn := *a.RunningTurnID
+	stop := sendReq(l.a.AgentID, "stop1", "", user)
+	stop.Delivery = DeliveryInterrupt
+	mustSendMsg(t, l.s, stop)
+	end := loomharness.Event{Type: loomharness.EventTurnCompleted, TurnID: turn, StopReason: "failed", Failure: usageLimit}
+	if err := l.s.limitTurnEnded(context.Background(), a, end); err != nil {
+		t.Fatal(err)
+	}
+	if due, err := l.s.store.DueLimitResumes(context.Background(), "ws", l.at.Add(48*time.Hour)); err != nil || len(due) != 0 {
+		t.Fatalf("due after a Stop then the turn's limit end = %+v, %v; want none", due, err)
 	}
 }

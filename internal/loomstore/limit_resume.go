@@ -43,7 +43,13 @@ func (s *Store) SetLimitResumeOn(ctx context.Context, workspace string, on bool)
 
 // PutLimitResume saves r as its agent's one resume owed, replacing any other.
 func (s *Store) PutLimitResume(ctx context.Context, r LimitResume) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO agent_limit_resumes (agent_id, turn_id, attempt, session, due_at)
+	return putLimitResume(ctx, s.db, r)
+}
+
+func putLimitResume(ctx context.Context, q interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, r LimitResume) error {
+	_, err := q.ExecContext(ctx, `INSERT INTO agent_limit_resumes (agent_id, turn_id, attempt, session, due_at)
 		VALUES (?, ?, ?, ?, ?) ON CONFLICT (agent_id) DO UPDATE SET turn_id = excluded.turn_id, attempt = excluded.attempt,
 		session = excluded.session, due_at = excluded.due_at`, r.AgentID, r.TurnID, r.Attempt, r.Session, r.DueAt)
 	return err

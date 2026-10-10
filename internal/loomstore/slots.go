@@ -372,13 +372,22 @@ func unreceipted(ctx context.Context, tx *sql.Tx, agentID string, notices []Noti
 	return fresh, nil
 }
 
-// SaveReceipt stores r as the receipt of a Send that changes no slot (an
-// interrupt with no message). The caller holds the agent lock and has
-// checked that r.RequestID has no receipt yet.
-func (s *Store) SaveReceipt(ctx context.Context, r Receipt) (Receipt, error) {
+// SaveStopReceipt stores r as the receipt of a Send that changes no slot (an
+// interrupt with no message) and, in the same transaction, mark as the
+// agent's usage-limit resume owed (OR7): a Stop ends the episode. The
+// caller holds the agent lock and has checked that r.RequestID has no
+// receipt yet.
+func (s *Store) SaveStopReceipt(ctx context.Context, r Receipt, mark LimitResume) (Receipt, error) {
 	r.CreatedAt = Stamp(time.Now())
-	_, err := s.db.ExecContext(ctx, `INSERT INTO agent_send_receipts (agent_id, request_id, sender, result_json, created_at, notices)
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `INSERT INTO agent_send_receipts (agent_id, request_id, sender, result_json, created_at, notices)
 		VALUES (?,?,?,?,?,'{}')`, r.AgentID, r.RequestID, r.Sender, r.ResultJSON, r.CreatedAt)
+		if err == nil {
+			err = putLimitResume(ctx, tx, mark)
+		}
+		commitStateCrash()
+		return err
+	})
 	return r, err
 }
 

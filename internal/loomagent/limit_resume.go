@@ -66,10 +66,10 @@ func (s *Service) limitTurnEnded(ctx context.Context, a loomstore.Agent, e loomh
 		return err
 	}
 	if attempt > int64(len(limitResumeSchedule)) {
-		return s.store.DropLimitResume(ctx, a.AgentID)
+		return s.store.PutLimitResume(ctx, limitMark(a, e.TurnID))
 	}
 	return s.store.PutLimitResume(ctx, loomstore.LimitResume{AgentID: a.AgentID, TurnID: e.TurnID, Attempt: attempt,
-		Session: deref(a.HarnessSessionID), DueAt: loomstore.Stamp(s.now().Add(limitResumeSchedule[attempt-1]))})
+		Session: sessionKey(a), DueAt: loomstore.Stamp(s.now().Add(limitResumeSchedule[attempt-1]))})
 }
 
 // sweepLimitResumes sends every usage-limit resume that is due. The
@@ -127,7 +127,7 @@ func (s *Service) limitResume(ctx context.Context, agentID string) error {
 // whose turn hit the limit (a harness switch).
 func resumeVoid(a loomstore.Agent, r loomstore.LimitResume) bool {
 	return a.DeletedAt != nil || a.Mode == "single_task" || a.State == StateArchived || a.State == StateStopping ||
-		deref(a.HarnessSessionID) != r.Session
+		sessionKey(a) != r.Session
 }
 
 // pending reports whether a slot waits or is handed over.
@@ -138,4 +138,18 @@ func pending(slots []loomstore.Slot) bool {
 		}
 	}
 	return false
+}
+
+// sessionKey names a's current native session: its harness, root and ID.
+func sessionKey(a loomstore.Agent) string {
+	return a.Harness + "\x00" + deref(a.HarnessSessionRoot) + "\x00" + deref(a.HarnessSessionID)
+}
+
+// limitMark is a's marker that turnID owes no resume and no more are sent
+// in this episode: past the cap and already sent, so the sweep skips it, a
+// replay of turnID's end keeps it, and a later limit end stays capped. Only
+// a Send (which drops it) or another turn end clears it.
+func limitMark(a loomstore.Agent, turnID string) loomstore.LimitResume {
+	return loomstore.LimitResume{AgentID: a.AgentID, TurnID: turnID, Attempt: int64(len(limitResumeSchedule)) + 1,
+		Session: sessionKey(a)}
 }

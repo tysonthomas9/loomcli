@@ -231,6 +231,7 @@ func (s *Service) interruptTurn(ctx context.Context, a *loomstore.Agent, req Sen
 	if r, ok, err := s.receipt(ctx, req); ok || err != nil {
 		return r, true, err
 	}
+	mark := limitMark(*a, deref(a.RunningTurnID)) // a Stop ends a usage-limit episode, even one its turn's end starts later (OR7)
 	running := a.RunningTurnID != nil
 	if running && req.Text != "" {
 		slots, err := s.store.Slots(ctx, a.AgentID)
@@ -268,10 +269,8 @@ func (s *Service) interruptTurn(ctx context.Context, a *loomstore.Agent, req Sen
 	if err != nil {
 		return SendResult{}, true, err
 	}
-	if err := s.store.DropLimitResume(ctx, a.AgentID); err != nil { // a Stop ends a usage-limit episode (OR7)
-		return SendResult{}, true, err
-	}
-	_, err = s.store.SaveReceipt(ctx, loomstore.Receipt{AgentID: a.AgentID, RequestID: req.RequestID, Sender: sender, ResultJSON: string(b)})
+	_, err = s.store.SaveStopReceipt(ctx, loomstore.Receipt{AgentID: a.AgentID, RequestID: req.RequestID, Sender: sender,
+		ResultJSON: string(b)}, mark)
 	return res, true, err
 }
 
