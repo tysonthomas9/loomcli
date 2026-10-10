@@ -52,15 +52,27 @@ done
 for t in podman opencode sqlite3 python3 jq curl make; do
   command -v "$t" >/dev/null 2>&1 || die "$t is required"
 done
+# The stack runs on podman (the engine every check below inspects).
+[ -z "${LOCAL_MODE_COMPOSE:-}" ] || [ "$LOCAL_MODE_COMPOSE" = "podman compose" ] \
+  || die "LOCAL_MODE_COMPOSE must be unset or 'podman compose'"
+export LOCAL_MODE_COMPOSE="podman compose"
 owned() { podman ps -a --filter "label=com.docker.compose.project=$project" --format '{{.Names}}'; }
-# The project must be entirely new: teardown runs `down -v`, so refuse any
-# container, volume or network already labelled with it.
-leftovers() {
-  owned
-  podman volume ls -q --filter "label=com.docker.compose.project=$project"
-  podman network ls -q --filter "label=com.docker.compose.project=$project"
+# loom-local's container, found by its compose labels (any name separator).
+loom_ctr() {
+  podman ps -a --filter "label=com.docker.compose.project=$project" \
+    --filter "label=com.docker.compose.service=loom-local" --format '{{.Names}}' 2>/dev/null | head -1
 }
-[ -z "$(leftovers 2>/dev/null)" ] || die "project $project already has containers, volumes or networks; pick another name"
+# The project must be entirely new: teardown runs `down -v`, so refuse any
+# container, volume or network already labelled with it. Every query must
+# succeed; an error is never read as "nothing there".
+leftovers() {
+  local c v n
+  c="$(owned)" && v="$(podman volume ls -q --filter "label=com.docker.compose.project=$project")" \
+    && n="$(podman network ls -q --filter "label=com.docker.compose.project=$project")" || return 1
+  printf '%s%s%s' "$c" "$v" "$n"
+}
+lo="$(leftovers)" || die "could not list podman containers, volumes or networks"
+[ -z "$lo" ] || die "project $project already has containers, volumes or networks; pick another name"
 # Only this suite's compose override and no Claude login copy may apply.
 [ -z "${LOCAL_MODE_COMPOSE_FILES:-}" ] || die "unset LOCAL_MODE_COMPOSE_FILES; the suite brings its own override"
 unset LOCAL_MODE_CLAUDE_COPY
@@ -68,7 +80,7 @@ unset LOCAL_MODE_CLAUDE_COPY
 model="${S15_MODEL:-anthropic/claude-sonnet-4-5}"
 api="http://127.0.0.1:${LOCAL_MODE_API_PORT}"
 prefix="$api/api/workspaces/LOCALMODE/v1"
-ctr="${project}-loom-local-1"
+ctr=""
 # The Makefile's per-project copy path (LOCAL_MODE_OPENCODE_COPY).
 state_dir="${LOCAL_MODE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/loom-local-mode}"
 [ -n "$state_dir" ] || die "could not resolve LOCAL_MODE_STATE_DIR"
@@ -94,7 +106,7 @@ export LOCAL_MODE_CODEX_AUTH=/dev/null LOCAL_MODE_CLAUDE_AUTH=/dev/null LOCAL_MO
 brought_up=""
 down() {
   [ -n "$brought_up" ] || return 0
-  (cd "$repo" && LOCAL_MODE_AGENTS_REAL=1 make -s local-mode-agents-down >"$T/down.log" 2>&1) || true
+  (cd "$repo" && LOCAL_MODE_AGENTS_REAL=1 make -s local-mode-agents-down >"$T/down.log" 2>&1)
 }
 # Image builds on this host are serialized by a shared mkdir lock (the AFT
 # agent-flows runner takes the same one): a concurrent build or prune can drop
@@ -115,14 +127,24 @@ drop_build_lock() {
   rm -f "$build_lock/owner"; rmdir "$build_lock" 2>/dev/null; lock_held=""
 }
 cleanup() {
+  local rc=$? lo
   [ -n "${follower:-}" ] && kill "$follower" 2>/dev/null
   drop_build_lock
-  [ "${S15_KEEP:-}" = 1 ] || down
+  # A failed or partial teardown fails the run, with its log.
+  if [ "${S15_KEEP:-}" != 1 ] && [ -n "$brought_up" ]; then
+    lo="$(down && leftovers)" || lo="(teardown or inventory failed)"
+    if [ -n "$lo" ] || [ -e "$state_dir/$project" ]; then
+      echo "boot-checks: teardown of $project left resources behind: ${lo:-$state_dir/$project}" >&2
+      tail -20 "$T/down.log" >&2
+      rc=1
+    fi
+  fi
   # S15_EVIDENCE=<dir> keeps the logs (never the fixture or any db).
   if [ -n "${S15_EVIDENCE:-}" ]; then
     mkdir -p "$S15_EVIDENCE" && find "$T" -maxdepth 1 \( -name '*.log' -o -name 'k1-*' \) -exec cp {} "$S15_EVIDENCE"/ \;
   fi
   rm -rf "$T"
+  exit "$rc"
 }
 trap cleanup EXIT
 
@@ -225,7 +247,9 @@ now() { if [ -n "${EPOCHREALTIME:-}" ]; then printf '%s\n' "$EPOCHREALTIME"; els
   # created container returns at once; attach only once it runs, and again if
   # the stream ends before the ready line (each attach replays from the start).
   while [ ! -s "$T/k1-timing" ]; do
-    until [ "$(podman inspect -f '{{.State.Running}}' "$ctr" 2>/dev/null)" = true ]; do sleep 0.25; done
+    until ctr="$(loom_ctr)" && [ -n "$ctr" ] && [ "$(podman inspect -f '{{.State.Running}}' "$ctr" 2>/dev/null)" = true ]; do
+      sleep 0.25
+    done
     : > "$boot"
     podman logs -f --timestamps "$ctr" 2>&1 | while IFS= read -r raw; do
       ts="${raw%% *}" line="${raw#* }"
@@ -241,12 +265,17 @@ now() { if [ -n "${EPOCHREALTIME:-}" ]; then printf '%s\n' "$EPOCHREALTIME"; els
         python3 - "$ts" "$t_models" "$t_post" "$h0" "$vm" "$h1" "$code" "$ccode" > "$T/k1-timing" <<'PY2'
 import datetime, json, re, sys
 ts, t_models, t_post, h0, vm, h1, code, ccode = sys.argv[1:]
-m = re.match(r"(.*\.\d{1,6})\d*(.*)$", ts)
-emit_vm = datetime.datetime.fromisoformat(m.group(1) + m.group(2) if m else ts).timestamp()
-skew = (float(h0) + float(h1)) / 2 - float(vm)
-emit = emit_vm + skew
-print(json.dumps({"ready_ts": ts, "models_after_s": float(t_models) - emit, "post_after_s": float(t_post) - emit,
-                  "clock_offset_s": skew, "offset_rtt_s": float(h1) - float(h0),
+# Python 3.9 fromisoformat: at most 6 fraction digits and no trailing Z.
+t = re.sub(r"Z$", "+00:00", ts)
+m = re.match(r"(.*\.\d{1,6})\d*(.*)$", t)
+emit_vm = datetime.datetime.fromisoformat(m.group(1) + m.group(2) if m else t).timestamp()
+# The VM's `date` ran at some host time in [h0, h1], so host = VM + offset
+# with offset in [h0 - vm, h1 - vm]. Taking the smallest offset gives the
+# LARGEST possible delay after emission: an upper bound, never an understatement.
+off_lo = float(h0) - float(vm)
+print(json.dumps({"ready_ts": ts, "models_after_max_s": float(t_models) - (emit_vm + off_lo),
+                  "post_after_max_s": float(t_post) - (emit_vm + off_lo),
+                  "clock_offset_range_s": [off_lo, float(h1) - float(vm)],
                   "models_http": code, "create_http": ccode}))
 PY2
         break
@@ -267,6 +296,7 @@ while [ "$rc" = 0 ] && [ ! -s "$T/k1-timing" ] && kill -0 "$follower" 2>/dev/nul
   i=$((i + 1)); sleep 1
 done
 kill "$follower" 2>/dev/null; wait "$follower" 2>/dev/null; follower=""
+ctr="$(loom_ctr)"
 podman logs "$ctr" > "$T/loom-local.log" 2>&1 || true
 
 check "K2 good host folder: make local-mode-agents-up succeeds and prints STACK UP" \
@@ -288,12 +318,14 @@ warm_line="$(grep -n "^\[local-mode\] OpenCode warm: [0-9][0-9]* models in [0-9]
 check "K1 the boot log prints \"OpenCode warm\" before \"[local-mode] ready\", with no catalog warning" \
   '[ -n "$ready_line" ] && [ -n "$warm_line" ] && [ "$warm_line" -lt "$ready_line" ] && ! grep -q "WARNING: OpenCode catalog" "$boot"'
 tget() { jq -r ".$1 // empty" "$T/k1-timing" 2>/dev/null; }
-under1() { python3 -c 'import sys; sys.exit(0 if sys.argv[1] and float(sys.argv[1]) < 1 else 1)' "$1" 2>/dev/null; }
+# An upper-bound delay must be in [0, 1): a negative one means the clocks or
+# the timestamps are wrong, so it never passes.
+under1() { python3 -c 'import sys; d = float(sys.argv[1]); sys.exit(0 if 0 <= d < 1 else 1)' "$1" 2>/dev/null; }
 mcode="$(tget models_http)" ccode="$(tget create_http)"
-check "K1 the catalog request starts within 1 s of the ready line's emission" 'under1 "$(tget models_after_s)"'
+check "K1 the catalog request starts within 1 s of the ready line's emission" 'under1 "$(tget models_after_max_s)"'
 check "K1 at ready, the catalog answers within 1 s and lists $model" \
   '[ "$mcode" = 200 ] && jq -e --arg m "$model" "any(.providers[].models[]; .id == \$m)" "$T/k1-models.json" >/dev/null 2>&1'
-check "K1 the first Create is sent within 1 s of the ready line's emission" 'under1 "$(tget post_after_s)"'
+check "K1 the first Create is sent within 1 s of the ready line's emission" 'under1 "$(tget post_after_max_s)"'
 check "K1 the first Create returns 201 with no unknown-model or catalog error" \
   '[ "$ccode" = 201 ] && jq -e ".agent_id" "$T/k1-create.json" >/dev/null 2>&1 && ! grep -qiE "unknown model|preset_invalid|catalog|not ready" "$T/k1-create.json"'
 created="$(jq -r '.agent_id // empty' "$T/k1-create.json" 2>/dev/null)"
