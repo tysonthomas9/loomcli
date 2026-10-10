@@ -29,7 +29,7 @@ func live(root string, m Message) (loomharness.Event, bool) {
 			return e, false
 		}
 		e.Type, e.TurnID, e.StopReason = loomharness.EventTurnCompleted, p.Turn.Id, stopReason(p.Turn.Status)
-		e.Error = turnError(p.Turn.Error)
+		e.Error, e.Failure = turnError(p.Turn.Error), turnFailure(p.Turn)
 		return e, p.Turn.Status != protocol.TurnStatusInProgress
 	case "item/started", "item/completed":
 		var p protocol.ItemStartedNotification // the same shape as ItemCompletedNotification
@@ -287,6 +287,36 @@ func turnError(err *protocol.TurnError) string {
 		return err.Message + "\n" + *err.AdditionalDetails
 	}
 	return err.Message
+}
+
+// turnFailure is a failed turn's class, from its error's codexErrorInfo: a code
+// string, or an object whose one key is the code. Ported from T3 Code
+// apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts (the error
+// notification's failure class). Copyright (c) 2026 T3 Tools Inc. MIT
+// License; see THIRD_PARTY_NOTICES.md.
+func turnFailure(t protocol.Turn) *loomharness.Failure {
+	err := t.Error
+	if t.Status != protocol.TurnStatusFailed || err == nil {
+		return nil
+	}
+	var code string
+	if json.Unmarshal(err.CodexErrorInfo, &code) != nil {
+		var obj map[string]json.RawMessage
+		_ = json.Unmarshal(err.CodexErrorInfo, &obj)
+		for k := range obj {
+			code = k
+		}
+	}
+	switch code {
+	case "usageLimitExceeded", "rateLimitExceeded":
+		return &loomharness.Failure{Class: loomharness.FailureUsageLimit, Retryable: true}
+	case "unauthorized":
+		return &loomharness.Failure{Class: loomharness.FailureAuth}
+	case "serverOverloaded", "internalServerError", "httpConnectionFailed", "responseStreamConnectionFailed",
+		"responseStreamDisconnected", "responseTooManyFailedAttempts":
+		return &loomharness.Failure{Class: loomharness.FailureProvider, Retryable: true}
+	}
+	return &loomharness.Failure{Class: loomharness.FailureProvider}
 }
 
 func stopReason(s protocol.TurnStatus) string {

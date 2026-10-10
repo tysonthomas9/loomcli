@@ -394,6 +394,24 @@ func (e *toolError) text() string {
 	return e.Message
 }
 
+// failure is a failed execution's class, from its error type; nil when it
+// has no error. OpenCode 2.0.19 types a provider failure by its reason:
+// RateLimit, QuotaExceeded, Authentication, Transport, ProviderInternal.
+func (e *toolError) failure() *loomharness.Failure {
+	if e == nil {
+		return nil
+	}
+	switch e.Type {
+	case "provider.rate-limit", "provider.quota":
+		return &loomharness.Failure{Class: loomharness.FailureUsageLimit, Retryable: true}
+	case "provider.auth":
+		return &loomharness.Failure{Class: loomharness.FailureAuth}
+	case "provider.transport", "provider.timeout", "provider.connect", "provider.internal":
+		return &loomharness.Failure{Class: loomharness.FailureProvider, Retryable: true}
+	}
+	return &loomharness.Failure{Class: loomharness.FailureProvider}
+}
+
 // toolInput is a tool call's input object as text; "" when it has none.
 func toolInput(raw json.RawMessage) string {
 	switch string(raw) {
@@ -492,7 +510,7 @@ func (m *mapper) fill(e *loomharness.Event, w wireEvent) bool {
 		}
 	case "session.execution.succeeded", "session.execution.failed":
 		e.Type, e.StopReason = loomharness.EventTurnCompleted, stopReason(lastDot(w.Type))
-		e.Error = d.Error.text()
+		e.Error, e.Failure = d.Error.text(), d.Error.failure()
 	case "permission.asked":
 		e.Type, e.AskID = loomharness.EventAskOpened, d.ID
 		e.Text = permissionAbout(d.Action, d.Message, d.Resources, d.Metadata.Files)

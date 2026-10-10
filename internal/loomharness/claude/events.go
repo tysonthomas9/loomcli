@@ -31,6 +31,7 @@ type mapper struct {
 	cancelled       bool                        // Loom interrupted the running turn
 	lastInterrupted bool
 	usage           loomharness.Usage // the running turn's steps so far
+	rateLimited     bool              // the running turn's last root assistant frame was a rate_limit error
 }
 
 func newMapper(ref loomharness.NativeRef) *mapper {
@@ -86,6 +87,12 @@ type wireFrame struct {
 	TaskID           string   `json:"task_id"`
 	TotalCostUSD     float64  `json:"total_cost_usd"` // result: the session's running total
 	Errors           []string `json:"errors"`         // result: a non-success result's errors
+	IsError          bool     `json:"is_error"`       // result: a success result that is an API error
+	Result           string   `json:"result"`         // result: its text
+	APIErrorStatus   int      `json:"api_error_status"`
+	TerminalReason   string   `json:"terminal_reason"`
+	Error            string   `json:"error"`              // assistant: its API error, e.g. rate_limit
+	ParentToolUseID  *string  `json:"parent_tool_use_id"` // assistant: set on a subagent's frame
 	Event            struct {
 		Type    string `json:"type"`
 		Index   int    `json:"index"`
@@ -146,13 +153,16 @@ func (m *mapper) frame(raw []byte) []loomharness.Event {
 	case f.Type == "stream_event":
 		m.stream(f, emit)
 	case f.Type == "assistant":
+		if f.ParentToolUseID == nil {
+			m.rateLimited = f.Error == "rate_limit"
+		}
 		m.assistant(f.Message.ID, blocks, emit)
 	case f.Type == "user" && !f.IsReplay:
 		m.toolResults(blocks, emit)
 	case f.Type == "system" && f.Subtype == "task_started" && f.TaskType == "local_agent":
 		emit(loomharness.Event{Type: loomharness.EventSubagentStarted, ItemID: f.TaskID})
 	case f.Type == "result":
-		m.result(f.Subtype, f.TotalCostUSD, resultError(f), emit)
+		m.result(f, emit)
 	}
 	return out
 }
@@ -242,36 +252,58 @@ func (m *mapper) assistant(msg string, blocks []block, emit func(loomharness.Eve
 }
 
 // result ends the turn: completed on success, cancelled when Loom
-// interrupted it, else failed. Its usage is the sum of the turn's steps (the
-// result's own usage may be a running total). Its cost is the session's
-// running total_cost_usd, which a resumed process continues; loomagent saves
-// its rise since the session's last saved total.
-func (m *mapper) result(subtype string, total float64, reason string, emit func(loomharness.Event)) {
-	m.usage.CostTotalUSD = total
+// interrupted it, else failed, with its class. A success result with
+// is_error is how the CLI reports an API error (T3 Code's
+// terminalStatusFromResult), so it fails the turn. Its usage is the sum of
+// the turn's steps (the result's own usage may be a running total). Its
+// cost is the session's running total_cost_usd, which a resumed process
+// continues; loomagent saves its rise since the session's last saved total.
+func (m *mapper) result(f wireFrame, emit func(loomharness.Event)) {
+	m.usage.CostTotalUSD = f.TotalCostUSD
 	emit(loomharness.Event{Type: loomharness.EventUsage, ItemID: m.turnID + "/usage", Usage: m.usage})
 	m.usage = loomharness.Usage{}
 	stop := "failed"
 	switch {
-	case subtype == "success":
+	case f.Subtype == "success" && !f.IsError:
 		stop = "completed"
 	case m.cancelled:
 		stop = "cancelled"
 	}
 	e := loomharness.Event{Type: loomharness.EventTurnCompleted, StopReason: stop}
 	if stop == "failed" {
-		e.Error = cmp.Or(reason, subtype)
+		e.Error, e.Failure = cmp.Or(resultError(f), f.Subtype), m.failure(f)
 	}
 	emit(e)
-	m.turnID, m.lastInterrupted, m.cancelled = "", stop == "cancelled", false
+	m.turnID, m.lastInterrupted, m.cancelled, m.rateLimited = "", stop == "cancelled", false, false
 }
 
-// resultError is a non-success result's first user-facing error. Ported
-// from T3 Code apps/server/src/provider/Layers/ClaudeAdapter.ts
-// (resultUserFacingError) at commit 2daff8c25. Copyright (c) 2026 T3 Tools
-// Inc. MIT License; see THIRD_PARTY_NOTICES.md. "[ede_diagnostic] ..."
-// entries are the CLI's internal telemetry, never the reason shown.
+// failure is a failed result's class. Ported from T3 Code
+// apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts
+// (providerFailureFromResult). Copyright (c) 2026 T3 Tools Inc. MIT
+// License; see THIRD_PARTY_NOTICES.md. A blocking_limit, a 429 or the
+// turn's rate_limit assistant frame is a usage limit; a 401 is auth; a 529
+// (overloaded) is a retryable provider error.
+func (m *mapper) failure(f wireFrame) *loomharness.Failure {
+	switch {
+	case f.TerminalReason == "blocking_limit" || f.APIErrorStatus == 429 || m.rateLimited:
+		return &loomharness.Failure{Class: loomharness.FailureUsageLimit, Retryable: true}
+	case f.APIErrorStatus == 401:
+		return &loomharness.Failure{Class: loomharness.FailureAuth}
+	}
+	return &loomharness.Failure{Class: loomharness.FailureProvider, Retryable: f.APIErrorStatus == 529}
+}
+
+// resultError is a failed result's first user-facing error, or a success
+// result's text when it is an API error. Ported from T3 Code
+// apps/server/src/provider/Layers/ClaudeAdapter.ts (resultUserFacingError)
+// at commit 2daff8c25. Copyright (c) 2026 T3 Tools Inc. MIT License; see
+// THIRD_PARTY_NOTICES.md. "[ede_diagnostic] ..." entries are the CLI's
+// internal telemetry, never the reason shown.
 func resultError(f wireFrame) string {
 	if f.Subtype == "success" {
+		if f.IsError {
+			return f.Result
+		}
 		return ""
 	}
 	for _, e := range f.Errors {
@@ -312,7 +344,7 @@ func (m *mapper) tool(b block) *loomharness.Tool {
 // lost, so it emits feed.gap, after the cut-off turn's partial usage.
 func (m *mapper) exited() []loomharness.Event {
 	out := m.flush()
-	m.turnID, m.cancelled, m.msgID, m.handed = "", false, "", ""
+	m.turnID, m.cancelled, m.msgID, m.handed, m.rateLimited = "", false, "", "", false
 	m.seq++
 	return append(out, loomharness.Event{Type: loomharness.EventFeedGap, Session: m.ref, Seq: m.seq, Time: time.Now()})
 }

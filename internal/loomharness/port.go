@@ -250,12 +250,37 @@ type Event struct {
 	Sender     string // the Loom slot sender of a message.delivered; loomagent sets it
 	StopReason string // completed | cancelled | declined (OpenCode, a rejected permission) | failed, for turn.completed
 	Error      string // for a failed turn.completed: the harness's reason, when it gives one
-	Usage      Usage  // for usage: this step's own counts, never a running total
-	Tool       *Tool  // for a tool item's item.started and item.completed: what the chat shows
+	// Failure, for a failed turn.completed, is the failure's class, when the
+	// harness says why the turn failed; nil when it does not.
+	Failure *Failure
+	Usage   Usage // for usage: this step's own counts, never a running total
+	Tool    *Tool // for a tool item's item.started and item.completed: what the chat shows
 	// Questions, for a question's ask.opened, are what it asks when the
 	// harness says; Text is then the first question.
 	Questions []Question
 }
+
+// Failure is a failed turn's terminal failure, the same for every harness.
+// Retryable: the same input may succeed later unchanged (a usage limit after
+// its window, an overloaded or dropped provider), never after an auth or
+// request error.
+//
+// No harness reports when a usage limit resets: Claude's rate_limit_event
+// (rate_limit_info.resetsAt) and codex's account/rateLimits/updated
+// (rateLimits.primary|secondary.resetsAt) are not mapped until a recorded
+// native frame shows a non-null reset on a rejected limit, and OpenCode has
+// no reset field. A reset time, when one is mapped, is its own event.
+type Failure struct {
+	Class     string `json:"class"` // FailureUsageLimit | FailureAuth | FailureProvider
+	Retryable bool   `json:"retryable,omitempty"`
+}
+
+// Failure classes.
+const (
+	FailureUsageLimit = "usage_limit"    // a plan, quota or rate limit
+	FailureAuth       = "auth"           // the credential was refused
+	FailureProvider   = "provider_error" // any other failure the harness names
+)
 
 // Tool is a tool call as the chat shows it, the same for every harness: the
 // harness's tool name, its input as text (JSON when the input is structured)

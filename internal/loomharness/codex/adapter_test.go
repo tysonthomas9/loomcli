@@ -1048,3 +1048,81 @@ func TestCodexAsksAndFailuresCarryText(t *testing.T) {
 		t.Fatalf("turn = %+v", e)
 	}
 }
+
+// TestCodexFailureClass (OR9): a failed turn carries the class of its
+// codexErrorInfo, as T3 Code's CodexAdapterV2 classifies it, live and in a
+// history read: usageLimitExceeded and rateLimitExceeded are a usage limit,
+// unauthorized is auth, an overloaded, internal or dropped provider is a
+// retryable provider error, any other code (or none) a provider error. A
+// failed turn with no error carries no failure. The recorded
+// account/rateLimits/updated frame (null windows, testdata/turn.jsonl) maps
+// to nothing: codex reports no reset time.
+func TestCodexFailureClass(t *testing.T) {
+	limit := &loomharness.Failure{Class: loomharness.FailureUsageLimit, Retryable: true}
+	cases := []struct {
+		info string
+		want *loomharness.Failure
+	}{
+		{`"usageLimitExceeded"`, limit},
+		{`"rateLimitExceeded"`, limit},
+		{`"unauthorized"`, &loomharness.Failure{Class: loomharness.FailureAuth}},
+		{`"serverOverloaded"`, &loomharness.Failure{Class: loomharness.FailureProvider, Retryable: true}},
+		{`{"responseStreamDisconnected":{"httpStatusCode":502}}`, &loomharness.Failure{Class: loomharness.FailureProvider, Retryable: true}},
+		{`"contextWindowExceeded"`, &loomharness.Failure{Class: loomharness.FailureProvider}},
+		{`null`, &loomharness.Failure{Class: loomharness.FailureProvider}},
+	}
+	a := NewAdapter(Config{})
+	feed, err := a.Feed(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = feed.Close() }()
+	for _, c := range cases {
+		failed := `{"threadId":"t-1","turn":{"id":"u","items":[],"status":"failed","error":{"message":"m","codexErrorInfo":` + c.info + `}}}`
+		a.receive("r", Message{Method: "turn/completed", ThreadID: "t-1", Params: json.RawMessage(failed)})
+		if e := next(t, feed); e.StopReason != "failed" || !reflect.DeepEqual(e.Failure, c.want) {
+			t.Errorf("live %s: %+v; want %+v", c.info, e.Failure, c.want)
+		}
+	}
+	a.receive("r", Message{Method: "turn/completed", ThreadID: "t-1", Params: json.RawMessage(`{"threadId":"t-1","turn":{"id":"u","items":[],"status":"failed","error":null}}`)})
+	if e := next(t, feed); e.StopReason != "failed" || e.Failure != nil {
+		t.Errorf("no error: %+v", e.Failure)
+	}
+	b, err := os.ReadFile("testdata/turn.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		if strings.Contains(line, `"account/rateLimits/updated"`) {
+			var m Message
+			if err := json.Unmarshal([]byte(line), &m); err != nil {
+				t.Fatal(err)
+			}
+			if e, ok := live("r", m); ok {
+				t.Errorf("account/rateLimits/updated -> %+v; want nothing", e)
+			}
+		}
+	}
+
+	f := newFixture(t, "codex-cli 0.157.1")
+	ha, ctx := newAdapter(t, f), context.Background()
+	root := ha.Root("")
+	saveStore(root, fakeStore{Threads: map[string]fakeThread{thread: {}}})
+	var turns []string
+	for i, c := range cases {
+		turns = append(turns, `{"id":"u`+strconv.Itoa(i)+`","items":[],"status":"failed","error":{"message":"m","codexErrorInfo":`+c.info+`},"startedAt":1790879001,"completedAt":1790879001}`)
+	}
+	page := `{"data":[` + strings.Join(turns, ",") + `],"nextCursor":null,"backwardsCursor":null}`
+	if err := os.WriteFile(filepath.Join(root, "turns-"+thread+".json"), []byte(page), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ha.Session(loomharness.NativeRef{Root: root, NativeID: thread}).Messages(ctx, "", 50)
+	if err != nil || len(got.Events) != len(cases) {
+		t.Fatalf("history: %+v %v", got, err)
+	}
+	for i, c := range cases {
+		if e := got.Events[i]; e.Type != loomharness.EventTurnCompleted || !reflect.DeepEqual(e.Failure, c.want) {
+			t.Errorf("history %s: %+v; want %+v", c.info, e.Failure, c.want)
+		}
+	}
+}

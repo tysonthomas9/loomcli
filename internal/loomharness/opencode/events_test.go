@@ -496,3 +496,40 @@ func TestEventsTurnAfterADeclineIsItsOwn(t *testing.T) {
 		t.Fatalf("history turns:\n%s\nwant:\n%s", strings.Join(hist, "\n"), strings.Join(wantHist, "\n"))
 	}
 }
+
+// TestOpenCodeFailureNoReset (OR9): a failed execution carries the class of
+// its error type, as OpenCode 2.0.19 names a provider failure (its
+// RateLimit, QuotaExceeded, Authentication, Transport and ProviderInternal
+// reasons): a rate limit or quota is a usage limit, auth is auth, a
+// transport, timeout, connect or internal error is a retryable provider
+// error, any other type a provider error. OpenCode reports no reset time.
+// A succeeded execution, or a failure with no error, carries no failure.
+func TestOpenCodeFailureNoReset(t *testing.T) {
+	m := mapper{seq: map[string]int64{}, turn: map[string]string{}}
+	limit := &loomharness.Failure{Class: loomharness.FailureUsageLimit, Retryable: true}
+	retry := &loomharness.Failure{Class: loomharness.FailureProvider, Retryable: true}
+	for typ, want := range map[string]*loomharness.Failure{
+		"provider.rate-limit":     limit,
+		"provider.quota":          limit,
+		"provider.auth":           {Class: loomharness.FailureAuth},
+		"provider.transport":      retry,
+		"provider.timeout":        retry,
+		"provider.connect":        retry,
+		"provider.internal":       retry,
+		"provider.invalid-output": {Class: loomharness.FailureProvider},
+		"provider.content-filter": {Class: loomharness.FailureProvider},
+	} {
+		e, ok := m.mapEvent([]byte(`{"type":"session.execution.failed","data":{"sessionID":"ses_1","error":{"type":"` + typ + `","message":"m"}}}`))
+		if !ok || e.StopReason != "failed" || e.Failure == nil || *e.Failure != *want {
+			t.Errorf("%s -> %+v; want %+v", typ, e.Failure, want)
+		}
+	}
+	for _, raw := range []string{
+		`{"type":"session.execution.failed","data":{"sessionID":"ses_1"}}`,
+		`{"type":"session.execution.succeeded","data":{"sessionID":"ses_1"}}`,
+	} {
+		if e, ok := m.mapEvent([]byte(raw)); !ok || e.Failure != nil {
+			t.Errorf("%s -> %+v", raw, e.Failure)
+		}
+	}
+}
