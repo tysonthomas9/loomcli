@@ -197,7 +197,7 @@ if phase == 'setup':
         request(forge + '/__register', 'POST', {'repo': 'owner/recovery-' + name, 'remote': str(remote), 'native_stacks': False}, expected=201)
         request(api + '/agents', 'POST', {'name': 'lead', 'role_name': 'lead', 'auto': False, 'cross_repo': True, 'repos': [], 'backend': 'codex'}, expected=(200, 201))
         if name == 'foreign':
-            subprocess.run([os.environ['AFT_LOOM_BIN'], 'delivery-mode', 'trunk', '--workspace', workspace], env={**os.environ, 'LOOM_CONFIG_DIR': os.environ['AFT_LOOM_CONFIG_DIR'], 'LOOM_WORKSPACE': workspace}, check=True)
+            subprocess.run([os.environ['AFT_LOOM_BIN'], 'git-settings', '--delivery', 'pr-per-task', '--workspace', workspace], env={**os.environ, 'LOOM_CONFIG_DIR': os.environ['AFT_LOOM_CONFIG_DIR'], 'LOOM_WORKSPACE': workspace}, check=True)
         epic = request(api + '/issues', 'POST', {'title': 'Recovery ' + name + ' epic', 'issue_type': 'epic', 'priority': 2}, expected=(200, 201))
         save('epic.json', epic)
         task = request(api + '/issues', 'POST', {'title': 'Recovery ' + name + ' task', 'issue_type': 'task', 'priority': 2, 'parent': epic['data']['id'], 'design': 'STUB_CODEX_PATCH=' + ('server.pem' if name == 'incomplete' else 'review-output.txt')}, expected=(200, 201))

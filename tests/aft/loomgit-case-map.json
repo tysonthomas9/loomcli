@@ -37,7 +37,8 @@
     "AFT-CF2": "0dd2ec08-e8b5-4955-b152-41130246002c",
     "AFT-CF3": "8182768a-1441-447f-b41f-938876194e80",
     "AFT-CF4": "a10dc943-b4dd-4ad3-81e2-a0904ea26faf",
-    "AFT-PR1": "c06c44d3-4c94-4223-9bf4-ab9bdffd5994"
+    "AFT-PR1": "c06c44d3-4c94-4223-9bf4-ab9bdffd5994",
+    "AFT-CLI1": "8e7684e9-add4-4366-bde4-59ce92b9260d"
   },
   "suites": {
     "loomgit-matrix-walk": {
@@ -595,14 +596,17 @@
       }
     },
     "loomgit-git-settings": {
-      "Settings Git section shows, saves and follows the CLI; lead permissions stay human only": {
+      "Settings Git section and loom git-settings change the same three settings; loom --help shows only the small Git CLI": {
         "requirements": [
           "D12",
           "D21",
           "D31",
-          "P2.20"
+          "P2.20",
+          "S3"
         ],
-        "tracker": []
+        "tracker": [
+          "AFT-CLI1"
+        ]
       },
       "switching from Stacked PRs to PR per task leaves open PRs and sends the next task to trunk": {
         "requirements": [
@@ -791,34 +795,35 @@
       }
     },
     "loomgit-merge-stale": {
-      "merge confirmation rejects a published head that changed after preview": {
+      "Merge up to here after the PR's head moved lands the new head, never the old one": {
         "requirements": [
           "D27",
           "P3.9c",
+          "P3.16",
           "D38"
         ],
-        "tracker": [],
-        "note": "merge-up-to preview: changes with P3.16 (D38)"
+        "tracker": []
       }
     },
     "loomgit-merge-up-to": {
-      "native four-layer stack merges through layer three over HTTP": {
+      "native four-layer stack merges up to layer three with Merge up to here": {
         "requirements": [
           "P3.9c",
           "P5.2",
+          "P3.16",
           "D38"
         ],
-        "tracker": [],
-        "note": "changes with P3.16 (D38)"
+        "tracker": []
       },
-      "Loom four-layer stack merges through layer three from CLI": {
+      "Loom four-layer stack merges up to layer three with Merge up to here": {
         "requirements": [
           "P3.9b",
           "P5.2",
+          "P3.16",
           "D38"
         ],
         "tracker": [],
-        "note": "CLI merge-up-to is removed by P3.16 (D38); Loom backend on GitHub is removed by P3.17 (D41)"
+        "note": "Loom backend on GitHub is removed by P3.17 (D41)"
       }
     },
     "loomgit-no-changes": {
@@ -982,15 +987,15 @@
       }
     },
     "loomgit-zz-lead-merge": {
-      "lead merge request runs only after a human confirms it in the UI": {
+      "The lead queues a whole-stack merge with Lead may merge on": {
         "requirements": [
           "P3.11",
+          "P3.16",
           "D38"
         ],
         "tracker": [
           "AFT-G2"
-        ],
-        "note": "the human-confirmed lead request goes with P3.16 (D38)"
+        ]
       },
       "when_green merges after required checks pass and stops below changes requested": {
         "requirements": [
@@ -1001,10 +1006,10 @@
       "Loom backend merges up to B and later merges C": {
         "requirements": [
           "P3.9e",
+          "P3.16",
           "D38"
         ],
-        "tracker": [],
-        "note": "CLI merge-up-to is removed by P3.16 (D38)"
+        "tracker": []
       },
       "cross-repo dependency holds loom/dependencies until its predecessor lands": {
         "requirements": [

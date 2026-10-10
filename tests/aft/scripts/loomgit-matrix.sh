@@ -525,7 +525,7 @@ lead-do)
   #   approve       ok|refused  Approve and create PR through the verdict API as the lead
   #   cli-approve   refused     the lead runs `loom approve` (must not bypass the policy; needs P2.25)
   #   merge         refused     Approve and merge through the API as the lead (D38)
-  #   request-merge refused     the lead asks to merge its stack through <slot> (D38: no queue, no human Confirm)
+  #   request-merge refused     the lead runs `loom merge <task>` for <slot> (D38: refused while Lead may merge is off, nothing queued)
   #   set-approve   refused     the lead turns Lead may approve off
   #   set-merge     refused     the lead turns Lead may merge to when green
   #   set-mode      ok          the lead switches delivery mode to PR per task
@@ -540,11 +540,7 @@ lead-do)
       body="{\"head_sha\":\"$sha\",\"verdict\":\"approve\",\"actor\":{\"kind\":\"lead\",\"id\":\"lead\"}}" ;;
     merge) url="$api/changes/$change/merge-approval"; method=POST
       body="{\"lead\":\"lead\",\"head_sha\":\"$pr_head\",\"actor\":{\"kind\":\"lead\",\"id\":\"lead\"}}" ;;
-    request-merge) url="$api/agents/lead/git/merge-requests"; method=POST
-      loom stack list --json > "$work/stacks.json"
-      stack="$(json "$work/stacks.json" 'm=[e["id"] for e in v if e.get("source")=="published" and any(l.get("change")==sys.argv[2] for l in e.get("layers") or [])]; print(m[0] if m else "")' "$change")"
-      [[ -n "$stack" ]] || fail "no published stack contains $slot's change $change: $(cat "$work/stacks.json")"
-      body="{\"stack_id\":\"$stack\",\"target\":\"$change\",\"actor\":{\"kind\":\"lead\",\"id\":\"lead\"}}" ;;
+    request-merge) ;;
     set-approve) url="$api/git/settings"; method=PUT; body='{"actor":{"kind":"lead","id":"lead"},"lead_may_approve_publish":false}' ;;
     set-merge) url="$api/git/settings"; method=PUT; body='{"actor":{"kind":"lead","id":"lead"},"lead_may_merge":"when_green"}' ;;
     set-mode) url="$api/git/settings"; method=PUT; body='{"actor":{"kind":"lead","id":"lead"},"delivery_mode":"trunk"}' ;;
@@ -565,9 +561,13 @@ lead-do)
   esac
   [[ "$forge" == github && -n "$refusal" ]] && lead_mark "$refusal"
   if [[ "$forge" == fake ]]; then
-    if [[ "$action" == cli-approve ]]; then
+    if [[ "$action" == cli-approve || "$action" == request-merge ]]; then
       set +e
-      LOOM_AGENT_NAME=lead LOOM_AGENT_ROLE=lead LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" approve "$change" "$number" --workspace "$workspace" > "$work/lead-$action.out" 2>&1
+      if [[ "$action" == cli-approve ]]; then
+        LOOM_AGENT_NAME=lead LOOM_AGENT_ROLE=lead LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" approve "$change" "$number" --workspace "$workspace" > "$work/lead-$action.out" 2>&1
+      else
+        LOOM_AGENT_NAME=lead LOOM_AGENT_ROLE=lead LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" merge "$(task_id "$slot")" --workspace "$workspace" > "$work/lead-$action.out" 2>&1
+      fi
       code=$?
       set -e
     else
@@ -577,6 +577,8 @@ lead-do)
   else
     if [[ "$action" == cli-approve ]]; then
       lead_say "Loom test harness: approve change $change revision $number of workspace $workspace by running exactly: loom approve $change $number --workspace $workspace . Then report the command output."
+    elif [[ "$action" == request-merge ]]; then
+      lead_say "Loom test harness: merge task $(task_id "$slot")'s stack by running exactly: loom merge $(task_id "$slot") --workspace $workspace . Then report the command output."
     else
       lead_say "Loom test harness: as the lead, run exactly this one command and report the HTTP status it prints: curl -sS -w '%{http_code}' -X $method '$url' -H 'Content-Type: application/json' -d '$body'"
     fi
@@ -605,8 +607,8 @@ lead-do)
       for _ in $(seq 1 $((10 * scale))); do
         got="$(approval_state "$slot" || true)"
         [[ "${got%%|*}" != waiting && "${got%%|*}" != merging && "${got%%|*}" != merged ]] || fail "the lead's merge was accepted: $got"
-        curl -fsS "$api/agents/lead/git/merge-requests" > "$work/merge-requests.json"
-        json "$work/merge-requests.json" 'assert not [x for x in (v or []) if x.get("target")==sys.argv[2]], "a lead merge request was queued: %r" % v' "$change" || fail "the lead's merge request was queued: $(cat "$work/merge-requests.json")"
+        curl -fsS "$api/git/merge-queue" > "$work/merge-queue.json"
+        json "$work/merge-queue.json" 'assert not [x for x in (v or []) if x.get("target")==sys.argv[2]], "a lead merge was queued: %r" % v' "$change" || fail "the lead's merge was queued: $(cat "$work/merge-queue.json")"
         pulls || fail "the forge's PR list is unreachable"
         [[ "$(pull_field "$slot" merged)" != True ]] || fail "PR of $slot merged after the lead's refused merge"
         sleep 1

@@ -2,6 +2,8 @@
 # P2.20: the Settings Git section (delivery mode, lead may approve, lead may
 # merge) reads and writes the server, follows the CLI, keeps the two lead
 # permissions human only, and a mode switch leaves open PRs alone.
+# S3 (AFT-CLI1): loom --help lists only the small Git CLI, loom git-settings
+# changes the same three settings as the UI, and the hidden loom apply works.
 set -euo pipefail
 source "$AFT_TESTS_DIR/scripts/loomgit-lib.sh"
 
@@ -15,9 +17,21 @@ remote="$case_dir/origin.git"
 export LOOM_CONNECTOR_GITHUB_BASE_URL="$AFT_FAKE_GH_BASE"
 export GITHUB_TOKEN=aft-fixture-token
 
-# delivery-mode reads its own --workspace flag after the subcommand.
-loom_setting() {
-  LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" "$@" --workspace "$workspace"
+# loom_cli runs the CLI as a human at a shell (no agent markers).
+loom_cli() {
+  env -u LOOM_AGENT_NAME -u LOOM_ORCHESTRATOR_SESSION_ID -u LOOM_AGENT_TERMINAL_ID \
+    LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" "$@"
+}
+
+git_settings() {
+  loom_cli git-settings --workspace "$workspace" "$@"
+}
+
+# expect_cli_settings checks loom git-settings prints delivery, auto-merge and
+# lead-may-approve as given.
+expect_cli_settings() {
+  git_settings > "$case_dir/cli-settings.txt"
+  printf 'delivery: %s\nauto-merge: %s\nlead-may-approve: %s\n' "$1" "$2" "$3" | diff -u - "$case_dir/cli-settings.txt"
 }
 
 settings() {
@@ -134,15 +148,40 @@ if [[ "$case_name" == ui ]]; then
   test "$(ui_value git-delivery-mode)" = trunk
   test "$(ui_value git-lead-may-approve)" = off
   test "$(ui_value git-lead-may-merge)" = when_green
-  test "$(loom_setting delivery-mode)" = trunk
-  test "$(loom_setting lead-may-merge)" = when_green
+  expect_cli_settings pr-per-task on off
   browser screenshot "$case_dir/ui-saved.png" >/dev/null
 
-  loom_setting delivery-mode stack >/dev/null
-  loom_setting lead-may-merge off >/dev/null
+  # The CLI changes the same three settings the UI shows.
+  git_settings --delivery stack --auto-merge off --lead-may-approve on > "$case_dir/cli-set.txt"
+  expect_cli_settings stack off on
+  expect_settings stack true off
   open_git_settings
   test "$(ui_value git-delivery-mode)" = stack
+  test "$(ui_value git-lead-may-approve)" = on
   test "$(ui_value git-lead-may-merge)" = off
+  browser screenshot "$case_dir/ui-after-cli.png" >/dev/null
+  git_settings --lead-may-approve off >/dev/null
+
+  # The lead may change delivery only, from the CLI as from the API.
+  lead_cli() { LOOM_AGENT_NAME=lead LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" git-settings --workspace "$workspace" "$@"; }
+  if lead_cli --auto-merge on > "$case_dir/lead-cli.txt" 2>&1; then echo "lead turned auto-merge on" >&2; exit 1; fi
+  grep -q 'only a human' "$case_dir/lead-cli.txt"
+  expect_cli_settings stack off off
+
+  # loom --help lists only the small Git CLI; the plumbing is hidden but runs.
+  loom_cli --help > "$case_dir/help.txt"
+  python3 - "$case_dir/help.txt" <<'PY'
+import sys
+text = open(sys.argv[1]).read()
+section = text.split("Git Operations:\n", 1)[1].split("\n\n", 1)[0]
+shown = sorted(line.split()[0] for line in section.splitlines())
+assert shown == ["abandon", "approve", "git-settings", "merge", "reject", "sync", "unapply"], shown
+PY
+  for hidden in apply pr pr-stack pull restack; do loom_cli "$hidden" --help >/dev/null; done
+  for gone in push delivery-mode lead-may-merge retention-sweep merge-up-to request-merge confirm-merge; do
+    loom_cli "$gone" > "$case_dir/gone-$gone.txt" 2>&1 || true
+    grep -q "unknown command \"$gone\"" "$case_dir/gone-$gone.txt"
+  done
 
   test "$(put_settings '{"actor":{"kind":"lead","id":"lead"},"delivery_mode":"trunk"}')" = 200
   test "$(put_settings '{"actor":{"kind":"lead","id":"lead"},"lead_may_approve_publish":true}')" = 403
@@ -160,9 +199,15 @@ for name in a b; do
   approve "$case_dir/revisions-$name.json" "$case_dir/change-$name.id"
   change="$(cat "$case_dir/change-$name.id")"
   revision="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["data"][0]["number"])' "$case_dir/revisions-$name.json")"
-  curl -fsS -X POST "$api/git/apply" -H 'Content-Type: application/json' \
-    -d "{\"change\":\"$change\",\"revision\":$revision,\"lead\":\"lead\"}" > "$case_dir/apply-$name.json"
-  grep -q '"success":true' "$case_dir/apply-$name.json"
+  if [[ "$name" == a ]]; then
+    # S3: the hidden loom apply (was push) applies an approved revision.
+    loom_cli apply "$change" "$revision" --lead lead --workspace "$workspace" > "$case_dir/apply-$name.txt"
+    grep -q 'Applied revision to local working area' "$case_dir/apply-$name.txt"
+  else
+    curl -fsS -X POST "$api/git/apply" -H 'Content-Type: application/json' \
+      -d "{\"change\":\"$change\",\"revision\":$revision,\"lead\":\"lead\"}" > "$case_dir/apply-$name.json"
+    grep -q '"success":true' "$case_dir/apply-$name.json"
+  fi
   curl -fsS "$api/issues/$(cat "$case_dir/task-$name.id")/revisions" > "$case_dir/applied-$name.json"
   approve "$case_dir/applied-$name.json" "$case_dir/applied-change-$name.id"
 done
@@ -172,7 +217,7 @@ python3 -c 'import json,sys; p=json.load(open(sys.argv[1])); assert len(p)==2, p
 
 test "$(put_settings '{"actor":{"kind":"lead","id":"lead"},"delivery_mode":"trunk"}')" = 200
 expect_settings trunk true off
-test "$(loom_setting delivery-mode)" = trunk
+expect_cli_settings pr-per-task off on
 
 approve "$case_dir/revisions-c.json" "$case_dir/change-c.id"
 change="$(cat "$case_dir/change-c.id")"

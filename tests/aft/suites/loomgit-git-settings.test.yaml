@@ -5,17 +5,17 @@ teardown: >-
   bash "$AFT_TESTS_DIR/scripts/loomgit-git-settings.sh" teardown ui || true;
   bash "$AFT_TESTS_DIR/scripts/loomgit-git-settings.sh" teardown switch || true
 tests:
-  - name: Settings Git section shows, saves and follows the CLI; lead permissions stay human only
-    intent: The three Git settings round-trip between the Settings UI, the server and the CLI; the lead may change only delivery mode
+  - name: Settings Git section and loom git-settings change the same three settings; loom --help shows only the small Git CLI
+    intent: The three Git settings round-trip between the Settings UI, the server and loom git-settings; the lead may change only delivery mode; loom --help lists only the kept Git commands and the hidden ones still run
     steps:
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-git-settings.sh" setup ui
         intent: Create a disposable repository, workspace and lead through the product API
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-git-settings.sh" run ui
-        intent: Read, change and reload the Git settings in the browser, change them from the CLI, and try them as the lead
+        intent: Read, change and reload the Git settings in the browser, change them with loom git-settings, try them as the lead, and check loom --help
   - name: switching from Stacked PRs to PR per task leaves open PRs and sends the next task to trunk
     intent: A stacked pair is published, the lead switches to PR per task, and the next approved task opens its own PR to trunk
     steps:
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-git-settings.sh" setup switch
         intent: Create a disposable repository, workspace and lead through the product API
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-git-settings.sh" run switch
-        intent: Publish a stacked pair, switch delivery mode, approve and publish a third task, and compare the PRs
+        intent: Publish a stacked pair (applying the first with loom apply), switch delivery mode, approve and publish a third task, and compare the PRs

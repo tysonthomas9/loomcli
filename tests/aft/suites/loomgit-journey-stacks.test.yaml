@@ -154,29 +154,12 @@ tests:
         intent: "Checkpoint PR-4: the approved task shows its existing PR"
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" chain loom-stack 4
         intent: Readback asserts task-only PR diffs, ordered bases, exact task bytes, native membership when selected, provider create count, and working-area leaf equality
-      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-fields loom-stack 2
-        intent: Human observer opens the mounted lead Git merge form and fills the existing stack ID and target layer
-      - click:
-          role: button
-          name: Show merge state
-          exact: true
-        intent: Human previews the actual ordered stack heads before merging
-      - wait:
-          text: awaiting confirmation
-        intent: The merge preview is ready for human confirmation
-      - expect:
-          text: awaiting confirmation
-        intent: "Checkpoint STACK-ORDER-2: the merge preview lists the stack order and exact heads"
-      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" confirm-merge loom-stack
-        intent: Human clicks the mounted Confirm merge request control and accepts its native dialog only after checking the target and all pinned heads
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-up-to-here loom-stack 2
+        intent: Human presses Merge up to here on layer 2's PR (the button's API); the merge is queued for the human with the stack's current heads
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-done loom-stack 2
         intent: Readback requires the chosen prefix landed, remaining PR bases and patch bytes converged, working area equals the leaf, and exact no-bypass provider effects
-      - wait:
-          text: "loom merge: done"
-        intent: The product merge panel agrees with provider and Git readbacks
-      - expect:
-          text: "loom merge: done"
-        intent: "Checkpoint PREFIX-2-LANDED: selected layers are done and remaining layers are visible"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-ui loom-stack 2
+        intent: "Checkpoint PREFIX-2-LANDED: the Pull Requests page no longer lists the finished merge in its queue"
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task loom-stack 3
         intent: Human observer opens task 3 through its product deep link
       - click:
@@ -198,29 +181,12 @@ tests:
             testid: revision-pr
           text: against trunk
         intent: "Checkpoint FOLLOW-UP-3: the remaining open PR has a trunk-based task diff after lower landing"
-      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-fields loom-stack 3
-        intent: Human observer opens the mounted lead Git merge form and fills the existing stack ID and target layer
-      - click:
-          role: button
-          name: Show merge state
-          exact: true
-        intent: Human previews the actual ordered stack heads before merging
-      - wait:
-          text: awaiting confirmation
-        intent: The merge preview is ready for human confirmation
-      - expect:
-          text: awaiting confirmation
-        intent: "Checkpoint STACK-ORDER-3: the merge preview lists the stack order and exact heads"
-      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" confirm-merge loom-stack
-        intent: Human clicks the mounted Confirm merge request control and accepts its native dialog only after checking the target and all pinned heads
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-up-to-here loom-stack 3
+        intent: Human presses Merge up to here on layer 3's PR (the button's API); the merge is queued for the human with the stack's current heads
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-done loom-stack 3
         intent: Readback requires the chosen prefix landed, remaining PR bases and patch bytes converged, working area equals the leaf, and exact no-bypass provider effects
-      - wait:
-          text: "loom merge: done"
-        intent: The product merge panel agrees with provider and Git readbacks
-      - expect:
-          text: "loom merge: done"
-        intent: "Checkpoint PREFIX-LANDED: selected layers are done and remaining layers are visible"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-ui loom-stack 3
+        intent: "Checkpoint PREFIX-LANDED: the Pull Requests page no longer lists the finished merge in its queue"
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task loom-stack 4
         intent: Human observer opens task 4 through its product deep link
       - click:
@@ -449,29 +415,12 @@ tests:
         intent: "Checkpoint PR-4: the approved task shows its existing PR"
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" chain loom-lower 4
         intent: Readback asserts task-only PR diffs, ordered bases, exact task bytes, native membership when selected, provider create count, and working-area leaf equality
-      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-fields loom-lower 1
-        intent: Human observer opens the mounted lead Git merge form and fills the existing stack ID and target layer
-      - click:
-          role: button
-          name: Show merge state
-          exact: true
-        intent: Human previews the actual ordered stack heads before merging
-      - wait:
-          text: awaiting confirmation
-        intent: The merge preview is ready for human confirmation
-      - expect:
-          text: awaiting confirmation
-        intent: "Checkpoint STACK-ORDER-1: the merge preview lists the stack order and exact heads"
-      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" confirm-merge loom-lower
-        intent: Human clicks the mounted Confirm merge request control and accepts its native dialog only after checking the target and all pinned heads
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-up-to-here loom-lower 1
+        intent: Human presses Merge up to here on layer 1's PR (the button's API); the merge is queued for the human with the stack's current heads
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-done loom-lower 1
         intent: Readback requires the chosen prefix landed, remaining PR bases and patch bytes converged, working area equals the leaf, and exact no-bypass provider effects
-      - wait:
-          text: "loom merge: done"
-        intent: The product merge panel agrees with provider and Git readbacks
-      - expect:
-          text: "loom merge: done"
-        intent: "Checkpoint LOWER-LANDED: selected layers are done and remaining layers are visible"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-ui loom-lower 1
+        intent: "Checkpoint LOWER-LANDED: the Pull Requests page no longer lists the finished merge in its queue"
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task loom-lower 2
         intent: Human observer opens task 2 through its product deep link
       - click:
@@ -700,29 +649,12 @@ tests:
         intent: "Checkpoint PR-4: the approved task shows its existing PR"
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" chain native-stack 4
         intent: Readback asserts task-only PR diffs, ordered bases, exact task bytes, native membership when selected, provider create count, and working-area leaf equality
-      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-fields native-stack 3
-        intent: Human observer opens the mounted lead Git merge form and fills the existing stack ID and target layer
-      - click:
-          role: button
-          name: Show merge state
-          exact: true
-        intent: Human previews the actual ordered stack heads before merging
-      - wait:
-          text: awaiting confirmation
-        intent: The merge preview is ready for human confirmation
-      - expect:
-          text: awaiting confirmation
-        intent: "Checkpoint STACK-ORDER-3: the merge preview lists the stack order and exact heads"
-      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" confirm-merge native-stack
-        intent: Human clicks the mounted Confirm merge request control and accepts its native dialog only after checking the target and all pinned heads
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-up-to-here native-stack 3
+        intent: Human presses Merge up to here on layer 3's PR (the button's API); the merge is queued for the human with the stack's current heads
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-done native-stack 3
         intent: Readback requires the chosen prefix landed, remaining PR bases and patch bytes converged, working area equals the leaf, and exact no-bypass provider effects
-      - wait:
-          text: "native merge: done"
-        intent: The product merge panel agrees with provider and Git readbacks
-      - expect:
-          text: "native merge: done"
-        intent: "Checkpoint PREFIX-LANDED: selected layers are done and remaining layers are visible"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-ui native-stack 3
+        intent: "Checkpoint PREFIX-LANDED: the Pull Requests page no longer lists the finished merge in its queue"
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task native-stack 4
         intent: Human observer opens task 4 through its product deep link
       - click:
@@ -951,29 +883,12 @@ tests:
         intent: "Checkpoint PR-4: the approved task shows its existing PR"
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" chain native-lower 4
         intent: Readback asserts task-only PR diffs, ordered bases, exact task bytes, native membership when selected, provider create count, and working-area leaf equality
-      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-fields native-lower 1
-        intent: Human observer opens the mounted lead Git merge form and fills the existing stack ID and target layer
-      - click:
-          role: button
-          name: Show merge state
-          exact: true
-        intent: Human previews the actual ordered stack heads before merging
-      - wait:
-          text: awaiting confirmation
-        intent: The merge preview is ready for human confirmation
-      - expect:
-          text: awaiting confirmation
-        intent: "Checkpoint STACK-ORDER-1: the merge preview lists the stack order and exact heads"
-      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" confirm-merge native-lower
-        intent: Human clicks the mounted Confirm merge request control and accepts its native dialog only after checking the target and all pinned heads
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-up-to-here native-lower 1
+        intent: Human presses Merge up to here on layer 1's PR (the button's API); the merge is queued for the human with the stack's current heads
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-done native-lower 1
         intent: Readback requires the chosen prefix landed, remaining PR bases and patch bytes converged, working area equals the leaf, and exact no-bypass provider effects
-      - wait:
-          text: "native merge: done"
-        intent: The product merge panel agrees with provider and Git readbacks
-      - expect:
-          text: "native merge: done"
-        intent: "Checkpoint LOWER-LANDED: selected layers are done and remaining layers are visible"
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" merge-ui native-lower 1
+        intent: "Checkpoint LOWER-LANDED: the Pull Requests page no longer lists the finished merge in its queue"
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-journey-stacks.sh" open-task native-lower 2
         intent: Human observer opens task 2 through its product deep link
       - click:

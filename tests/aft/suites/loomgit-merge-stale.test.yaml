@@ -5,36 +5,19 @@ setup: bash "$AFT_TESTS_DIR/scripts/loomgit-merge-stale.sh" setup
 teardown: bash "$AFT_TESTS_DIR/scripts/loomgit-merge-stale.sh" teardown
 
 tests:
-  - name: merge confirmation rejects a published head that changed after preview
-    intent: A real task and Pull/republish make the displayed merge preview stale; the UI refuses the old heads without merging
+  - name: Merge up to here after the PR's head moved lands the new head, never the old one
+    intent: A real task and Pull/republish move the published head; with no confirmation step to go stale, a human's Merge up to here merges the head now on the PR
     steps:
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-merge-stale.sh" seed
         intent: Create, approve, apply and publish a real TaskRun change through the product paths
-      - open: /ws/E2E-WS-MERGE-STALE/agents/lead
-        intent: Open the lead's Git tab before changing the publication
-      - wait:
-          fn: "!!document.querySelector('[data-testid=agents-page]')"
-        intent: Wait for the agent detail page to mount
-      - click: { role: button, name: Git, exact: true }
-        intent: Switch to the lead's Git tab
-      - wait: { text: "Merge stack" }
-      - run: >-
-          set -e;
-          agent-browser --session "$AFT_SESSION" find role button click --name 'Merge stack';
-          agent-browser --session "$AFT_SESSION" find label 'Stack ID' fill stale-card;
-          agent-browser --session "$AFT_SESSION" find label 'Up to layer' fill "$(cat "$AFT_WORK_DIR/merge-stale/change.id")";
-          agent-browser --session "$AFT_SESSION" find role button click --name 'Show merge state'
-        intent: Ask the UI to display the exact published head in its merge confirmation form
-      - wait: { text: "loom merge: awaiting confirmation" }
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-merge-stale.sh" advance
         intent: Advance provider trunk, Pull the applied layer and republish its carried-approval head through Loom
-      - click: { role: button, name: "Confirm merge request" }
-        intent: Submit the old confirmation still displayed in the UI
-      - run: agent-browser --session "$AFT_SESSION" dialog accept
-        intent: Accept the browser's human confirmation prompt for the displayed old head
-      - wait:
-          fn: >-
-            !!document.querySelector('[role=alert]')?.textContent?.includes('confirmed stack head changed')
-        intent: The UI shows that the confirmation is stale instead of starting a merge
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-merge-stale.sh" verify
-        intent: API, provider trunk and recorded merge state confirm that no merge was requested
+        intent: Merge up to here queues the new head; trunk ends with the new head's tree and the foreign edit, not the old head
+      - open: /ws/E2E-WS-MERGE-STALE/prs
+        intent: Open the Pull Requests page after the merge
+      - wait:
+          fn: "!document.querySelector('[data-testid=merge-queue-entry]')"
+        intent: The finished merge has left the merge queue
+      - run: agent-browser --session "$AFT_SESSION" screenshot "$AFT_WORK_DIR/merge-stale/merge-stale-prs.png"
+        intent: Record the Pull Requests page after the merge

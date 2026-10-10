@@ -183,34 +183,18 @@ PY
 diff)
   get "issues/$(task_id "$slot")/diff?lead=lead" "$work/diff-$slot.json"
   ;;
-merge-fields)
-  loom stack list --json > "$work/stack-list.json"
-  stack="$(json "$work/stack-list.json" 'c=open(sys.argv[2]).read().strip(); s=[s for s in v if s.get("source")=="published" and any(l["change"]==c for l in s["layers"])]; assert len(s)==1,s; print(s[0]["id"])' "$work/change-$slot.id")"
-  printf '%s\n' "$stack" > "$work/stack.id"
-  printf '%s\n' "$slot" > "$work/target-slot"
-  browser open "$AFT_BASE_URL/ws/$workspace/agents/lead" >/dev/null
-  browser find role button click --name Git --exact >/dev/null
-  browser find role button click --name 'Merge stack' --exact >/dev/null
-  browser find label 'Stack ID' fill "$stack" >/dev/null
-  browser find label 'Up to layer' fill "$(cat "$work/change-$slot.id")" >/dev/null
-  ;;
-confirm-merge)
-  # One human UI action, including its native confirmation dialog. No fetch,
-  # handler call or replacement window.confirm is used to submit the request.
-  target="$(cat "$work/change-$(cat "$work/target-slot").id")"
-  get "agents/lead/git/merge-up-to?stack_id=$(cat "$work/stack.id")&target=$target" "$work/pinned-preview.json"
-  browser find role button click --name 'Confirm merge request' --exact >/dev/null
-  browser dialog status > "$work/confirmation-dialog.txt"
-  grep -qF "$target" "$work/confirmation-dialog.txt"
-  json "$work/pinned-preview.json" '[print(l["head"]) for l in v["layers"]]' > "$work/pinned-heads.txt"
-  while read -r head; do grep -qF "$head" "$work/confirmation-dialog.txt"; done < "$work/pinned-heads.txt"
-  browser dialog accept >/dev/null
+merge-up-to-here)
+  # The PR page's Merge up to here button and the lead's loom merge share one
+  # server queue (P3.16, D38); a human's merge needs no confirmation step.
+  target="$(cat "$work/change-$slot.id")"
+  printf '{"actor":{"kind":"human","id":"aft-operator"}}' | post "changes/$target/merge-up-to" "$work/queued-$slot.json"
+  json "$work/queued-$slot.json" 'assert v["target"]==sys.argv[2] and v["phase"], v' "$target"
   ;;
 merge-done)
-  stack="$(cat "$work/stack.id")" target="$(cat "$work/change-$slot.id")"
+  target="$(cat "$work/change-$slot.id")"
   done_merge=false
   for _ in $(seq 1 45); do
-    get "agents/lead/git/merge-up-to?stack_id=$stack&target=$target" "$work/merge-$slot.json"
+    get "changes/$target/merge-up-to" "$work/merge-$slot.json"
     if json "$work/merge-$slot.json" 'assert v["phase"]=="done",v' 2>/dev/null; then done_merge=true; break; fi
     sleep 2
   done
@@ -249,6 +233,14 @@ lead=subprocess.check_output(['git','-C',str(w/'repo'),'rev-parse','refs/heads/l
 assert lead==leaf['head']['sha'],(lead,leaf)
 subprocess.check_call(['git','--git-dir='+remote,'merge-base','--is-ancestor','main',leaf['head']['ref']])
 PY
+  ;;
+merge-ui)
+  get git/merge-queue "$work/merge-queue-$slot.json"
+  json "$work/merge-queue-$slot.json" 'assert v==[], v'
+  browser open "$AFT_BASE_URL/ws/$workspace/prs" >/dev/null
+  browser wait 3000 >/dev/null
+  test "$(browser eval "document.querySelectorAll('[data-testid=merge-queue-entry]').length")" = 0
+  browser screenshot "$work/merge-ui-$slot.png" >/dev/null
   ;;
 mode-before)
   receipt mode-before
