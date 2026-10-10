@@ -374,9 +374,11 @@ wait-rev)
   # last try fails. Ends with the task in review with the code-review label.
   slot="$1" try="$2" tries="$3"
   got=""
+  after="$(cat "$work/rejected-$slot.number" 2> /dev/null || echo 0)" # a rerun waits for a new revision
   for _ in $(seq 1 50); do # wait_until would fail the step; a non-last try must pass
     got="$(rev_field "$slot" head_sha 2> /dev/null || true)"
-    [[ -n "$got" ]] && break
+    [[ -n "$got" ]] && (($(rev_field "$slot" number 2> /dev/null || echo 0) > after)) && break
+    got=""
     sleep 2
   done
   if [[ -z "$got" ]]; then
