@@ -155,7 +155,8 @@ func (s *Service) switchTarget(ctx context.Context, a loomstore.Agent, req Updat
 }
 
 // stopTurn stops a's running turn for a switch (R30): the turn is interrupted
-// and not replayed, each open ask is saved as ask.lost first, and a goes idle.
+// and not replayed, each open ask is saved as ask.lost first, its end is
+// saved, and a goes idle.
 func (s *Service) stopTurn(ctx context.Context, a loomstore.Agent) (loomstore.Agent, error) {
 	if a.State != StateActive && a.State != StateWaiting {
 		return a, nil
@@ -165,6 +166,13 @@ func (s *Service) stopTurn(ctx context.Context, a loomstore.Agent) (loomstore.Ag
 	}
 	if err := s.loseOpen(ctx, a, nil); err != nil {
 		return a, err
+	}
+	if a.RunningTurnID != nil { // its end, saved as the native one would be, counts before the new session runs (OR6a)
+		end := loomharness.Event{Type: loomharness.EventTurnCompleted, TurnID: *a.RunningTurnID, StopReason: "cancelled",
+			Session: loomharness.NativeRef{Root: deref(a.HarnessSessionRoot), NativeID: deref(a.HarnessSessionID)}}
+		if _, err := s.events.Append(ctx, nativeRow(a.AgentID, EventTurnCompleted, end)); err != nil {
+			return a, err
+		}
 	}
 	to := a.StateOf()
 	to.State, to.WaitingOn, to.RunningTurn = StateIdle, nil, nil

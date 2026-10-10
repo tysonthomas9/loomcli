@@ -26,9 +26,10 @@ func (c checkpointFailed) Unwrap() error { return c.error }
 // agent.turn_completed rows (0 before any), so a crash at any point leaves
 // the ref owed until a capture makes it, once. No turn may run: dispatch
 // captures before every hand-over, which gates the next turn on the ref. An
-// agent with no working copy, archived or being deleted, owes none.
+// archived agent keeps its working copy, so it still captures a ref owed;
+// one with no working copy, or being deleted, owes none.
 func (s *Service) checkpoint(ctx context.Context, a loomstore.Agent) error {
-	if a.RunningTurnID != nil || a.WorktreePath == nil || a.State == StateArchived || a.DeleteRequested {
+	if a.RunningTurnID != nil || a.WorktreePath == nil || a.DeleteRequested {
 		return nil
 	}
 	n, err := s.store.CountEvents(ctx, a.AgentID, EventTurnCompleted)

@@ -19,12 +19,13 @@ type switchEnv struct {
 	fa, fb     *fake.Harness
 	old        loomharness.NativeRef
 	interrupts int
+	ws         *fakeWorkspace // a1 has a working copy here
 }
 
 func newSwitchEnv(t *testing.T, state string) *switchEnv {
 	t.Helper()
 	ctx := context.Background()
-	e := &switchEnv{fa: fake.New(), fb: fake.New()}
+	e := &switchEnv{fa: fake.New(), fb: fake.New(), ws: &fakeWorkspace{}}
 	harnesses := map[string]loomharness.Harness{"fa": e.fa, "fb": e.fb}
 	if _, err := e.fb.Open(ctx, loomharness.OpenSpec{Key: "other"}); err != nil { // fb ids differ from fa's
 		t.Fatal(err)
@@ -35,8 +36,10 @@ func newSwitchEnv(t *testing.T, state string) *switchEnv {
 	}
 	a := svcAgent("a1", "persistent", state)
 	a.Harness, a.HarnessSessionID, a.Model = "fa", &e.old.NativeID, sp("fake-model")
+	a.WorktreePath = sp("/wt/a1")
 	e.s = newService(t, ServiceConfig{
 		Harnesses: harnesses,
+		Workspace: e.ws,
 		Launch: func(_ context.Context, _ loomstore.Agent, h string) (loomharness.Launch, error) {
 			return loomharness.Launch{Root: "/root/" + h}, nil
 		},

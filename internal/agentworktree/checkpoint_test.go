@@ -206,3 +206,40 @@ func TestCheckpointRestartAfterUpdateRef(t *testing.T) {
 		t.Fatalf("turn/1 a.txt = %q", got)
 	}
 }
+
+// TestCheckpointSkipsGitlinks: a submodule committed on HEAD keeps HEAD's
+// commit even after its checkout moved, and a nested repository the agent
+// staged in its own index is left out; both are named in the message.
+func TestCheckpointSkipsGitlinks(t *testing.T) {
+	ctx := context.Background()
+	w, repo := setup(t)
+	sub := filepath.Join(repo, "sub")
+	run(t, "", "init", "-q", "-b", "main", sub)
+	pinned := commit(t, sub, "s.txt", "pinned")
+	run(t, repo, "add", "sub")
+	run(t, repo, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-m", "submodule")
+	s := Spec{Key: "agt_1", Repo: repo, BaseRef: "main", Branch: "loom/agent/agt_1"}
+	wt, err := w.Ensure(ctx, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved := filepath.Join(wt.Path, "sub") // checked out empty: make it a repo at another commit
+	run(t, "", "init", "-q", "-b", "main", moved)
+	commit(t, moved, "s.txt", "moved")
+	staged := filepath.Join(wt.Path, "staged")
+	run(t, "", "init", "-q", "-b", "main", staged)
+	commit(t, staged, "x.txt", "x")
+	run(t, wt.Path, "add", "staged")
+	if err := w.Checkpoint(ctx, s, turn1); err != nil {
+		t.Fatal(err)
+	}
+	if got := run(t, wt.Path, "ls-tree", turn1, "sub", "staged"); got != "160000 commit "+pinned+"\tsub" {
+		t.Fatalf("turn/1 nested entries = %q; want only sub at %s", got, pinned)
+	}
+	msg := run(t, wt.Path, "log", "-1", "--format=%B", turn1)
+	for _, d := range []string{"sub", "staged/"} {
+		if !strings.Contains(msg, "skipped nested repository "+d+"\n") && !strings.HasSuffix(msg, "skipped nested repository "+d) {
+			t.Fatalf("message %q does not record %s", msg, d)
+		}
+	}
+}

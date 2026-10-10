@@ -55,16 +55,14 @@ func (w *Worktrees) capture(ctx context.Context, path, ref string) error {
 	if _, err := git.RunEnv(ctx, path, env, "read-tree", "HEAD"); err != nil {
 		return err
 	}
-	out, err := w.git.Run(ctx, path, "ls-files", "--others", "--exclude-standard", "-z")
+	nested, err := nestedRepos(ctx, git, path, env)
 	if err != nil {
 		return err
 	}
 	add, msg := []string{"add", "-A", "--", "."}, "loom checkpoint "+ref
-	for _, p := range strings.Split(out, "\x00") {
-		if strings.HasSuffix(p, "/") { // only a nested repository is listed as a directory
-			add = append(add, ":(exclude,literal)"+p)
-			msg += "\nskipped nested repository " + p
-		}
+	for _, p := range nested {
+		add = append(add, ":(exclude,literal)"+p)
+		msg += "\nskipped nested repository " + p
 	}
 	if _, err := git.RunEnv(ctx, path, env, add...); err != nil {
 		return err
@@ -82,4 +80,31 @@ func (w *Worktrees) capture(ctx context.Context, path, ref string) error {
 		return fmt.Errorf("agentworktree: checkpoint %s: %w", ref, err)
 	}
 	return nil
+}
+
+// nestedRepos lists the nested repositories in the worktree at path, as seen
+// from the private index env names (HEAD's tree): each gitlink, which keeps
+// HEAD's commit, and each other repository, which ls-files lists as a
+// directory (path/), including one only the agent's own index has staged.
+func nestedRepos(ctx context.Context, git gitrunner.EnvRunner, path string, env []string) ([]string, error) {
+	var out []string
+	staged, err := git.RunEnv(ctx, path, env, "ls-files", "--stage", "-z")
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range strings.Split(staged, "\x00") {
+		if mode, p, ok := strings.Cut(e, "\t"); ok && strings.HasPrefix(mode, "160000 ") {
+			out = append(out, p)
+		}
+	}
+	others, err := git.RunEnv(ctx, path, env, "ls-files", "--others", "--exclude-standard", "-z")
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range strings.Split(others, "\x00") {
+		if strings.HasSuffix(p, "/") {
+			out = append(out, p)
+		}
+	}
+	return out, nil
 }

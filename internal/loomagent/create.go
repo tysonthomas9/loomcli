@@ -90,7 +90,7 @@ func (p permanent) Unwrap() error { return p.error }
 
 func isPermanent(err error) bool {
 	var p permanent
-	return errors.As(err, &p)
+	return errors.As(err, &p) && !isCheckpointFailed(err) // a capture can always be retried
 }
 
 // createFailed shows why agentID's Create, whose row is written, has not

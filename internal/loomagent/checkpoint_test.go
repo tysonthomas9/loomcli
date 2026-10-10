@@ -279,3 +279,90 @@ func TestBaselineFailureHoldsFirstPrompt(t *testing.T) {
 	}
 	wantCheckpoints(t, e.ws, id, "at create")
 }
+
+// TestCheckpointSwitchMidTurn: a harness switch that stops a running turn
+// counts that turn's end before the new session's first hand-over, so turn/1
+// is captured while the next message still waits, whenever the old
+// session's own end arrives.
+func TestCheckpointSwitchMidTurn(t *testing.T) {
+	ctx := context.Background()
+	e := newSwitchEnv(t, StateActive)
+	e.startTurn(t)
+	to := e.s.get(t, "a1").StateOf()
+	to.RunningTurn = sp("turn_0")
+	if _, err := e.s.store.CommitState(ctx, "a1", e.s.get(t, "a1").StateOf(), to, e.s.get(t, "a1").Revision, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitingAtTurn1 := ""
+	e.ws.capture = func(ref string) error {
+		if ref == checkpointRef("a1", 1) {
+			waitingAtTurn1 = slotState(t, e.s, "a1", "r-next")
+		}
+		return nil
+	}
+	runDispatcher(t, e.s)
+	settled(t, e.s)
+	mustSendMsg(t, e.s, sendReq("a1", "r-next", "next", user))
+	if _, err := e.s.Update(ctx, switchReq("r1", 1, "fb")); err != nil {
+		t.Fatal(err)
+	}
+	drained(t, e.s, "the hand-over", func() bool { return len(handedReqs(t, e.s, "a1", "r-next")) == 1 })
+	if waitingAtTurn1 != loomstore.SlotWaiting {
+		t.Fatalf("r-next at the turn/1 capture = %q; want it captured while r-next waited", waitingAtTurn1)
+	}
+	if n, err := e.s.store.CountEvents(ctx, "a1", EventTurnCompleted); err != nil || n != 1 {
+		t.Fatalf("saved turn ends = %d, %v; want the stopped turn's one", n, err)
+	}
+}
+
+// TestCheckpointOwedAfterArchive: a ref still owed when the agent is
+// archived (its working copy stays) is captured by the reconcile retry.
+func TestCheckpointOwedAfterArchive(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	s := e.service(ServiceConfig{})
+	clock := useTestClock(s)
+	runDispatcher(t, s)
+	runFeed(t, s, "opencode")
+	a, ref := newLead(t, e, s, "alpha")
+	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "t1"}}})
+	var mu sync.Mutex
+	failing := true
+	e.ws.capture = func(string) error {
+		mu.Lock()
+		defer mu.Unlock()
+		if failing {
+			return errors.New("disk full")
+		}
+		return nil
+	}
+	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "first", user))
+	drained(t, s, "t1 asked", func() bool { return len(s.openAsks(a.AgentID)) == 1 })
+	if err := fh.Session(ref).Reply(ctx, "t1", loomharness.Reply{Allow: true}); err != nil {
+		t.Fatal(err)
+	}
+	drained(t, s, "turn 1 ended", func() bool { return s.get(t, a.AgentID).State == StateIdle })
+	if err := s.Archive(ctx, ArchiveRequest{AgentID: a.AgentID, Reason: ArchiveDone}); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	failing = false
+	mu.Unlock()
+	if clock.fire() == 0 {
+		t.Fatal("no retry queued")
+	}
+	drained(t, s, "turn/1 captured after the archive", func() bool { _, ok := e.ws.checkpoint(checkpointRef(a.AgentID, 1)); return ok })
+}
+
+// TestCheckpointFailureRetriedWithoutSession: a failed capture is retried
+// even when the agent's harness is not wired; it is never permanent.
+func TestCheckpointFailureRetriedWithoutSession(t *testing.T) {
+	a := svcAgent("a1", "persistent", StateIdle)
+	a.WorktreePath = sp("/wt/a1")
+	ws := &fakeWorkspace{capture: func(string) error { return errors.New("disk full") }}
+	s := newService(t, ServiceConfig{Workspace: ws}, a)
+	if err := s.reconcileAgent(context.Background(), "a1"); !isCheckpointFailed(err) {
+		t.Fatalf("reconcile = %v; want the capture failure, for the queue to retry", err)
+	}
+}
