@@ -770,6 +770,19 @@ describe("AgentList", () => {
     await waitFor(() => expect(names()).toEqual(["kid"]));
   });
 
+  it("drops an archived or deleted Lead's finished children after a reload, keeping a working one (ORPH1)", async () => {
+    // List leaves archived and deleted agents out, so their children's
+    // parents are not in the roster.
+    api.agents = [
+      agent("lead2", { preset: "lead" }),
+      agent("done", { parent_agent_id: "gone-lead", state: "finished" }),
+      agent("idle", { parent_agent_id: "gone-lead", state: "idle" }),
+      agent("kid", { parent_agent_id: "gone-lead", state: "active" }),
+    ];
+    renderList("/ws/ws1/agents");
+    await waitFor(() => expect(names()).toEqual(["lead2", "kid"]));
+  });
+
   it("closes the row menu when the workspace changes", async () => {
     const tree = (ws: string) => (
       <KeyboardShortcutProvider>

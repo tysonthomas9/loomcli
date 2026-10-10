@@ -59,6 +59,13 @@ describe("ApiAgentRailItems", () => {
         api("done", { parent_agent_id: "l1", state: "finished", preset: "t" }),
         api("l2"),
         api("old", { state: "archived" }),
+        // ORPH1: a finished child of an archived (unlisted) Lead leaves too.
+        api("echo", {
+          parent_agent_id: "unlisted",
+          state: "finished",
+          preset: "t",
+          role_kind: "worker",
+        }),
       ].map((a) => [a.agent_id, a]),
     );
 
