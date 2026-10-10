@@ -35,7 +35,10 @@ export interface AetherModalProps {
   showCloseButton?: boolean;
   /** Extra class names merged onto the dialog element (e.g. wide variant). */
   dialogClassName?: string | undefined;
-  /** Escape calls onClose (default true); set false while closing is blocked. */
+  /**
+   * Escape calls onClose (default true). When false, Escape does nothing,
+   * and layers under the modal (panels, the drawer) don't get it either.
+   */
   closeOnEscape?: boolean;
 }
 
@@ -75,7 +78,9 @@ export function AetherModal({
       onClick={handleOverlayClick}
       data-testid={overlayTestId}
     >
-      {hasEscapeRegistry && closeOnEscape && <ModalEscape onClose={onClose} />}
+      {hasEscapeRegistry && (
+        <ModalEscape onClose={closeOnEscape ? onClose : undefined} />
+      )}
       <div
         className={styles.dialogShell}
         style={dialogShellStyle}
@@ -111,8 +116,8 @@ export function AetherModal({
   );
 }
 
-function ModalEscape({ onClose }: { onClose: () => void }): null {
-  useRegisterEscapeLayer(LAYER_MODAL, onClose, true);
+function ModalEscape({ onClose }: { onClose: (() => void) | undefined }): null {
+  useRegisterEscapeLayer(LAYER_MODAL, () => onClose?.(), true);
   return null;
 }
 

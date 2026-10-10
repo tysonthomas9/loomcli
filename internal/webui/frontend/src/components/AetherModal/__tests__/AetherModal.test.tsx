@@ -145,10 +145,12 @@ describe("AetherModal: Escape", () => {
     expect(onDrawerEscape).not.toHaveBeenCalled();
   });
 
-  it("ignores Escape when closeOnEscape is false", () => {
+  it("ignores Escape when closeOnEscape is false, and so do layers under it", () => {
     const onClose = vi.fn();
+    const onDrawerEscape = vi.fn();
     render(
       <KeyboardShortcutProvider>
+        <LowerLayer onEscape={onDrawerEscape} />
         <AetherModal
           isOpen
           title="Test modal"
@@ -163,5 +165,6 @@ describe("AetherModal: Escape", () => {
     fireEvent.keyDown(document, { key: "Escape" });
 
     expect(onClose).not.toHaveBeenCalled();
+    expect(onDrawerEscape).not.toHaveBeenCalled();
   });
 });
