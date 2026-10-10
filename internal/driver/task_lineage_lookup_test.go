@@ -406,3 +406,21 @@ func TestResolveTaskWorktree_UnreadableStacksFileStopsBeforeTaskCopy(t *testing.
 		t.Fatalf("unreadable stacks file = %v, want lineage_unresolved", err)
 	}
 }
+
+// A daemon-run dependent starts from its predecessor's frozen revision, pinned
+// so a rerun keeps it; a root task has no dependent base (P1.28).
+func TestResolveDependentBaseUsesPredecessorRevision(t *testing.T) {
+	f := setupLineageFixture(t)
+	ctx := context.Background()
+	base, found, err := ResolveDependentBase(ctx, "TEST", "app", f.repoPath, "task-b")
+	if err != nil || !found || base != f.taskAH {
+		t.Fatalf("dependent base = %q, %v, %v; want predecessor revision %s", base, found, err, f.taskAH)
+	}
+	status, err := taskcopy.ReadLineageStatus(ctx, "TEST", "task-b", "app")
+	if err != nil || status.BasedOn.SHA != f.taskAH || status.BasedOn.Revision != 1 {
+		t.Fatalf("pinned lineage = %+v, %v", status, err)
+	}
+	if base, found, err := ResolveDependentBase(ctx, "TEST", "app", f.repoPath, "task-a"); err != nil || found || base != "" {
+		t.Fatalf("root task base = %q, %v, %v; want none", base, found, err)
+	}
+}

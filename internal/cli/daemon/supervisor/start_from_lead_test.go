@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 	"github.com/olesho/harness-wrapper/pkg/discovery"
 
 	"github.com/tysonthomas9/loomcli/internal/agenterr"
+	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/clitest"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
@@ -148,5 +150,94 @@ func TestColdStartRefusesCheckoutWithUnsavedWork(t *testing.T) {
 	}
 	if data, err := os.ReadFile(filepath.Join(f.dir, "notes.txt")); err != nil || string(data) != "unsaved\n" {
 		t.Fatalf("unsaved file changed: %q, %v", data, err)
+	}
+}
+
+// A checkout already at the lead's head still refuses a cold start, before any
+// claim, while it holds uncommitted files.
+func TestColdStartRefusesUncommittedFilesAtLeadHead(t *testing.T) {
+	f := newRerunFixture(t)
+	if err := os.WriteFile(filepath.Join(f.dir, "notes.txt"), []byte("unsaved\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	issues := clitest.NewMockIssueBackend()
+	issues.ReadyResult = []backend.IssueData{{ID: "task-1", Status: "open", IssueType: "task", HasDesign: true}}
+	f.s.IssueBackend = issues
+	if f.s.preFlightSetup(f.ap) {
+		t.Fatal("an attempt started on a checkout holding uncommitted files")
+	}
+	if f.ap.LastError == nil || f.ap.LastError.Class != agenterr.OutcomeFromDomain(agenterr.SpawnFailureOutcome) {
+		t.Fatalf("LastError = %+v, want a spawn failure naming the unsaved work", f.ap.LastError)
+	}
+	if issues.Called("ClaimIssue") {
+		t.Fatal("refused start claimed a task")
+	}
+	if data, err := os.ReadFile(filepath.Join(f.dir, "notes.txt")); err != nil || string(data) != "unsaved\n" {
+		t.Fatalf("unsaved file changed: %q, %v", data, err)
+	}
+}
+
+// claimDependent sets the fixture up to claim task-dep, a dependent task whose
+// base DependentBase resolves.
+func (f rerunFixture) claimDependent(resolve func() (string, bool, error)) *clitest.MockIssueBackend {
+	issues := clitest.NewMockIssueBackend()
+	issues.ReadyResult = []backend.IssueData{{ID: "task-dep", Status: "open", IssueType: "task", HasDesign: true}}
+	f.s.IssueBackend = issues
+	f.s.DependentBase = func(_ context.Context, workspace, repo, _, task string) (string, bool, error) {
+		if workspace != "WS" || task != "task-dep" {
+			return "", false, fmt.Errorf("unexpected %s/%s/%s", workspace, repo, task)
+		}
+		return resolve()
+	}
+	return issues
+}
+
+// A dependent task starts from its blocker's frozen revision, not the lead's
+// head (Tyson's 2026-10-09 dependent-task decision).
+func TestDependentTaskStartsFromBlockerRevision(t *testing.T) {
+	f := newRerunFixture(t)
+	base := gitForCaptureTest(t, f.dir, "rev-parse", "HEAD")
+	gitForCaptureTest(t, f.dir, "checkout", "-q", "-b", "blocker")
+	if err := os.WriteFile(filepath.Join(f.dir, "blocker.txt"), []byte("blocker\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitForCaptureTest(t, f.dir, "add", "blocker.txt")
+	gitForCaptureTest(t, f.dir, "commit", "-m", "blocker revision")
+	blocker := gitForCaptureTest(t, f.dir, "rev-parse", "HEAD")
+	gitForCaptureTest(t, f.dir, "update-ref", "refs/loom/ws/WS/change/C/1/head", blocker)
+	gitForCaptureTest(t, f.dir, "checkout", "-q", "--detach", base)
+	f.claimDependent(func() (string, bool, error) { return blocker, true, nil })
+	if !f.s.preFlightSetup(f.ap) {
+		t.Fatalf("dependent attempt did not start: %+v", f.ap.LastError)
+	}
+	if f.ap.BeforeRef != blocker {
+		t.Fatalf("dependent attempt base = %s, want the blocker revision %s", f.ap.BeforeRef, blocker)
+	}
+}
+
+// A dependent base that cannot be resolved refuses the start and hands the
+// claim back, so the task is not stranded in progress.
+func TestDependentBaseFailureHandsBackClaim(t *testing.T) {
+	f := newRerunFixture(t)
+	issues := f.claimDependent(func() (string, bool, error) { return "", false, errors.New("predecessor has no ready revision") })
+	if f.s.preFlightSetup(f.ap) {
+		t.Fatal("an attempt started without its dependent base")
+	}
+	if f.ap.LastError == nil || f.ap.LastError.Class != agenterr.OutcomeFromDomain(agenterr.SpawnFailureOutcome) {
+		t.Fatalf("LastError = %+v, want a spawn failure; calls %+v", f.ap.LastError, issues.Calls)
+	}
+	if !issues.Called("ClaimIssue") {
+		t.Fatal("task was never claimed")
+	}
+	reopened := false
+	for _, call := range issues.Calls {
+		if call.Method == "Update" {
+			if params, ok := call.Args[1].(backend.UpdateParams); ok && params.Status != nil && *params.Status == "open" {
+				reopened = true
+			}
+		}
+	}
+	if !reopened || f.ap.AssignedTaskID != "" {
+		t.Fatalf("claim not handed back: reopened=%v assigned=%q", reopened, f.ap.AssignedTaskID)
 	}
 }

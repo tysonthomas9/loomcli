@@ -19,7 +19,7 @@ import (
 // StartResult says where a reused agent checkout starts its next attempt.
 type StartResult struct {
 	HasLead bool   // the lead has a working area for the repo
-	BaseSHA string // the lead's working-area head the checkout now sits on
+	BaseSHA string // the commit the checkout now sits on
 	Moved   bool   // the checkout's HEAD changed
 }
 
@@ -27,14 +27,25 @@ type StartResult struct {
 // working-area head before a new attempt (P1.28, D23), so the attempt never
 // builds on an earlier attempt's leftover commits.
 func StartFromLead(ctx context.Context, source, checkout, workspace, lead, repo string) (StartResult, error) {
-	return StartFromLeadAt(ctx, filepath.Join(config.GetConfigDir(), "loomgit", "store.db"),
-		source, checkout, workspace, lead, repo)
+	return StartFromLeadAt(ctx, defaultJournal(), source, checkout, workspace, lead, repo, "")
 }
 
-// StartFromLeadAt is StartFromLead with an explicit journal. A lead with no
-// working area for repo leaves the checkout alone. Uncommitted files, or
-// commits that Loom has not saved, refuse the move with UnsavedWork.
-func StartFromLeadAt(ctx context.Context, journalPath, source, checkout, workspace, lead, repo string) (StartResult, error) {
+// StartFromBase puts the checkout on base instead: a dependent task's frozen
+// blocker revision. The same unsaved-work guards apply.
+func StartFromBase(ctx context.Context, source, checkout, workspace, lead, repo, base string) (StartResult, error) {
+	return StartFromLeadAt(ctx, defaultJournal(), source, checkout, workspace, lead, repo, base)
+}
+
+func defaultJournal() string {
+	return filepath.Join(config.GetConfigDir(), "loomgit", "store.db")
+}
+
+// StartFromLeadAt is StartFromLead with an explicit journal; a non-empty base
+// is the commit to start from in place of the lead's head. With neither a lead
+// working area for repo nor a base, the checkout is left alone. Uncommitted
+// files, or commits that Loom has not saved, refuse the start with UnsavedWork,
+// even when the checkout is already at the target.
+func StartFromLeadAt(ctx context.Context, journalPath, source, checkout, workspace, lead, repo, base string) (StartResult, error) {
 	if workspace == "" || lead == "" || repo == "" || checkout == "" {
 		return StartResult{}, errors.New("workspace, lead, repo and checkout are required")
 	}
@@ -56,45 +67,40 @@ func StartFromLeadAt(ctx context.Context, journalPath, source, checkout, workspa
 			area = &areas[i]
 		}
 	}
-	if area == nil {
-		return StartResult{}, nil
+	tip := ""
+	if area != nil {
+		if tip, err = WorkingAreaTip(ctx, *area); err != nil {
+			return StartResult{}, fmt.Errorf("read lead %q working area: %w", lead, err)
+		}
 	}
-	tip, err := WorkingAreaTip(ctx, *area)
-	if err != nil {
-		return StartResult{}, fmt.Errorf("read lead %q working area: %w", lead, err)
+	target := base
+	if target == "" {
+		target = tip
+	}
+	if target == "" {
+		return StartResult{}, nil
 	}
 	if source == "" {
 		source = checkout
 	}
-	result := StartResult{HasLead: true, BaseSHA: tip}
-	if reader, err := gitexec.New(checkout, gitexec.Options{ReadOnly: true}); err == nil {
-		if head, err := reader.Run(ctx, "rev-parse", "HEAD"); err == nil && strings.TrimSpace(string(head)) == tip {
-			return result, nil // Already at the lead's head: no lease needed on an idle poll.
-		}
-	}
+	result := StartResult{HasLead: area != nil, BaseSHA: target}
 	err = WithTaskCopyLease(ctx, journalPath, source, checkout, func(ctx context.Context) error {
-		moved, err := moveToLead(ctx, store, checkout, workspace, tip)
+		moved, err := moveToLead(ctx, store, checkout, workspace, target, tip)
 		result.Moved = moved
 		return err
 	})
 	return result, err
 }
 
-func moveToLead(ctx context.Context, store *journal.SQLite, checkout, workspace, tip string) (bool, error) {
+// moveToLead moves the checkout to target after refusing unsaved work; tip is
+// the lead's head ("" without a lead working area).
+func moveToLead(ctx context.Context, store *journal.SQLite, checkout, workspace, target, tip string) (bool, error) {
 	runner, err := gitexec.New(checkout, gitexec.Options{FallbackIdentity: gitexec.Identity{Name: "Loom", Email: "loom@localhost"}})
 	if err != nil {
 		return false, err
 	}
-	if _, err := runner.Run(ctx, "cat-file", "-e", tip+"^{commit}"); err != nil {
-		return false, fmt.Errorf("lead head %s is not in the agent checkout's repository: %w", tip, err)
-	}
-	out, err := runner.Run(ctx, "rev-parse", "HEAD")
-	if err != nil {
-		return false, err
-	}
-	head := strings.TrimSpace(string(out))
-	if head == tip {
-		return false, nil
+	if _, err := runner.Run(ctx, "cat-file", "-e", target+"^{commit}"); err != nil {
+		return false, fmt.Errorf("start commit %s is not in the agent checkout's repository: %w", target, err)
 	}
 	unsaved, err := unsavedPaths(ctx, runner, checkout)
 	if err != nil {
@@ -104,7 +110,15 @@ func moveToLead(ctx context.Context, store *journal.SQLite, checkout, workspace,
 		return false, loomgit.NewError(loomgit.UnsavedWork,
 			"agent checkout has uncommitted files: "+strings.Join(unsaved, ", "), nil)
 	}
-	saved, err := headSaved(ctx, runner, store, workspace, head, tip)
+	out, err := runner.Run(ctx, "rev-parse", "HEAD")
+	if err != nil {
+		return false, err
+	}
+	head := strings.TrimSpace(string(out))
+	if head == target {
+		return false, nil
+	}
+	saved, err := headSaved(ctx, runner, store, workspace, head, target, tip)
 	if err != nil {
 		return false, err
 	}
@@ -112,12 +126,12 @@ func moveToLead(ctx context.Context, store *journal.SQLite, checkout, workspace,
 		return false, loomgit.NewError(loomgit.UnsavedWork,
 			fmt.Sprintf("agent checkout HEAD %s has commits Loom has not saved", head), nil)
 	}
-	args := []string{"checkout", "--detach", tip}
+	args := []string{"checkout", "--detach", target}
 	if branch, err := runner.Run(ctx, "symbolic-ref", "-q", "--short", "HEAD"); err == nil && strings.TrimSpace(string(branch)) != "" {
-		args = []string{"checkout", "-B", strings.TrimSpace(string(branch)), tip}
+		args = []string{"checkout", "-B", strings.TrimSpace(string(branch)), target}
 	}
 	if _, err := runner.Run(ctx, args...); err != nil {
-		return false, fmt.Errorf("move agent checkout to lead head: %w", err)
+		return false, fmt.Errorf("move agent checkout to %s: %w", target, err)
 	}
 	return true, nil
 }
@@ -148,10 +162,16 @@ func unsavedPaths(ctx context.Context, runner *gitexec.Runner, checkout string) 
 }
 
 // headSaved reports whether moving away from head loses no commit: head is
-// already in the lead, is reachable from a Loom ref, or was frozen as a revision.
-func headSaved(ctx context.Context, runner *gitexec.Runner, store *journal.SQLite, workspace, head, tip string) (bool, error) {
-	if _, err := runner.Run(ctx, "merge-base", "--is-ancestor", head, tip); err == nil {
-		return true, nil
+// already in the target or the lead, is reachable from a Loom ref, or was
+// frozen as a revision.
+func headSaved(ctx context.Context, runner *gitexec.Runner, store *journal.SQLite, workspace, head string, kept ...string) (bool, error) {
+	for _, commit := range kept {
+		if commit == "" {
+			continue
+		}
+		if _, err := runner.Run(ctx, "merge-base", "--is-ancestor", head, commit); err == nil {
+			return true, nil
+		}
 	}
 	prefix, err := refname.WorkspacePrefix(workspace)
 	if err != nil {

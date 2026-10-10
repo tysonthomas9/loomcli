@@ -92,7 +92,7 @@ func (f leadFixture) freezeSource(t *testing.T, sha string) {
 
 func (f leadFixture) start(t *testing.T) (StartResult, error) {
 	t.Helper()
-	return StartFromLeadAt(context.Background(), f.journal, f.source, f.agent, "W", "L", "repo")
+	return StartFromLeadAt(context.Background(), f.journal, f.source, f.agent, "W", "L", "repo", "")
 }
 
 func assertUnsavedWork(t *testing.T, err error) {
@@ -207,7 +207,7 @@ func TestStartFromLeadRefusesCommitsLoomHasNotSaved(t *testing.T) {
 func TestStartFromLeadWithoutLeadWorkingAreaLeavesCheckout(t *testing.T) {
 	f := newLeadFixture(t)
 	head := commitIn(t, f.agent, "feature.txt", "work\n")
-	result, err := StartFromLeadAt(context.Background(), f.journal, f.source, f.agent, "W", "other-lead", "repo")
+	result, err := StartFromLeadAt(context.Background(), f.journal, f.source, f.agent, "W", "other-lead", "repo", "")
 	if err != nil || result.HasLead || result.Moved {
 		t.Fatalf("result = %+v, %v; want untouched without a working area", result, err)
 	}
@@ -222,4 +222,49 @@ func TestStartFromLeadRefusesSwitchedLeadBranch(t *testing.T) {
 	if _, err := f.start(t); err == nil {
 		t.Fatal("a lead working area on another branch must not be used as the attempt base")
 	}
+}
+
+// A checkout already at the lead's head still refuses a cold start while it
+// holds uncommitted files: the new attempt must not inherit them.
+func TestStartFromLeadRefusesUncommittedFilesAtLeadHead(t *testing.T) {
+	for name, edit := range map[string]func(t *testing.T, f leadFixture){
+		"tracked edit":   func(t *testing.T, f leadFixture) { writeFile(t, f.agent, "main.txt", "edited\n") },
+		"untracked file": func(t *testing.T, f leadFixture) { writeFile(t, f.agent, "notes.txt", "unsaved\n") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newLeadFixture(t)
+			edit(t, f)
+			_, err := f.start(t)
+			assertUnsavedWork(t, err)
+			if head := gitForCapture(t, f.agent, "rev-parse", "HEAD"); head != f.base {
+				t.Fatalf("refused start moved HEAD to %s", head)
+			}
+			if status := gitForCapture(t, f.agent, "status", "--porcelain"); status == "" {
+				t.Fatal("refused start discarded the unsaved file")
+			}
+		})
+	}
+}
+
+// A dependent task starts from its blocker's frozen revision, not the lead's
+// head, even when the checkout sits on the lead's head.
+func TestStartFromBaseUsesDependentBlockerRevision(t *testing.T) {
+	f := newLeadFixture(t)
+	leadHead := commitIn(t, f.lead, "lead.txt", "lead work\n")
+	if _, err := f.start(t); err != nil {
+		t.Fatal(err)
+	}
+	gitForCapture(t, f.source, "checkout", "-q", "-b", "blocker", f.base)
+	blocker := commitIn(t, f.source, "blocker.txt", "blocker\n")
+	gitForCapture(t, f.source, "update-ref", "refs/loom/ws/W/change/C/1/head", blocker)
+	result, err := StartFromLeadAt(context.Background(), f.journal, f.source, f.agent, "W", "L", "repo", blocker)
+	if err != nil || !result.Moved || result.BaseSHA != blocker {
+		t.Fatalf("result = %+v, %v; want moved to the blocker revision %s", result, err, blocker)
+	}
+	if head := gitForCapture(t, f.agent, "rev-parse", "HEAD"); head != blocker || head == leadHead {
+		t.Fatalf("agent HEAD = %s, want the blocker revision %s", head, blocker)
+	}
+	writeFile(t, f.agent, "notes.txt", "unsaved\n")
+	_, err = StartFromLeadAt(context.Background(), f.journal, f.source, f.agent, "W", "L", "repo", blocker)
+	assertUnsavedWork(t, err)
 }
