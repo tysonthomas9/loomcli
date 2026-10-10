@@ -3,8 +3,14 @@ package opsimpl
 import (
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/cli/backends"
+	"github.com/tysonthomas9/loomcli/internal/leadcontrol"
 	"github.com/tysonthomas9/loomcli/internal/ops"
 )
+
+// ReapOrphanedLeadAppServers stops leads' codex app-servers left running by
+// a server that crashed or was killed before their lead runtime could stop
+// them. Returns the pids it stopped.
+func ReapOrphanedLeadAppServers() []int { return leadcontrol.ReapOrphanedCodexAppServers() }
 
 // BackendOpsImpl implements ops.BackendOps by inspecting the registered
 // backend registry. The ops package owns the interface, cli provides this
