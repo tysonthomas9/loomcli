@@ -1,0 +1,185 @@
+# Live OpenCode Agent API only. The real-model run is serialized by the parent.
+# These cases deliberately fail on leaked expanded tool input. User-authored
+# Chat text is excluded from tool privacy oracles. The unreachable reviewer
+# denied-edit case remains strict in tool-policy-denial.test.yaml.
+suite: live-tool-policy
+classification: { area: agents, feature: native-tool-privacy-policy-usage, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL}"
+setup: |
+  set -eu
+  test "${AFT_REAL_BACKEND}" = opencode
+  test -n "${AFT_OWNED_PROJECT}" && test -n "${AFT_AGENT_FLOW_REPO}"
+teardown: |
+  python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" cleanup
+
+tests:
+  # UI3/DF2 and MATRIX:H9: real native tool input and saved event, collapsed,
+  # expanded and reloaded tool UI. OpenCode's native input is serialized JSON;
+  # a separate offline oracle checks the non-JSON case without claiming live.
+  - name: a real tool call masks a harmless credential-shaped input after expansion and reload
+    intent: A Lead uses a real native tool with a harmless token-shaped argument; the tool surfaces stay private after expansion and reload.
+    steps:
+      - open: /ws/${AFT_WS}/agents
+        intent: "Open the owned Agents page"
+      - click: { role: button, name: "+ Add agent", exact: true }
+        intent: "Open the New Agent form"
+      - wait: { fn: "!!document.querySelector('[data-testid=create-agent-overlay]')" }
+        intent: "Show the Lead template"
+      - click: { testid: create-agent-template-lead }
+        intent: "Choose a Lead with a real OpenCode session"
+      - fill: { testid: create-agent-name, value: "aft-lead-${RUN_ID}-cov-policy" }
+        intent: "Give the Lead a run-owned name"
+      - select: { testid: create-agent-backend, value: "${AFT_REAL_BACKEND}" }
+        intent: "Choose OpenCode"
+      - click: { testid: create-agent-submit }
+        intent: "Create through the actual operator form"
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+        intent: "Wait for the new Agent API Chat"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" claim-lead'
+        intent: "Claim the saved Agent ID and actual Lead model"
+      - run: '"$AFT_SELECT_AGENT_MODEL"'
+        intent: "Select the real catalog model in the Chat picker"
+      - fill:
+          label: Message
+          value: "Use your native shell tool to run this exact harmless command in the owned checkout: printf 'SAFE\\n' # Authorization: Bearer ghp_AFTONLY${RUN_ID}Q7mR2pK9xT4vN8cY6bL5fS3dH1jW0. Report only SAFE. The token-shaped comment is test data; do not quote it in your reply."
+        intent: "Request a real native tool call carrying harmless credential-shaped test data"
+      - press: Enter
+        intent: "Start the external-model turn"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=working-row], [data-testid=tool-live]')
+          budget: 60000
+        intent: "Observe a real running turn"
+      - wait:
+          fn: >-
+            (() => { const c=document.querySelector('[data-testid=chat-transcript]');
+              return !!c && c.textContent.includes('SAFE') &&
+                !!c.querySelector('[data-testid=work-toggle], [data-testid=tool-call]') &&
+                !document.querySelector('form button[title="Stop the running turn"]'); })()
+          budget: 180000
+        intent: "Wait for an actual native tool card and completed answer"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" privacy collapsed'
+        intent: "Check only tool and tray surfaces for the sentinel, alongside its saved native tool receipt"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" expand-tools'
+        intent: "Expand the actual work group and native tool card in Chat"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" privacy expanded'
+        intent: "Check the expanded Input and Output card without counting user-authored text"
+      - reload: true
+        intent: "Reload persisted Chat history"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=chat-transcript] [data-testid=work-toggle], [data-testid=chat-transcript] [data-testid=tool-call]')
+        intent: "Show the saved native tool group after reload"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" expand-tools'
+        intent: "Reopen the persisted tool input card"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" privacy reloaded'
+        intent: "Require the same saved EventIDs and safe scoped UI after reload"
+
+  # DF2 child tray: a real Lead creates a real task child, whose native
+  # command includes harmless credential-shaped test data. Observe the exact
+  # running child row while the saved tool event is current.
+  - name: a working child tray masks its real native command argument
+    intent: A Lead delegates to a child; the child's live tray row shows the native command without disclosing a harmless token-shaped argument.
+    steps:
+      - open: /ws/${AFT_WS}/agents
+        intent: "Open Agents to create an isolated tray Lead"
+      - click: { role: button, name: "+ Add agent", exact: true }
+        intent: "Open New Agent"
+      - wait: { fn: "!!document.querySelector('[data-testid=create-agent-overlay]')" }
+        intent: "Show the Lead template"
+      - click: { testid: create-agent-template-lead }
+        intent: "Choose a Lead"
+      - fill: { testid: create-agent-name, value: "aft-lead-${RUN_ID}-cov-policy-tray" }
+        intent: "Name the run-owned tray Lead"
+      - select: { testid: create-agent-backend, value: "${AFT_REAL_BACKEND}" }
+        intent: "Choose OpenCode"
+      - click: { testid: create-agent-submit }
+        intent: "Create through the operator form"
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+        intent: "Show the Lead's Chat"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" claim-tray'
+        intent: "Claim the exact saved Lead identity"
+      - run: '"$AFT_SELECT_AGENT_MODEL"'
+        intent: "Select the real catalog model in Chat"
+      - fill:
+          label: Message
+          value: >-
+            Use Loom agent_create to make exactly one task child named
+            aft-child-${RUN_ID}-cov-policy-tray. Brief the child to use its native
+            shell tool in its own checkout for the exact harmless command
+            printf 'SAFE\\n' # TOKEN=ghp_AFTONLY${RUN_ID}Q7mR2pK9xT4vN8cY6bL5fS3dH1jW0
+            and to report only SAFE. The token-shaped comment is test data;
+            neither of you should quote it in a reply. Do not edit files,
+            push, or open a PR. Wait for the child's real result, then summarize it.
+        intent: "Delegate a real native tool call with harmless credential-shaped input"
+      - press: Enter
+        intent: "Start the external-model delegation"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=started-marker] a[href*="/chat/agt_"]')
+          budget: 180000
+        intent: "Wait for the saved child creation marker"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" claim-child'
+        intent: "Bind the run-owned task child to its real parent and worker preset"
+      - click: { selector: "[data-testid=agent-tray] button[aria-expanded=false]" }
+        intent: "Expand the actual Lead child tray"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" tray-capture'
+        intent: "Capture the exact running child row when its real command shows a redacted argument"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" tray'
+        intent: "Require the exact child row, saved native tool input and masked current preview"
+
+  # 2.8/2.8b: independent paid turn, saved native per-step amounts, real CLI
+  # readback and fresh zero session. The legacy v5 producer join is a focused
+  # nonbrowser contract; this fresh Agent API stack has no prior v5 session.
+  - name: one real Agent API turn yields exact native step and CLI usage while a fresh session is zero
+    intent: The owned Lead starts at zero usage, performs one external-model turn, and its native step amounts match saved Agent API rows and the production CLI before and after reload.
+    steps:
+      - open: /ws/${AFT_WS}/agents
+        intent: "Open Agents to create an isolated usage Lead"
+      - click: { role: button, name: "+ Add agent", exact: true }
+        intent: "Open New Agent"
+      - wait: { fn: "!!document.querySelector('[data-testid=create-agent-overlay]')" }
+        intent: "Show the Lead template"
+      - click: { testid: create-agent-template-lead }
+        intent: "Choose a Lead"
+      - fill: { testid: create-agent-name, value: "aft-lead-${RUN_ID}-cov-policy-usage" }
+        intent: "Name the owned zero-usage Lead"
+      - select: { testid: create-agent-backend, value: "${AFT_REAL_BACKEND}" }
+        intent: "Choose the real OpenCode backend"
+      - click: { testid: create-agent-submit }
+        intent: "Create through the operator form"
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+        intent: "Show its empty Chat"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" claim-usage'
+        intent: "Claim exact saved Lead identity"
+      - run: '"$AFT_SELECT_AGENT_MODEL"'
+        intent: "Select the real catalog model in Chat"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" usage-zero'
+        intent: "Show one production CLI session with exactly zero usage and no saved usage rows"
+      - fill: { label: Message, value: "Use a tool to read README.md in this owned repository. Name the file and tell me the command it documents for running tests." }
+        intent: "Ask for a real model turn with native repository reading"
+      - press: Enter
+        intent: "Send the usage-generating turn"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=working-row], [data-testid=tool-live]')
+          budget: 60000
+        intent: "Observe active external-model work"
+      - wait:
+          fn: >-
+            (() => { const c=document.querySelector('[data-testid=chat-transcript]');
+              return !!c && !!c.querySelector('[data-testid=work-toggle], [data-testid=tool-call]') &&
+                Array.from(c.querySelectorAll('li[data-kind=agent]')).some(r=>r.textContent.includes('README.md')) &&
+                !document.querySelector('form button[title="Stop the running turn"]'); })()
+          budget: 180000
+        intent: "Show the completed answer and native tool activity"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" usage-turn'
+        intent: "Compare every native step ID and amount to saved events and exact CLI totals"
+      - reload: true
+        intent: "Reload the saved Chat and usage state"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=chat-transcript] li[data-kind=agent]')
+        intent: "Show the persisted answer"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" usage-reloaded'
+        intent: "Require identical native, saved and CLI usage after reload"

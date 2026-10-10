@@ -1,0 +1,300 @@
+# Live OpenCode Agent API. Every answer goes to the real provider. Screenshots
+# are taken by AFT at each named step; helper readbacks use saved API events.
+suite: live-chat-controls-models
+classification: { area: agents, feature: real-model-picker, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL}"
+tests:
+  - name: UI1 UI2 SM1 two catalog picks and declared effort persist into a real next answer
+    intent: A person creates a Lead in the modal, searches the connected catalog, picks two available models and a declared effort, then gets a real answer with the saved selection.
+    steps:
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" catalog'
+        intent: "Read the real connected catalog and record two distinct listed models plus the target model's declared effort choices"
+      - open: /ws/${AFT_WS}/agents
+        intent: "Open the Agent API New Agent page"
+      - wait: { fn: "Array.from(document.querySelectorAll('button')).some(b => b.textContent.trim() === '+ Add agent')" }
+        intent: "Wait for the New Agent control"
+      - click: { role: button, name: "+ Add agent", exact: true }
+        intent: "Open New Agent"
+      - wait: { fn: "!!document.querySelector('[data-testid=create-agent-overlay]')" }
+        intent: "Show the real modal"
+      - click: { testid: create-agent-template-lead }
+        intent: "Choose the Lead preset"
+      - fill: { testid: create-agent-name, value: "cov-controls-picker-${RUN_ID}" }
+        intent: "Name this owned Lead"
+      - select: { testid: create-agent-backend, value: opencode }
+        intent: "Choose the real OpenCode harness"
+      - wait:
+          fn: >-
+            (() => { const b = [...document.querySelectorAll('[data-testid=create-agent-repo-chips] button')];
+              return b.length === 1 && b[0].textContent.includes('source-repo') && b[0].getAttribute('aria-pressed') === 'true'; })()
+        intent: "Show the owned source repo selected"
+      - click: { testid: create-agent-submit }
+        intent: "Create the Lead through the UI"
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+        intent: "Open the created Lead's Chat"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" claim picker'
+        intent: "Bind later API readbacks to this exact UI-created Lead"
+      - click: { selector: "[data-chat-provider-model-picker]" }
+        intent: "Open the connected provider and model rail"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-model-picker-sidebar] [data-model-picker-provider="recent"]') &&
+            !!document.querySelector('[data-model-picker-sidebar] [data-model-picker-provider="favorites"]')
+        intent: "Show Favorites, Recent and connected provider sections"
+      - fill: { label: Search models, value: "${AFT_REAL_MODEL}" }
+        intent: "Search the real catalog for the required target model"
+      - wait:
+          fn: "!!document.querySelector('li[role=option][title=\"${AFT_REAL_MODEL}\"]')"
+        intent: "Show a matching real catalog model row"
+      - click: { role: button, name: Add to favorites }
+        intent: "Favorite the found model using the picker UI"
+      - press: Escape
+        intent: "Close the search through the picker's actual Escape control"
+      - click: { selector: "[data-chat-provider-model-picker]" }
+        intent: "Reopen the picker with its saved favorite and a fresh empty search"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-model-picker-sidebar] [data-model-picker-provider="favorites"]') &&
+            document.querySelector('[aria-label="Search models"]')?.value === ''
+        intent: "Show the real Favorites rail after the picker resets its search"
+      - click: { selector: '[data-model-picker-provider="favorites"]' }
+        intent: "Open the Favorites section"
+      - wait:
+          fn: "!!document.querySelector('li[role=option][title=\"${AFT_REAL_MODEL}\"]')"
+        intent: "Show the favorited target model without relying on a localStorage-only assertion"
+      - press: Escape
+        intent: "Close the picker before changing models"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" pick picker alternate'
+        intent: "Search and select a second available real catalog model through the visible picker"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-chat-provider-model-picker]') &&
+            !document.querySelector('[data-chat-provider-model-picker]').disabled
+        intent: "Show the selected alternate model in the composer"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" check-model picker alternate'
+        intent: "Read back the UI selection from the Agent API"
+      - click: { selector: "[data-chat-provider-model-picker]" }
+        intent: "Inspect the real picker after the alternate UI selection"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" picker-receipt after-alternate'
+        intent: "Save the owned route, parsed preferences, and actual picker section, query and option IDs without changing them"
+      - press: Escape
+        intent: "Close the picker before the required target selection"
+      - run: '"$AFT_SELECT_AGENT_MODEL" "cov-controls-picker-${RUN_ID}"'
+        intent: "Select the required connected provider model through the runner's owned real-model UI contract"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" check-model picker target'
+        intent: "Read back the model selected through that same UI actor"
+      - click: { selector: "[data-chat-provider-model-picker]" }
+        intent: "Inspect the real picker after the target UI selection"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" picker-receipt after-target'
+        intent: "Save the owned route and parsed Recent preferences before any real turn"
+      - press: Escape
+        intent: "Return to the composer without changing the model"
+      - fill: { label: Message, value: "PRIOR_${RUN_ID}: use a tool to read README.md. In your final answer, include the literal filename README.md and its test command." }
+        intent: "Ask a first real repository question before changing effort"
+      - press: Enter
+        intent: "Send the prior turn"
+      - wait:
+          fn: >-
+            (() => { const c = document.querySelector('[data-testid=chat-transcript]');
+              return (c?.querySelectorAll('li[data-kind=agent]').length || 0) > 0 &&
+                [...c.querySelectorAll('li[data-kind=agent]')].some(r => r.textContent.includes('README.md')) &&
+                !document.querySelector('form button[title="Stop the running turn"]'); })()
+        budget: 180000
+        intent: "Show the first real answer completed"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" turn picker PRIOR_${RUN_ID} completed && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" history picker prior'
+        intent: "Save exact prior-turn event IDs before effort changes"
+      - click: { selector: "[data-chat-traits-picker]" }
+        intent: "Open effort choices declared by that model"
+      - wait:
+          fn: >-
+            !!document.querySelector('[role=menu] [role=menuitemradio]') &&
+            [...document.querySelectorAll('[role=menu] [role=menuitemradio]')].some(e => e.textContent.trim() === 'High')
+        intent: "Show only real catalog effort choices including High"
+      - click: { role: menuitemradio, name: High, exact: true }
+        intent: "Set the declared High effort through the UI"
+      - wait:
+          fn: "(document.querySelector('[data-chat-traits-picker]')?.textContent || '').includes('High')"
+        intent: "Show High in the composer"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" check-model picker target effort'
+        intent: "Check saved model and Options effort, without inferring the native turn from a label"
+      - reload: true
+        intent: "Reload to test persisted selection"
+      - wait:
+          fn: "(document.querySelector('[data-chat-traits-picker]')?.textContent || '').includes('High')"
+        intent: "High remains visible after reload"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" check-model picker target effort'
+        intent: "Recheck the model and effort from the saved agent"
+      - fill: { label: Message, value: "PICKER_${RUN_ID}: read README.md with a tool. In your final answer, include the literal filename README.md and its test command." }
+        intent: "Ask a real repository question on the selected model"
+      - press: Enter
+        intent: "Send from Chat"
+      - wait:
+          fn: >-
+            (() => { const c = document.querySelector('[data-testid=chat-transcript]');
+              return (c?.querySelectorAll('li[data-kind=agent]').length || 0) >= 2 &&
+                [...c.querySelectorAll('li[data-kind=agent]')].some(r => r.textContent.includes('README.md')) &&
+                !document.querySelector('form button[title="Stop the running turn"]'); })()
+        budget: 180000
+        intent: "Show a completed real answer that cites the owned repository"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" turn picker PICKER_${RUN_ID} completed'
+        intent: "Tie the visible answer to one saved delivered request and a completed turn"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" history picker after prior'
+        intent: "Require the earlier real turn's saved event IDs and order to remain unchanged"
+      - run: 'bash "$AFT_TESTS_DIR/scripts/coverage-chat-controls-native.sh" picker'
+        intent: "Check the completed assistant message in the owned native OpenCode session used the UI-selected model"
+      - click: { selector: "[data-chat-provider-model-picker]" }
+        intent: "Open the picker after two saved selections and completed real turns"
+      - click: { selector: '[data-model-picker-provider="recent"]' }
+        intent: "Open the Recent section"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" picker-receipt recent'
+        intent: "Capture the exact route, parsed preferences, and visible Recent section before its required row assertion"
+      - wait:
+          fn: "!!document.querySelector('li[role=option][title=\"${AFT_REAL_MODEL}\"]')"
+        intent: "Require the selected and used model in the picker's actual Recent section"
+      - press: Escape
+        intent: "Return to the composer"
+      - run: 'agent-browser --session "$AFT_SESSION" set viewport 540 900'
+        intent: "Resize only this test browser to the supported narrow-composer layout"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-chat-provider-model-picker]') &&
+            !!document.querySelector('button[aria-label="More composer controls"]') &&
+            !document.querySelector('[data-chat-traits-picker]')
+        intent: "Show the compact model trigger and More composer controls instead of the wide effort trigger"
+      - click: { role: button, name: More composer controls }
+        intent: "Open the narrow composer's declared effort choices"
+      - wait:
+          fn: "[...document.querySelectorAll('[role=menu] [role=menuitemradio]')].some(e => e.textContent.trim() === 'High' && e.getAttribute('aria-checked') === 'true')"
+        intent: "Show the saved High effort selected in the compact menu"
+      - run: 'agent-browser --session "$AFT_SESSION" set viewport 1920 1080'
+        intent: "Restore this test session's normal browser viewport"
+
+  - name: MC1 fresh owned boot create has a bounded saved result and retry if catalog is unavailable
+    intent: An explicit Agent API actor creates during a real owned serve and OpenCode restart, preserving the actual warm-up outcome and refusing to call a warm catalog cold.
+    steps:
+      - open: /ws/${AFT_WS}/agents
+        intent: "Keep the API actor's browser session on the owned workspace"
+      - run: ': "${AFT_RESTART_SERVE:?owned restart helper required}"; "$AFT_RESTART_SERVE"'
+        intent: "Restart only this run's owned loom-local service, including its OpenCode process"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" cold-create'
+        intent: "Immediately create with the real selected model, check a typed bounded result and exact saved roster, and retry only after an actual not-ready refusal"
+
+  - name: MCS3 custom model added in picker is listed without warning and removed after a readable OpenCode refusal
+    intent: A person adds and removes a custom id in the real picker; the API actor creates with it without a model warning, while OpenCode's accepted custom turn limitation remains a readable failure.
+    steps:
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" catalog'
+        intent: "Confirm the run's required model and real catalog before opening the picker"
+      - open: /ws/${AFT_WS}/agents
+        intent: "Open New Agent for the custom-model settings actor"
+      - wait: { fn: "Array.from(document.querySelectorAll('button')).some(b => b.textContent.trim() === '+ Add agent')" }
+        intent: "Wait until New Agent is available"
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait: { fn: "!!document.querySelector('[data-testid=create-agent-overlay]')" }
+        intent: "Show the Create form"
+      - click: { testid: create-agent-template-lead }
+      - fill: { testid: create-agent-name, value: "cov-controls-custom-ui-${RUN_ID}" }
+      - select: { testid: create-agent-backend, value: opencode }
+      - click: { testid: create-agent-submit }
+        intent: "Create an owned human UI actor"
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" claim custom-ui'
+        intent: "Bind the UI actor to its saved agent"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" pick custom-ui target'
+        intent: "Save a real listed model for the UI actor"
+      - click: { selector: "[data-chat-provider-model-picker]" }
+        intent: "Open the model picker"
+      - click: { selector: '[data-model-picker-provider="provider:custom"]' }
+        intent: "Open the Custom rail"
+      - fill: { label: Custom model id, value: "openai/cov-custom-${RUN_ID}" }
+        intent: "Enter a well formed custom id"
+      - click: { role: button, name: Add, exact: true }
+        intent: "Add it through the product UI"
+      - wait:
+          fn: "!!document.querySelector('li[role=option][title=\"openai/cov-custom-${RUN_ID}\"]')"
+        intent: "Show the custom model row in the picker"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" create custom-api lead custom'
+        intent: "API actor contract: create a separate owned Lead using the custom id"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" custom custom-api present'
+        intent: "Check GET custom, catalog source=custom, create without warning, and no model.unverified event"
+      - run: 'agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$AFT_WS/chat/$(cat "$AFT_WORK_DIR/chat-controls/custom-api.id")"'
+        intent: "Open the API-created custom-model agent's actual Chat"
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+      - fill: { label: Message, value: "CUSTOM_${RUN_ID}: say one sentence about README.md." }
+        intent: "Ask the real OpenCode service to use the custom id"
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=turn-error]')?.textContent || '').includes('Model unavailable') &&
+            (document.querySelector('[data-testid=turn-end-error]')?.textContent || '').includes('Model unavailable')
+        budget: 180000
+        intent: "Show the accepted OpenCode custom-model limitation as a readable failed turn"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" turn custom-api CUSTOM_${RUN_ID} failed'
+        intent: "Check one saved failed turn, rather than claiming a successful custom reply"
+      - run: 'agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$AFT_WS/chat/$(cat "$AFT_WORK_DIR/chat-controls/custom-ui.id")"'
+        intent: "Return to the human picker actor"
+      - click: { selector: "[data-chat-provider-model-picker]" }
+      - click: { selector: '[data-model-picker-provider="provider:custom"]' }
+      - click: { role: button, name: "Remove custom model openai/cov-custom-${RUN_ID}" }
+        intent: "Remove the custom id through the picker"
+      - wait:
+          fn: "!document.querySelector('li[role=option][title=\"openai/cov-custom-${RUN_ID}\"]')"
+        intent: "Show the custom row gone"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" custom custom-api absent'
+        intent: "Check GET custom and catalog no longer list the removed id"
+
+  - name: MCS1 unknown model warns, fails readably, and the same agent recovers on a listed model
+    intent: An API actor deliberately creates a well formed unknown model, sees the saved warning and real failed turn, then a person chooses a valid model in Chat and gets a real answer.
+    steps:
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" catalog'
+        intent: "Read the owned OpenCode catalog before deliberately testing an unlisted model"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" malformed'
+        intent: "Explicit Agent API surface: malformed provider/model gets 400 and leaves the roster unchanged"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" create unknown lead unknown'
+        intent: "Explicit Agent API surface: create an owned well formed but unknown model"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" unknown unknown'
+        intent: "Check model_unverified and one saved warning event"
+      - run: 'agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$AFT_WS/chat/$(cat "$AFT_WORK_DIR/chat-controls/unknown.id")"'
+        intent: "Open the unknown-model agent's real Chat"
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+      - wait:
+          fn: "(document.querySelector('[data-chat-provider-model-picker]')?.textContent || '').includes('Unavailable')"
+        intent: "Show the unknown model visibly marked unavailable"
+      - fill: { label: Message, value: "UNKNOWN_${RUN_ID}: read README.md and answer." }
+        intent: "Send a real turn to the harness with the unknown id"
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=turn-error]')?.textContent || '').includes('Model unavailable') &&
+            (document.querySelector('[data-testid=turn-end-error]')?.textContent || '').includes('Model unavailable')
+        budget: 180000
+        intent: "Show the real provider refusal in both error banner and saved turn note"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" turn unknown UNKNOWN_${RUN_ID} failed'
+        intent: "Check the failed turn ended and the agent became reusable"
+      - reload: true
+        intent: "Reload failed Chat"
+      - wait:
+          fn: "(document.querySelector('[data-testid=turn-end-error]')?.textContent || '').includes('Model unavailable')"
+        intent: "The saved failure note remains after reload"
+      - click: { role: button, name: Dismiss error }
+        intent: "Dismiss only the transient banner"
+      - wait:
+          fn: "!document.querySelector('[data-testid=turn-error]') && !!document.querySelector('[data-testid=turn-end-error]')"
+        intent: "Keep the durable error note visible"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" pick unknown target'
+        intent: "Recover the same agent with a listed model through the UI picker"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" recover unknown'
+        intent: "Read back valid Config.Model and retain the saved prior failure and warning"
+      - fill: { label: Message, value: "RECOVER_${RUN_ID}: use a tool to read README.md. In your final answer, include the literal filename README.md and its test command." }
+        intent: "Ask a fresh real turn after recovery"
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const c = document.querySelector('[data-testid=chat-transcript]');
+              return [...c.querySelectorAll('li[data-kind=agent]')].some(r => r.textContent.includes('README.md')) &&
+                !document.querySelector('form button[title="Stop the running turn"]'); })()
+        budget: 180000
+        intent: "Show the recovered agent answered with its valid model"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" turn unknown RECOVER_${RUN_ID} completed'
+        intent: "Check a second saved successful turn on the same agent"
+      - run: 'bash "$AFT_TESTS_DIR/scripts/coverage-chat-controls-native.sh" unknown'
+        intent: "Check the recovered real answer's native completed assistant model is the selected valid catalog model"

@@ -1,0 +1,311 @@
+# Two bounded real OpenCode Chat journeys. The first requires actual model
+# items; the second uses one authentic persisted user message for layout and
+# intentionally makes no assertion about a paid model reply. Every browser
+# capture is paired with saved event, DOM, clipboard, or numeric readback.
+suite: live-chat-visual
+classification: { area: agents, feature: real-chat-visual, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL}"
+setup: |
+  set -e
+  python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" preflight
+teardown: |
+  set -e
+  python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" cleanup
+
+tests:
+  # UI3 table/code/two genuine reads/failed read/reasoning/copy/reload,
+  # UI5 stream/caret/flush/working/CLS/reduced-motion normal state,
+  # UI6 agent hover. A provider without reasoning fails with an explicit
+  # capability prerequisite rather than claiming a scripted Thinking row.
+  - name: real repo reply renders markdown tools motion and copy after reload
+    intent: A real Lead reads the owned repository, attempts a benign missing read, renders grounded table/code and saved tool items, and preserves exact copy and history after reload.
+    steps:
+      - open: /ws/${AFT_WS}/agents
+        intent: "Open the owned workspace's Agents page"
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('button')).some(b => b.textContent.trim() === '+ Add agent')
+        intent: "Wait for New Agent"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" motion-prime'
+        intent: "Passively observe the future owned Chat EventSource before UI navigation, without sending an event"
+      - click: { role: button, name: "+ Add agent", exact: true }
+        intent: "Open the New Agent form"
+      - click: { testid: create-agent-template-lead }
+        intent: "Choose the Lead template"
+      - fill: { testid: create-agent-name, value: "aft-${RUN_ID}-cov-visual-render" }
+        intent: "Name this run's rendering Lead"
+      - select: { testid: create-agent-backend, value: "${AFT_REAL_BACKEND}" }
+        intent: "Select the real OpenCode backend"
+      - wait:
+          fn: >-
+            (() => { const r=[...document.querySelectorAll('[data-testid=create-agent-repo-chips] button')];
+              return r.length===1 && r[0].textContent.includes('source-repo') && r[0].getAttribute('aria-pressed')==='true'; })()
+        intent: "Confirm the owned Slack-clone repo is selected"
+      - click: { testid: create-agent-submit }
+        intent: "Create the Lead through the UI"
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+        intent: "Wait for its real Chat route"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" claim render'
+        intent: "Bind this journey to the actual saved Lead ID and repo"
+      - run: '"$AFT_SELECT_AGENT_MODEL"'
+        intent: "Select and read back the declared real model in the current Chat"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" motion-start'
+        intent: "Arm bounded 100ms and rendered-frame observers before the real send"
+      - fill:
+          label: Message
+          value: "VISUAL_RENDER_${RUN_ID}. Use your real file tools: read README.md, package.json, and BACKLOG.md, then attempt to read visual-missing-${RUN_ID}.txt; do not create it and let the missing-file error stand. From the three successful files, write between 650 and 750 words in six labeled sections of about 105 to 125 words each: setup, scripts, ticket routes, test coverage, missing-read result, and operational summary. Explain each of the six independent BACKLOG.md tickets using only the files read. Include a GFM table with a README.md row giving the test command and a package.json row giving its test script. Include a fenced json code block with the actual test script from package.json. Explain the missing read. Cite only facts from those reads. Before finishing, count your words and add source-grounded detail if fewer than 400. Do not edit files. End with the exact text VISUAL_END_${RUN_ID}."
+        intent: "Ask for a long repository-grounded answer, real tool calls and a benign failed read"
+      - press: Enter
+        intent: "Send the request through Chat"
+      - wait:
+          fn: >-
+            !!window.__aftChatVisualLive
+        budget: 120000
+        intent: "Wait for the pre-send DOM observer to capture an actual simultaneous running tool, Working row and Stop control"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" live-check && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" shot render tool-transition'
+        intent: "Read back the observed live state and capture its possibly completed transition; compare the later saved tool by time and file"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=chat-transcript] li[data-kind=agent] [data-streaming-caret]') &&
+            !!document.querySelector('form button[title="Stop the running turn"]')
+        budget: 180000
+        intent: "Observe real streamed reply text and its active caret"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" shot render streaming'
+        intent: "Capture the named streaming frame while the real turn is active"
+      - wait:
+          fn: >-
+            (() => { const c=document.querySelector('[data-testid=chat-transcript]');
+              return c?.textContent.includes('VISUAL_END_${RUN_ID}') &&
+                !document.querySelector('form button[title="Stop the running turn"]') &&
+                !c.querySelector('[data-streaming-caret], [data-testid=working-row]'); })()
+        budget: 180000
+        intent: "Wait for the saved real turn to finish, flush text and remove caret and working row"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" shot render end && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" motion-capture render'
+        intent: "Freeze the first turn's final frame, saved events and caret state at the original checkpoint; motion validation remains pending"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=chat-transcript] [data-testid=chat-codeblock][data-language=json] code span')
+        budget: 30000
+        intent: "Wait for completed JSON code highlighting before reading its token spans"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" reasoning-capture before-reload'
+        intent: "Freeze actual saved reasoning EventIDs and raw text, including null, with compact Thinking disclosures and an explicit nonexpandable empty-text explanation; available text expands exactly; original reasoning validation remains pending"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" render-check'
+        intent: "Expand through UI clicks and compare table, highlighted code and all tool bodies with actual saved events"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" shot render expanded'
+        intent: "Capture the expanded real tool input, output and failure"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" agent-hover'
+        intent: "Require copy and time hidden at rest, visible on reply hover or keyboard focus, below the full reply and onscreen without shifting layout; capture both themes"
+      - click: { selector: "[data-testid=chat-transcript] [data-testid=chat-codeblock][data-language=json] button[aria-label='Copy code']" }
+        intent: "Copy the rendered code through its UI action"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" clipboard-check code'
+        intent: "Read back the actual browser clipboard and Copied feedback for code"
+      - click: { role: button, name: "Copy as Markdown", exact: true }
+        intent: "Copy the rendered GFM table through its UI action"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" clipboard-check table'
+        intent: "Read back the actual browser clipboard and Copied feedback for the table"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" copy-message'
+        intent: "Copy the completed assistant message through its UI action"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" clipboard-check message'
+        intent: "Compare clipboard bytes with the saved assistant message"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" snapshot render before-reload'
+        intent: "Save exact event IDs before reload"
+      - reload: true
+        intent: "Reload the same Lead Chat"
+      - wait:
+          fn: >-
+            (() => { const c=document.querySelector('[data-testid=chat-transcript]');
+              return c?.textContent.includes('VISUAL_END_${RUN_ID}') && !!c.querySelector('table') &&
+                !!c.querySelector('[data-testid=chat-codeblock]'); })()
+        intent: "Wait for persisted table, code and final answer"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" reasoning-capture reloaded'
+        intent: "Freeze actual saved reasoning and collapsed/expanded Thinking DOM after reload without treating absent or null text as a pass"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" render-reload-check && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" shot render reloaded'
+        intent: "Compare exact saved event IDs and rendered tool/table/code after reload"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" reasoning-presentation-grid'
+        intent: "Check compact Thinking disclosures at 800 and 390px in both themes; expand saved text and close via keyboard, or show the nonexpandable empty-text explanation; keep the original reasoning-text requirement separate"
+      - run: 'agent-browser --session "$AFT_SESSION" set media light reduced-motion'
+        intent: "Switch this owned browser session to reduced motion for a separate real turn"
+      - wait:
+          fn: >-
+            matchMedia('(prefers-reduced-motion: reduce)').matches
+        intent: "Confirm the browser's reduced-motion preference is active"
+      - fill:
+          label: Message
+          value: "VISUAL_REDUCED_${RUN_ID}. Use a real tool to reread README.md, then write at least 120 words explaining what test command it documents and how to run it. Name README.md and the command in the answer. Do not edit files."
+        intent: "Ask the same real Lead for a second grounded streaming turn under reduced motion"
+      - press: Enter
+        intent: "Send the reduced-motion request through Chat"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=chat-transcript] li[data-kind=agent] [data-streaming-caret]') &&
+            !!document.querySelector('form button[title="Stop the running turn"]')
+        budget: 180000
+        intent: "Observe an actual streaming answer under reduced motion"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" reduced-live-check && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" shot render reduced-streaming'
+        intent: "Require no fresh-word fade or caret/working animation in the real reduced-motion frame"
+      - wait:
+          fn: >-
+            (() => {const c=document.querySelector('[data-testid=chat-transcript]');
+              const rows=[...(c?.querySelectorAll('li[data-kind]')||[])];
+              const sent=rows.findIndex(r=>r.dataset.kind==='user' && r.textContent.includes('VISUAL_REDUCED_${RUN_ID}'));
+              return sent>=0 && rows.slice(sent+1).some(r=>r.dataset.kind==='agent' && r.textContent.includes('npm test')) &&
+                !document.querySelector('form button[title="Stop the running turn"]') &&
+                !c.querySelector('[data-streaming-caret], [data-testid=working-row]');})()
+        budget: 180000
+        intent: "Wait for the actual reduced-motion reply to complete"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" reduced-saved-check && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" shot render reduced-end'
+        intent: "Compare the second real reply to its saved turn and capture the final reduced-motion frame"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" final-visual-assert'
+        intent: "Independently validate both sealed reasoning checkpoints and original first-turn motion thresholds; record both verdicts and fail if either fails"
+  # UI0 empty/focus/keyboard/autogrow/header; 1.8a/1.8c literal text;
+  # UI6/7/7b hover and narrow geometry; SK1 and MB1/MB1b actual viewport.
+  # The source is a genuine user send;
+  # this case does not claim a successful model reply.
+  - name: chat composer and long literal user text stay usable at narrow widths
+    intent: A new real Lead's Chat keeps keyboard and rename behavior, saves an unsafe-shaped long user message literally, and fits its hover pill at documented narrow widths.
+    steps:
+      - open: /ws/${AFT_WS}/agents
+        intent: "Open Agents for a fresh visual input Lead"
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('button')).some(b => b.textContent.trim() === '+ Add agent')
+        intent: "Wait for New Agent"
+      - click: { role: button, name: "+ Add agent", exact: true }
+        intent: "Open the New Agent form"
+      - click: { testid: create-agent-template-lead }
+        intent: "Choose Lead"
+      - fill: { testid: create-agent-name, value: "aft-${RUN_ID}-cov-visual-input" }
+        intent: "Name this run's input Lead"
+      - select: { testid: create-agent-backend, value: "${AFT_REAL_BACKEND}" }
+        intent: "Select real OpenCode"
+      - click: { testid: create-agent-submit }
+        intent: "Create the Lead through the UI"
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+        intent: "Wait for its Chat route"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" claim input && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" draft empty && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" shot input empty'
+        intent: "Bind current Chat and check the empty state and disabled Send with a screenshot"
+      - run: '"$AFT_SELECT_AGENT_MODEL"'
+        intent: "Bind the model selection helper to this current Lead before any send"
+      - run: 'agent-browser --session "$AFT_SESSION" focus "textarea[aria-label=Message]" && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" draft focused && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" shot input focused'
+        intent: "Focus the real composer and measure its minimum height"
+      - fill: { label: Message, value: "first line" }
+        intent: "Start a draft without sending"
+      - press: Shift+Enter
+        intent: "Insert a newline with Shift+Enter"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" draft newline'
+        intent: "Check Shift+Enter changed only the draft and saved no user row"
+      - fill:
+          label: Message
+          value: "first line\nsecond line\nthird line\nfourth line\nfifth line\nsixth line"
+        intent: "Grow the composer with a multiline draft"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" draft grown && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" shot input grown'
+        intent: "Measure bounded autogrow in the real layout"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" fill-long'
+        intent: "Insert literal HTML-shaped text longer than 8000 characters through focused Chat keyboard input, checking every chunk"
+      - press: Enter
+        intent: "Send the long message using Enter"
+      - wait:
+          fn: >-
+            [...document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=user]')].some(r => r.textContent.includes('VISUAL_${RUN_ID}'))
+        budget: 60000
+        intent: "Wait for the authentic saved user message to appear"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" input-check collapsed && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" shot input collapsed'
+        intent: "Compare the collapsed literal text with the exact saved delivery and check safe wrapping"
+      - click: { role: button, name: "Show full message", exact: true }
+        intent: "Expand the user bubble through the UI"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" input-check expanded'
+        intent: "Confirm the expanded bubble shows every saved character without a second reveal control"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" input-check all && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" shot input all'
+        intent: "Compare every displayed character with the real persisted text"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" layout'
+        intent: "Measure nonoverlap and copy-button visibility at 130, 105 and 80px, both themes, plus larger font"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" locale-stress'
+        intent: "Stress the documented long locale time in the browser and remeasure the real user's pill at each narrow width"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" stop-if-running'
+        intent: "Stop only this input Lead's turn if it is still running; no model answer is claimed"
+      - wait:
+          fn: >-
+            !document.querySelector('form button[title="Stop the running turn"]')
+        budget: 60000
+        intent: "Wait for the owned input Lead to become idle before teardown"
+      - reload: true
+        intent: "Reload the same Chat after the user send"
+      - wait:
+          fn: >-
+            [...document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=user]')].some(r => r.textContent.includes('VISUAL_${RUN_ID}'))
+        intent: "Wait for persisted literal text after reload"
+      - click: { role: button, name: "Show full message", exact: true }
+        intent: "Reopen the long user bubble"
+      - click: { selector: "[data-testid=chat-transcript] li[data-kind=user] button[class*='showAll']" }
+        intent: "Reveal all saved characters after reload"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" input-reload-check && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" shot input reloaded'
+        intent: "Compare the exact saved user event and full safe rendered text after reload"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" create-mobile-roster'
+        intent: "Create only the needed real empty workspaces through the isolated serve API, saving exact IDs for teardown"
+      - reload: true
+        intent: "Open a fresh Chat document for the first-Tab skip-link journey"
+      - wait:
+          fn: >-
+            document.querySelector('section[aria-label="Agent chat"] header h2')?.textContent === 'aft-${RUN_ID}-cov-visual-input' &&
+            document.querySelectorAll('nav[aria-label="Primary"] [aria-label="Workspace selector"] button[aria-label^="Switch to "]').length >= 4
+        intent: "Wait for the four authentic workspace avatars and original Lead title"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" mobile-roster-check'
+        intent: "Compare exact roster names and IDs from product API with visible switcher avatars before layout checks"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" skip-link hidden'
+        intent: "Measure the real skip link hidden before keyboard use"
+      - press: Tab
+        intent: "Use the first keyboard Tab on the freshly loaded Chat"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" skip-link tab'
+        intent: "Read focused and visible skip-link state and capture its keyboard screenshot"
+      - press: Enter
+        intent: "Activate Skip to main content"
+      - press: Tab
+        intent: "Move to the first control within main"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" skip-link entered'
+        intent: "Verify main-content hash and keyboard focus inside main"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" mouse-focus-skip-link'
+        intent: "After a real main-area mouse click, focus the link and verify it stays visually hidden"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" mobile-layout 360 && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" mobile-layout 390 && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" mobile-layout 470 && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" mobile-layout 557'
+        intent: "Set actual phone/tablet viewports, measure overflow, single rail, active workspace, name, uncovered composer and header, and capture both themes"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" mobile-switcher 360 && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" mobile-switcher 390 && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" mobile-switcher 470 && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" mobile-switcher 557'
+        intent: "Check authentic workspace avatars/Add at scroll start, odd offset and end, with whole-item and more-hint readback; fail explicitly if the real roster cannot exercise overflow"
+      - click: { role: button, name: "Rename agent", exact: true }
+        intent: "Open inline header rename after the independent input and layout checks"
+      - fill: { label: "Agent name", value: "aft-${RUN_ID}-cov-visual-input-renamed" }
+        intent: "Choose a run-owned new title"
+      - click: { testid: harness-label }
+        intent: "Commit the inline rename by blurring the focused title through a real UI click"
+      - wait:
+          fn: >-
+            !!document.querySelector('section[aria-label="Agent chat"] header h2')?.textContent.endsWith('-renamed')
+        intent: "Wait for the new header title"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" rename input'
+        intent: "Confirm the blur-committed header rename persisted on the exact saved Agent API row"
+      - reload: true
+        intent: "Reload Chat to prove the changed header survives a fresh document"
+      - wait:
+          fn: >-
+            document.querySelector('section[aria-label="Agent chat"] header h2')?.textContent === 'aft-${RUN_ID}-cov-visual-input-renamed'
+        intent: "Wait for the saved renamed Agent header"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" rename-reloaded input'
+        intent: "Compare the reloaded header with the exact renamed Agent API row"
+      - click: { role: button, name: "Rename agent", exact: true }
+        intent: "Open inline rename to restore the runner-declared Lead identity"
+      - fill: { label: "Agent name", value: "aft-${RUN_ID}-cov-visual-input" }
+        intent: "Restore the exact cataloged Lead name through real Chat UI"
+      - press: Enter
+        intent: "Commit the original Lead name with the header's Enter action"
+      - wait:
+          fn: >-
+            document.querySelector('section[aria-label="Agent chat"] header h2')?.textContent === 'aft-${RUN_ID}-cov-visual-input'
+        intent: "Wait for the original name in the Chat header"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" rename-restored input'
+        intent: "Read back the exact Enter-restored Agent API name before runner ownership audit"
+      - reload: true
+        intent: "Reload Chat after the Enter-restored header name"
+      - wait:
+          fn: >-
+            document.querySelector('section[aria-label="Agent chat"] header h2')?.textContent === 'aft-${RUN_ID}-cov-visual-input'
+        intent: "Wait for the saved original Agent header after a fresh document"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-visual.py" rename-restored-reloaded input'
+        intent: "Compare the reloaded original header and exact saved Agent identity with the pre-reload receipt"

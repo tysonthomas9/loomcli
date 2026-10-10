@@ -1,0 +1,256 @@
+# Paid real OpenCode journey. Runner owns service, browser session and source repo.
+# Each step is a named screenshot; helpers use public API or read-only native GET.
+suite: coverage-lifecycle-delete
+classification: { area: agents, feature: real-agent-lifecycle-delete, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL}"
+setup: |
+  set -eu
+  : "${AFT_API_URL:?}" "${AFT_WS:?}" "${AFT_AGENT_FLOW_REPO:?}" "${AFT_SELECT_AGENT_MODEL:?}" "${RUN_ID:?}"
+  : "${AFT_WORK_DIR:?}" "${AFT_TESTS_DIR:?}" "${AFT_SESSION:?}"
+  test "$AFT_WS" = LOCALMODE
+  test "$AFT_REAL_BACKEND" = opencode
+  test -x "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete-native.sh"
+
+tests:
+  - name: stale-delete
+    intent: A UI-created Lead answers, two real Files saves invalidate the first Delete fingerprint, and fresh UI Delete purges only its recorded native session.
+    steps:
+      - open: /ws/${AFT_WS}/agents
+        intent: Open the owned Agents view
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - click: { testid: create-agent-template-lead }
+      - fill: { testid: create-agent-name, value: "cov-delete-control-${RUN_ID}" }
+      - select: { testid: create-agent-backend, value: opencode }
+      - click: { testid: create-agent-submit }
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+        intent: Show the independent UI-created control Lead
+      - run: '"$AFT_SELECT_AGENT_MODEL"'
+        intent: Select the real model for the control
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" bind control'
+        intent: Save the exact control Agent ID and owned checkout
+      - fill: { label: Message, value: "Read README.md and answer in one sentence with marker control-${RUN_ID}. Change no files." }
+      - press: Enter
+      - wait:
+          fn: >-
+            document.querySelector('section[aria-label="Agent chat"] header')?.textContent?.includes('idle') &&
+            Array.from(document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]'))
+              .some(li=>li.textContent.includes('control-${RUN_ID}'))
+        intent: Show the control's completed real-model answer
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" native control capture'
+        intent: Persist its exact owned native session and checkout receipt
+      - open: /ws/${AFT_WS}/agents
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - click: { testid: create-agent-template-lead }
+      - fill: { testid: create-agent-name, value: "cov-delete-target-${RUN_ID}" }
+      - select: { testid: create-agent-backend, value: opencode }
+      - click: { testid: create-agent-submit }
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+        intent: Show the separately created target Lead
+      - run: '"$AFT_SELECT_AGENT_MODEL"'
+        intent: Select the real model for the target
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" bind target'
+        intent: Save the exact target ID and worktree
+      - fill: { label: Message, value: "Read README.md and answer briefly with marker target-${RUN_ID}. Change no files." }
+      - press: Enter
+      - wait:
+          fn: >-
+            document.querySelector('section[aria-label="Agent chat"] header')?.textContent?.includes('idle') &&
+            Array.from(document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent]'))
+              .some(li=>li.textContent.includes('target-${RUN_ID}'))
+        intent: Show a small real repo read and answer before Delete
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" native target capture'
+        intent: Persist the target's owned native tuple before any Delete
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" prepare'
+        intent: Read original README through Files API and prepare two distinct local typing inputs
+      - run: |
+          agent-browser --session "$AFT_SESSION" eval '(() => { const tabs=Array.from(document.querySelectorAll("[data-testid=agent-api-page] button[class*=editorTab]")).filter(b=>b.textContent.trim()==="Files"); if(tabs.length!==1) throw Error("expected one agent Files tab"); tabs[0].click(); return true; })()' >/dev/null
+        intent: Select only the target Agent Chat Files tab
+      - wait:
+          fn: >-
+            (() => { const p=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])');
+              return location.search==='?tab=files' &&
+                !!p?.querySelector('[role=tablist][aria-label="File explorer lens"] [role=tab][aria-label=Files]'); })()
+        intent: Show the target's nested Files lens
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" select_files_lens'
+        intent: Select the unique nested Files lens on the exact target route
+      - run: |
+          agent-browser --session "$AFT_SESSION" eval '(() => { const p=document.querySelector("[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])"); if(!p || location.search!=="?tab=files") throw Error("owned Files panel missing"); const tabs=Array.from(p.querySelectorAll("[role=tablist][aria-label=\"File explorer lens\"] [role=tab][aria-label^=\"Changes \"]")); if(tabs.length!==1) throw Error("expected one owned Changes lens"); tabs[0].click(); return true; })()' >/dev/null
+        intent: Show the target's Changes lens to choose the uncommitted working-tree comparison
+      - wait:
+          fn: >-
+            (() => { const p=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])');
+              return location.search==='?tab=files' &&
+                !!p?.querySelector('[role=tablist][aria-label="Compare mode"] [role=tab][title^="Uncommitted changes in each checkout"]'); })()
+        intent: Show the product's Working tree comparison option
+      - run: |
+          agent-browser --session "$AFT_SESSION" eval '(() => { const p=document.querySelector("[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])"); if(!p || location.search!=="?tab=files") throw Error("owned Changes panel missing"); const tabs=Array.from(p.querySelectorAll("[role=tablist][aria-label=\"Compare mode\"] [role=tab][title^=\"Uncommitted changes in each checkout\"]")); if(tabs.length!==1) throw Error("expected one owned Working tree option"); tabs[0].click(); return true; })()' >/dev/null
+        intent: Compare the target's uncommitted working-tree files
+      - wait:
+          fn: >-
+            (() => { const p=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])');
+              const lens=p?.querySelector('[role=tablist][aria-label="File explorer lens"] [role=tab][aria-label^="Changes "]');
+              const working=p?.querySelectorAll('[role=tablist][aria-label="Compare mode"] [role=tab][title^="Uncommitted changes in each checkout"]');
+              const branch=p?.querySelectorAll('[role=tablist][aria-label="Compare mode"] [role=tab][title^="Committed changes on each agent branch"]');
+              return location.search==='?tab=files' && lens?.getAttribute('aria-selected')==='true' &&
+                working?.length===1 && working[0].getAttribute('aria-selected')==='true' &&
+                branch?.length===1 && branch[0].getAttribute('aria-selected')==='false'; })()
+        intent: Require the Working tree comparison to be selected before the edit
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" select_files_lens'
+        intent: Return to the unique target Files lens with Working tree comparison retained
+      - wait:
+          fn: >-
+            (() => { const p=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])');
+              const id=location.pathname.split('/').pop();
+              return location.search==='?tab=files' && !!p?.querySelector('[data-root-key^="agent:' + id + ':"]'); })()
+        intent: Show the target's Files root
+      - run: |
+          agent-browser --session "$AFT_SESSION" eval '(() => { const p=document.querySelector("[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])"); const id=location.pathname.split("/").pop(); const root=p?.querySelector("[data-root-key^=\"agent:" + id + ":\"]"); const lens=p?.querySelector("[role=tablist][aria-label=\"File explorer lens\"] [role=tab][aria-label=Files]"); if(!root || location.search!=="?tab=files" || lens?.getAttribute("aria-selected")!=="true") throw Error("owned Files root missing"); if(root.getAttribute("aria-expanded")==="false") root.click(); return true; })()' >/dev/null
+        intent: Expand only this target's owned Files root when collapsed
+      - wait:
+          fn: >-
+            (() => { const p=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])');
+              return location.search==='?tab=files' &&
+                p?.querySelector('[role=tablist][aria-label="File explorer lens"] [role=tab][aria-label=Files]')?.getAttribute('aria-selected')==='true' &&
+                !!p.querySelector('[aria-label="README.md"]'); })()
+        intent: Show tracked README in the expanded owned Files tree
+      - click: { selector: "[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) [aria-label='README.md']" }
+      - wait: { fn: "!!document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) .cm-content[contenteditable=true]')" }
+        intent: Show the real Files editor
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" type_editor one'
+        intent: Focus, select, clear and type the first distinct bytes through CodeMirror keys
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" check_editor one'
+        intent: Require exact visible editor bytes before the first Save
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" save_editor one'
+        intent: Save the first edit using Files
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden]) button[role=tab]'))
+              .some(b=>b.getAttribute('aria-label')==='Changes 1')
+        intent: Show the changed tracked file after the first Files Save
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" file_saved one'
+        intent: Prove exact first saved bytes and changed version through public Files reads
+      - run: |
+          agent-browser --session "$AFT_SESSION" eval '(() => { const n=document.querySelector("nav[aria-label=Agents] a[aria-current=page]"); if(!n) throw Error("active target missing"); const r=n.getBoundingClientRect(); n.dispatchEvent(new MouseEvent("contextmenu",{bubbles:true,clientX:r.x+4,clientY:r.y+4})); return true; })()' >/dev/null
+        intent: Open the target's sidebar Delete menu
+      - click: { testid: agent-context-menu-delete }
+      - click: { role: button, name: "Delete agent", exact: true }
+      - wait:
+          fn: >-
+            (() => { const d=document.querySelector('[role=alertdialog]');
+              return !!d?.querySelector('[data-testid=agent-delete-anyway]') &&
+                d.textContent.includes('Uncommitted changes') &&
+                d.textContent.includes('README.md') &&
+                d.textContent.includes(location.pathname.split('/').pop()); })()
+        intent: Show the real dirty-worktree warning for this target
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" fingerprint one'
+        intent: Capture the first public unsaved_work fingerprint F1
+      - click: { role: button, name: "Keep agent", exact: true }
+        intent: Keep the target and dismiss the first warning
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" native target present'
+        intent: Prove Keep preserved the target's owned native session
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" type_editor two'
+        intent: Focus, select, clear and type different README bytes through CodeMirror keys
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" check_editor two'
+        intent: Require exact visible editor bytes before the second Save
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" save_editor two'
+        intent: Save the second edit through Files
+      - wait:
+          fn: >-
+            (() => { const p=document.querySelector('[data-testid=agent-api-page] [role=tabpanel]:not([data-hidden])');
+              return p?.querySelector('.cm-content')?.textContent?.includes('COV_DELETE_${RUN_ID}_TWO') &&
+                Array.from(p?.querySelectorAll('button') || []).some(b=>b.textContent.trim()==='Save' && b.disabled); })()
+        intent: Show the second distinct bytes saved and the editor no longer dirty
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" file_saved two'
+        intent: Prove the second exact bytes and strong version
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" fingerprint stale'
+        intent: Submit stale F1 to public Delete and require changed F2 with no deletion
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" native target present'
+        intent: Prove stale refusal preserved the native session, checkout and branch
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" control'
+        intent: Prove the foreign control session also remains
+      - run: |
+          agent-browser --session "$AFT_SESSION" eval '(() => { const n=document.querySelector("nav[aria-label=Agents] a[aria-current=page]"); if(!n) throw Error("active target missing"); const r=n.getBoundingClientRect(); n.dispatchEvent(new MouseEvent("contextmenu",{bubbles:true,clientX:r.x+4,clientY:r.y+4})); return true; })()' >/dev/null
+        intent: Reopen the exact target's sidebar Delete menu after the stale refusal
+      - click: { testid: agent-context-menu-delete }
+      - click: { role: button, name: "Delete agent", exact: true }
+      - wait:
+          fn: >-
+            (() => { const d=document.querySelector('[role=alertdialog]');
+              return !!d?.querySelector('[data-testid=agent-delete-anyway]') &&
+                d.textContent.includes('README.md') &&
+                d.textContent.includes(location.pathname.split('/').pop()); })()
+        intent: Show a fresh UI Delete warning after the second Save
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" preflight target'
+        intent: Save exact public Agent and runner-owned native identity receipts before UI Delete
+      - click: { testid: agent-delete-anyway }
+        intent: Confirm through the UI with its current fingerprint
+      - wait: { fn: "location.pathname.endsWith('/home')" }
+        intent: Show UI navigation after target Delete
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" deleted target'
+        intent: Prove tombstone, purged history, removed checkout and native 404
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" control'
+        intent: Prove the unrelated control session and worktree survive
+      - reload: true
+        intent: Reload the workspace after deletion
+      - wait:
+          fn: >-
+            !Array.from(document.querySelectorAll('nav[aria-label=Agents] a')).some(a=>a.textContent.includes('cov-delete-target-${RUN_ID}')) &&
+            Array.from(document.querySelectorAll('nav[aria-label=Agents] a')).some(a=>a.textContent.includes('cov-delete-control-${RUN_ID}'))
+        intent: Show deleted target absent and control present after reload
+
+  - name: native-cascade
+    intent: A real Lead's actual task child blocks ordinary Delete, then public cascade removes exactly the pair and their recorded native sessions while preserving the control.
+    steps:
+      - open: /ws/${AFT_WS}/agents
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - click: { testid: create-agent-template-lead }
+      - fill: { testid: create-agent-name, value: "cov-delete-parent-${RUN_ID}" }
+      - select: { testid: create-agent-backend, value: opencode }
+      - click: { testid: create-agent-submit }
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+      - run: '"$AFT_SELECT_AGENT_MODEL"'
+        intent: Select the real model for the parent Lead
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" bind parent'
+        intent: Save the UI-created parent ID
+      - fill:
+          label: Message
+          value: >-
+            Use Loom agent_create to make one task child named cov-delete-child-${RUN_ID}.
+            Ask it to inspect README.md, package.json, app.js, server.js, app.test.js,
+            public/index.html, and BACKLOG.md without editing any file; then run
+            node --test app.test.js once and report the results.
+            Do not archive the child. Reply as soon as it has started.
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('cov-delete-child-${RUN_ID}') &&
+            document.querySelectorAll('[data-testid=started-marker]').length >= 1
+        intent: Show the real child creation/tool activity in parent Chat
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" child'
+        intent: Save exact child/parent IDs and real agent_create tool receipt
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" native parent capture'
+        intent: Save the parent's exact native ownership receipt
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" native child capture'
+        intent: Save the child's exact native ownership receipt after its real turn starts
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" child_refusal'
+        intent: Require children_live on public noncascade Delete while the child is live
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" native parent present'
+        intent: Verify refusal kept the parent native session and worktree
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" native child present'
+        intent: Verify refusal kept the child native session and worktree
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" preflight parent child'
+        intent: Save both exact public Agent rows and runner-owned native identities before cascade
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" cascade'
+        intent: User public cascade=true Delete, the supported production path
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" deleted child'
+        intent: Verify child tombstone, history purge, owned native 404 and branch preservation
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" deleted parent'
+        intent: Verify parent tombstone, history purge, owned native 404 and branch preservation
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-lifecycle-delete.py" control'
+        intent: Verify unrelated control Agent and native session still exist
+      - reload: true
+      - wait:
+          fn: >-
+            !Array.from(document.querySelectorAll('nav[aria-label=Agents] a')).some(a=>a.textContent.includes('cov-delete-parent-${RUN_ID}') || a.textContent.includes('cov-delete-child-${RUN_ID}')) &&
+            Array.from(document.querySelectorAll('nav[aria-label=Agents] a')).some(a=>a.textContent.includes('cov-delete-control-${RUN_ID}'))
+        intent: Show the pair absent and independent control present after reload

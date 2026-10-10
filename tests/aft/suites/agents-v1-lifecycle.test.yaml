@@ -59,7 +59,13 @@ tests:
         intent: "Wait until the chat shows the lead as archived"
       - fill: { label: Message, value: "while archived" }
       - press: Enter
-      - wait: { selector: "section[aria-label='Agent chat'] [role=alert]" }
+      - wait:
+          fn: >-
+            (() => { const el = document.querySelector("section[aria-label='Agent chat'] [role=alert]");
+              if (!el) return false;
+              const rect = el.getBoundingClientRect();
+              return rect.width > 0 && rect.height > 0 && getComputedStyle(el).visibility === 'visible'; })()
+        intent: "Wait until a visible alert appears in the Agent chat"
       - api:
           method: POST
           path: "/api/workspaces/E2E-AGV1-LIFE/v1/agents/${var:agv1ArchiveId}/messages"

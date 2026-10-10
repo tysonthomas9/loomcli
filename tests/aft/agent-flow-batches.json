@@ -1,0 +1,197 @@
+{
+  "version": 1,
+  "batches": {
+    "git-files": {
+      "files": ["git-files.test.yaml"],
+      "agents": {
+        "leads": [
+          { "name": "cov-files-${RUN_ID}-editor", "suite": "coverage-agent-git-files", "model_required": false },
+          { "name": "cov-files-${RUN_ID}-actions", "suite": "coverage-agent-git-files", "model_required": false },
+          { "name": "cov-files-${RUN_ID}-git", "suite": "coverage-agent-git-files", "model_required": true }
+        ],
+        "children": [
+          { "name": "cov-files-child-${RUN_ID}", "parent": "cov-files-${RUN_ID}-git", "suite": "coverage-agent-git-files" }
+        ]
+      }
+    },
+    "receipts-stream": {
+      "files": ["receipts-stream-create.test.yaml", "receipts-stream-native.test.yaml", "receipts-stream-sse.test.yaml", "receipts-stream-waiting.test.yaml"],
+      "agents": {
+        "leads": [
+          { "name": "coverage-rs-create-${RUN_ID}", "suite": "live-receipts-stream-create", "model_required": true, "model_proof": "api_post_create" },
+          { "name": "coverage-rs-native-${RUN_ID}", "suite": "live-receipts-stream-native", "model_required": true },
+          { "name": "coverage-rs-stream-${RUN_ID}", "suite": "live-receipts-stream-sse", "model_required": true },
+          { "name": "coverage-rs-other-${RUN_ID}", "suite": "live-receipts-stream-sse", "model_required": true },
+          { "name": "coverage-rs-waiting-${RUN_ID}", "suite": "live-receipts-stream-waiting", "model_required": true }
+        ],
+        "children": []
+      }
+    },
+    "receipts-edges": {
+      "files": ["receipts-stream-edges.test.yaml"],
+      "expected_cases": [
+        { "suite": "live-receipts-stream-edges", "name": "LIVE 1.5d interrupt with message cancels running turn and delivers replacement once" },
+        { "suite": "live-receipts-stream-edges", "name": "LIVE 1.6c 1.7b queued UTF-8 body limit and rejected over-cap receipt" },
+        { "suite": "live-receipts-stream-edges", "name": "LIVE CR1 2.0n rejected Create inputs leave no Agent or worktree then same-name retry succeeds" }
+      ],
+      "agents": {
+        "leads": [
+          { "name": "coverage-rs-edges-interrupt-${RUN_ID}", "suite": "live-receipts-stream-edges", "model_required": true },
+          { "name": "coverage-rs-edges-create-${RUN_ID}", "suite": "live-receipts-stream-edges", "model_required": true, "model_proof": "api_post_create" }
+        ],
+        "reviewers": [
+          { "name": "coverage-rs-edges-large-${RUN_ID}", "suite": "live-receipts-stream-edges" }
+        ],
+        "children": []
+      }
+    },
+    "children-activity": {
+      "files": ["children-activity.test.yaml"],
+      "agents": {
+        "leads": [
+          { "name": "cov-child-repeat-lead-${RUN_ID}", "suite": "coverage-children-activity", "model_required": true },
+          { "name": "cov-child-pair-lead-${RUN_ID}", "suite": "coverage-children-activity", "model_required": true },
+          { "name": "cov-child-sidebar-a-${RUN_ID}", "suite": "coverage-children-activity", "model_required": false },
+          { "name": "cov-child-sidebar-b-${RUN_ID}", "suite": "coverage-children-activity", "model_required": true }
+        ],
+        "children": [
+          { "name": "cov-child-repeat-${RUN_ID}", "parent": "cov-child-repeat-lead-${RUN_ID}", "suite": "coverage-children-activity" },
+          { "name": "cov-child-pair-a-${RUN_ID}", "parent": "cov-child-pair-lead-${RUN_ID}", "suite": "coverage-children-activity" },
+          { "name": "cov-child-pair-b-${RUN_ID}", "parent": "cov-child-pair-lead-${RUN_ID}", "suite": "coverage-children-activity" },
+          { "name": "cov-child-sidebar-task-${RUN_ID}", "parent": "cov-child-sidebar-b-${RUN_ID}", "suite": "coverage-children-activity" }
+        ]
+      }
+    },
+    "children-queue": {
+      "files": ["children-queue.test.yaml"],
+      "expected_cases": [
+        { "suite": "coverage-children-queue", "name": "live task child keeps user and parent FIFO slots then hands a later user interrupt first" }
+      ],
+      "agents": {
+        "leads": [
+          { "name": "cov-child-queue-lead-${RUN_ID}", "suite": "coverage-children-queue", "model_required": true }
+        ],
+        "children": [
+          { "name": "cov-child-queue-task-${RUN_ID}", "parent": "cov-child-queue-lead-${RUN_ID}", "suite": "coverage-children-queue" }
+        ]
+      }
+    },
+    "chat-visual": {
+      "files": ["chat-visual.test.yaml"],
+      "agents": {
+        "leads": [
+          { "name": "aft-${RUN_ID}-cov-visual-render", "suite": "live-chat-visual", "model_required": true },
+          { "name": "aft-${RUN_ID}-cov-visual-input", "suite": "live-chat-visual", "model_required": true }
+        ],
+        "children": []
+      }
+    },
+    "chat-visual-skip": {
+      "files": ["chat-visual-skip.test.yaml"],
+      "expected_cases": [
+        { "suite": "live-chat-visual-skip", "name": "normal-motion skip link stays hidden after mouse focus" }
+      ],
+      "agents": {
+        "leads": [
+          { "name": "cov-visual-skip-${RUN_ID}", "suite": "live-chat-visual-skip", "model_required": false }
+        ],
+        "children": []
+      }
+    },
+    "tool-policy": {
+      "files": ["tool-policy.test.yaml"],
+      "expected_cases": [
+        { "suite": "live-tool-policy", "name": "a real tool call masks a harmless credential-shaped input after expansion and reload" },
+        { "suite": "live-tool-policy", "name": "a working child tray masks its real native command argument" },
+        { "suite": "live-tool-policy", "name": "one real Agent API turn yields exact native step and CLI usage while a fresh session is zero" }
+      ],
+      "agents": {
+        "leads": [
+          { "name": "aft-lead-${RUN_ID}-cov-policy", "suite": "live-tool-policy", "model_required": true },
+          { "name": "aft-lead-${RUN_ID}-cov-policy-tray", "suite": "live-tool-policy", "model_required": true },
+          { "name": "aft-lead-${RUN_ID}-cov-policy-usage", "suite": "live-tool-policy", "model_required": true }
+        ],
+        "children": [
+          { "name": "aft-child-${RUN_ID}-cov-policy-tray", "parent": "aft-lead-${RUN_ID}-cov-policy-tray", "suite": "live-tool-policy" }
+        ]
+      }
+    },
+    "lifecycle-delete": {
+      "files": [
+        "lifecycle-delete.test.yaml"
+      ],
+      "expected_cases": [
+        {
+          "suite": "coverage-lifecycle-delete",
+          "name": "stale-delete"
+        },
+        {
+          "suite": "coverage-lifecycle-delete",
+          "name": "native-cascade"
+        }
+      ],
+      "agents": {
+        "leads": [
+          {
+            "name": "cov-delete-control-${RUN_ID}",
+            "suite": "coverage-lifecycle-delete",
+            "model_required": true
+          },
+          {
+            "name": "cov-delete-target-${RUN_ID}",
+            "suite": "coverage-lifecycle-delete",
+            "model_required": true,
+            "end_state": "deleted"
+          },
+          {
+            "name": "cov-delete-parent-${RUN_ID}",
+            "suite": "coverage-lifecycle-delete",
+            "model_required": true,
+            "end_state": "deleted"
+          }
+        ],
+        "children": [
+          {
+            "name": "cov-delete-child-${RUN_ID}",
+            "parent": "cov-delete-parent-${RUN_ID}",
+            "suite": "coverage-lifecycle-delete",
+            "end_state": "deleted"
+          }
+        ]
+      }
+    },
+    "chat-controls": {
+      "files": ["chat-controls-asks.test.yaml", "chat-controls-create.test.yaml", "chat-controls-models.test.yaml"],
+      "agents": {
+        "leads": [
+          { "name": "cov-controls-questions-${RUN_ID}", "suite": "live-chat-controls-asks", "model_required": false },
+          { "name": "cov-controls-refusal-${RUN_ID}", "suite": "live-chat-controls-create", "model_required": false },
+          { "name": "cov-controls-picker-${RUN_ID}", "suite": "live-chat-controls-models", "model_required": true },
+          { "name": "cov-controls-cold-${RUN_ID}", "suite": "live-chat-controls-models", "model_required": false },
+          { "name": "cov-controls-custom-ui-${RUN_ID}", "suite": "live-chat-controls-models", "model_required": false },
+          { "name": "cov-controls-custom-api-${RUN_ID}", "suite": "live-chat-controls-models", "model_required": false, "model_exception": true },
+          { "name": "cov-controls-unknown-${RUN_ID}", "suite": "live-chat-controls-models", "model_required": false, "model_exception": true }
+        ],
+        "reviewers": [
+          { "name": "cov-controls-approval-${RUN_ID}", "suite": "live-chat-controls-asks" },
+          { "name": "cov-controls-denial-${RUN_ID}", "suite": "live-chat-controls-asks" },
+          { "name": "cov-controls-restart-${RUN_ID}", "suite": "live-chat-controls-asks" }
+        ],
+        "children": []
+      }
+    },
+    "chat-stop": {
+      "files": ["chat-controls-stop.test.yaml"],
+      "expected_cases": [
+        { "suite": "live-chat-controls-stop", "name": "OC1 bare Chat Stop loses the native ask without executing it and permits a real next turn" }
+      ],
+      "agents": {
+        "leads": [],
+        "reviewers": [
+          { "name": "cov-controls-stop-${RUN_ID}", "suite": "live-chat-controls-stop" }
+        ],
+        "children": []
+      }
+    }
+  }
+}

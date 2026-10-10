@@ -1,0 +1,267 @@
+# API actor is explicit: the New Agent modal offers Lead, while the compiled
+# pr-review-interactive preset is the production Agent API path with bash ask.
+# The old PR Review modal is a different product and supplies no evidence here.
+suite: live-chat-controls-asks
+classification: { area: agents, feature: real-native-asks, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL}"
+tests:
+  - name: UI4 real approval Allow once then Always grants only the current native session
+    intent: A real pr-review-interactive Agent API actor asks before its shell command; a person approves once, grants the next identical command for this session, and sees a further identical command run without a new ask.
+    steps:
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" create approval pr-review-interactive target'
+        intent: "Create an owned production preset whose bash policy is ask, through the Agent API actor contract"
+      - run: 'agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$AFT_WS/chat/$(cat "$AFT_WORK_DIR/chat-controls/approval.id")"'
+        intent: "Open that Agent API agent's Chat"
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+        intent: "Show the owned approval actor's Chat route"
+      - fill: { label: Message, value: "APPROVAL_ONE_${RUN_ID}: use your shell tool to run exactly printf 'APPROVAL_EFFECT_${RUN_ID}\\n'. Report its output." }
+        intent: "Request a harmless exact command governed by the real preset's bash ask policy"
+      - press: Enter
+        intent: "Send the command request"
+      - wait:
+          fn: >-
+            (() => { const c = document.querySelector('[data-testid=ask-card]');
+              return (c?.querySelector('[aria-label="Approval request"]')?.textContent || '').includes('APPROVAL_EFFECT_${RUN_ID}') &&
+                [...c.querySelectorAll('button')].some(b => b.textContent.trim() === 'Approve'); })()
+        budget: 180000
+        intent: "Show the actual native command and Allow once action in the Agent API approval card"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" ask approval once'
+        intent: "Save the exact native ask ID, turn ID and ask.opened event once"
+      - click: { role: button, name: Approve, exact: true }
+        intent: "Respond Allow once through the Chat UI"
+      - wait:
+          fn: >-
+            (() => { const c = document.querySelector('[data-testid=chat-transcript]');
+              return !document.querySelector('[data-testid=ask-card]') &&
+                [...c.querySelectorAll('li[data-kind=agent]')].some(r => r.textContent.includes('APPROVAL_EFFECT_${RUN_ID}')) &&
+                !document.querySelector('form button[title="Stop the running turn"]'); })()
+        budget: 180000
+        intent: "Show the command effect and the completed first turn"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" respond-receipt approval once && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" resolved approval once allow_once && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" ask-terminal approval once completed && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" approval-effect approval APPROVAL_EFFECT_${RUN_ID} 1 1'
+        intent: "Check one saved resolution and one successful native tool effect"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" ask-history approval once 1,1,0'
+        intent: "Save every ask event ID, sequence, turn and full saved payload before reload"
+      - reload: true
+        intent: "Reload the actual Agent API Chat after this ask outcome"
+      - wait:
+          fn: "!!document.querySelector('[data-testid=chat-transcript]') && !document.querySelector('[data-testid=ask-card]')"
+        intent: "Show the saved Chat history without a stale pending ask"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" ask-history approval once 1,1,0 compare'
+        intent: "Require the full saved opened/resolved/lost ask history to be unchanged after UI reload"
+      - fill: { label: Message, value: "APPROVAL_TWO_${RUN_ID}: run exactly the same shell command printf 'APPROVAL_EFFECT_${RUN_ID}\\n' again and report its output." }
+        intent: "Ask again to prove Allow once did not grant later turns"
+      - press: Enter
+      - wait:
+          fn: "(document.querySelector('[data-testid=ask-card]')?.textContent || '').includes('APPROVAL_EFFECT_${RUN_ID}')"
+        budget: 180000
+        intent: "Show a fresh native approval on the second turn"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" ask approval always'
+        intent: "Record the second ask's distinct ID and turn ID"
+      - click: { role: button, name: Always allow this session, exact: true }
+        intent: "Grant this command for the native session through the product UI"
+      - wait:
+          fn: >-
+            (() => { const c = document.querySelector('[data-testid=chat-transcript]');
+              return !document.querySelector('[data-testid=ask-card]') &&
+                (c?.querySelectorAll('li[data-kind=agent]').length || 0) >= 2 &&
+                !document.querySelector('form button[title="Stop the running turn"]'); })()
+        budget: 180000
+        intent: "Show the second turn finished"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" respond-receipt approval always && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" resolved approval always allow_always && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" ask-terminal approval always completed && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" approval-effect approval APPROVAL_EFFECT_${RUN_ID} 2 2'
+        intent: "Check the Always Respond resolution and second command effect"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" ask-history approval always 2,2,0'
+        intent: "Save every ask event ID, sequence, turn and full saved payload before reload"
+      - reload: true
+        intent: "Reload the actual Agent API Chat after this ask outcome"
+      - wait:
+          fn: "!!document.querySelector('[data-testid=chat-transcript]') && !document.querySelector('[data-testid=ask-card]')"
+        intent: "Show the saved Chat history without a stale pending ask"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" ask-history approval always 2,2,0 compare'
+        intent: "Require the full saved opened/resolved/lost ask history to be unchanged after UI reload"
+      - fill: { label: Message, value: "APPROVAL_THREE_${RUN_ID}: run exactly printf 'APPROVAL_EFFECT_${RUN_ID}\\n' again with your shell tool, then report the output." }
+        intent: "Use the same command in the same native session on a new turn"
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const c = document.querySelector('[data-testid=chat-transcript]');
+              return !document.querySelector('[data-testid=ask-card]') &&
+                (c?.querySelectorAll('li[data-kind=agent]').length || 0) >= 3 &&
+                !document.querySelector('form button[title="Stop the running turn"]'); })()
+        budget: 180000
+        intent: "Show the granted command's third turn completed without another approval card"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" approval-effect approval APPROVAL_EFFECT_${RUN_ID} 3 2 && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" turn approval APPROVAL_THREE_${RUN_ID} completed'
+        intent: "Require three real command effects but only two native ask.opened events"
+
+  - name: UI4 OC1 real Decline and Cancel end their turns without the denied command running
+    intent: A person declines one native approval and cancels another; both turns end, their commands do not run, and the same Agent API actor remains reusable.
+    steps:
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" create denial pr-review-interactive target'
+        intent: "Create a separate owned approval-policy API actor"
+      - run: 'agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$AFT_WS/chat/$(cat "$AFT_WORK_DIR/chat-controls/denial.id")"'
+        intent: "Open its Agent API Chat"
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+        intent: "Wait for the real Chat route"
+      - fill: { label: Message, value: "DECLINE_${RUN_ID}: use shell to run exactly printf 'DENIED_EFFECT_${RUN_ID}\\n'." }
+        intent: "Trigger a native approval for a harmless command"
+      - press: Enter
+      - wait:
+          fn: "(document.querySelector('[data-testid=ask-card]')?.textContent || '').includes('DENIED_EFFECT_${RUN_ID}')"
+        budget: 180000
+        intent: "Show the command before deciding"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" ask denial declined'
+        intent: "Record this exact native approval ask"
+      - click: { role: button, name: Decline, exact: true }
+        intent: "Decline through the UI"
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=ask-card]') &&
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('Turn declined') &&
+            !document.querySelector('form button[title="Stop the running turn"]')
+        budget: 180000
+        intent: "Show the real OpenCode decline ends the turn and Chat is reusable"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" respond-receipt denial declined && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" resolved denial declined deny && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" ask-terminal denial declined declined && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" approval-effect denial DENIED_EFFECT_${RUN_ID} 0 1'
+        intent: "Check the saved resolution and absence of command output"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" ask-history denial declined 1,1,0'
+        intent: "Save every ask event ID, sequence, turn and full saved payload before reload"
+      - reload: true
+        intent: "Reload the actual Agent API Chat after this ask outcome"
+      - wait:
+          fn: "!!document.querySelector('[data-testid=chat-transcript]') && !document.querySelector('[data-testid=ask-card]')"
+        intent: "Show the saved Chat history without a stale pending ask"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" ask-history denial declined 1,1,0 compare'
+        intent: "Require the full saved opened/resolved/lost ask history to be unchanged after UI reload"
+      - fill: { label: Message, value: "CANCEL_${RUN_ID}: use shell to run exactly printf 'CANCELLED_EFFECT_${RUN_ID}\\n'." }
+        intent: "Trigger a new approval on the same usable agent"
+      - press: Enter
+      - wait:
+          fn: "(document.querySelector('[data-testid=ask-card]')?.textContent || '').includes('CANCELLED_EFFECT_${RUN_ID}')"
+        budget: 180000
+        intent: "Show a fresh native ask for the Cancel path"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" ask denial cancelled'
+        intent: "Record the second ask and its turn"
+      - click: { role: button, name: Cancel, exact: true }
+        intent: "Cancel the pending request and running turn from the UI"
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=ask-card]') &&
+            !document.querySelector('form button[title="Stop the running turn"]')
+        budget: 180000
+        intent: "Show Cancel finished instead of leaving the agent active"
+      # AskCard Cancel sends deny, then Stop. OpenCode can record the decline
+      # before the interrupt, or the interrupt can win; either must end this turn.
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" respond-receipt denial cancelled && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" resolved denial cancelled deny && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" ask-terminal denial cancelled declined,cancelled && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" approval-effect denial CANCELLED_EFFECT_${RUN_ID} 0 2'
+        intent: "Check Cancel resolved exactly once and never executed its command"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" ask-history denial cancelled 2,2,0'
+        intent: "Save every ask event ID, sequence, turn and full saved payload before reload"
+      - reload: true
+        intent: "Reload the actual Agent API Chat after this ask outcome"
+      - wait:
+          fn: "!!document.querySelector('[data-testid=chat-transcript]') && !document.querySelector('[data-testid=ask-card]')"
+        intent: "Show the saved Chat history without a stale pending ask"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" ask-history denial cancelled 2,2,0 compare'
+        intent: "Require the full saved opened/resolved/lost ask history to be unchanged after UI reload"
+
+  - name: UI4 real native two-question form accepts an option and a custom answer
+    intent: An API-created Lead invokes OpenCode's native question tool with two questions, and the person uses the Agent API card's progress and custom-answer controls to respond.
+    steps:
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" create questions lead target'
+        intent: "Create an owned real Lead through the explicit API actor contract"
+      - run: 'agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$AFT_WS/chat/$(cat "$AFT_WORK_DIR/chat-controls/questions.id")"'
+        intent: "Open the Agent API Lead Chat"
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+        intent: "Show the owned Chat"
+      - fill:
+          label: Message
+          value: "QUESTIONS_${RUN_ID}: Call your native question tool once with exactly two questions. First header Color, question Which color?, options Blue and Red. Second header Size, question Which size?, options Small and Medium. Wait for my answers, then repeat both answers."
+        intent: "Ask the real model to use OpenCode's native question tool rather than a scripted ask"
+      - press: Enter
+        intent: "Send the native-tool request"
+      - wait:
+          fn: >-
+            (() => { const c = document.querySelector('[data-testid=ask-card]');
+              return (c?.textContent || '').includes('Color') &&
+                (c?.textContent || '').includes('1/2') &&
+                [...c.querySelectorAll('button')].some(b => b.textContent.includes('Blue')); })()
+        budget: 180000
+        intent: "Show the first of two real native questions and its options"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" ask questions questions'
+        intent: "Read back the exact native form ask ID, turn ID, two questions and saved ask.opened event"
+      - click: { role: button, name: Blue }
+        intent: "Choose the first question's declared option"
+      - wait:
+          fn: "(document.querySelector('[data-testid=ask-card]')?.textContent || '').includes('2/2')"
+        intent: "Show second-question progress"
+      - fill: { label: Write custom answer, value: "Medium, please" }
+        intent: "Write a custom answer for the second question"
+      - click: { role: button, name: Submit answers, exact: true }
+        intent: "Submit both answers through the Chat card"
+      - wait:
+          fn: >-
+            (() => { const c = document.querySelector('[data-testid=chat-transcript]');
+              return !document.querySelector('[data-testid=ask-card]') &&
+                (c?.textContent || '').includes('Blue') &&
+                (c?.textContent || '').includes('Medium, please') &&
+                !document.querySelector('form button[title="Stop the running turn"]'); })()
+        budget: 180000
+        intent: "Show the real agent continue after receiving both answers"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" respond-receipt questions questions && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" resolved questions questions answered && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" ask-terminal questions questions completed && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" question-answers questions'
+        intent: "Require one saved resolution and native question-tool output containing both UI answers"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" ask-history questions questions 1,1,0'
+        intent: "Save every ask event ID, sequence, turn and full saved payload before reload"
+      - reload: true
+        intent: "Reload the actual Agent API Chat after this ask outcome"
+      - wait:
+          fn: "!!document.querySelector('[data-testid=chat-transcript]') && !document.querySelector('[data-testid=ask-card]')"
+        intent: "Show the saved Chat history without a stale pending ask"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" ask-history questions questions 1,1,0 compare'
+        intent: "Require the full saved opened/resolved/lost ask history to be unchanged after UI reload"
+
+  - name: UI4 lost native ask after owned restart refuses stale Respond and shows one fresh reask
+    intent: An owned serve and OpenCode restart interrupts a pending native approval; the person sees a fresh ask, the old ask is saved as lost once, and a stale API Respond is refused before answering the fresh one.
+    steps:
+      - run: ': "${AFT_RESTART_SERVE:?owned restart helper required}"; python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" create restart pr-review-interactive target'
+        intent: "Require the runner-owned restart helper and create an owned production ask-policy actor"
+      - run: 'agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$AFT_WS/chat/$(cat "$AFT_WORK_DIR/chat-controls/restart.id")"'
+        intent: "Open the owned Agent API Chat"
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+        intent: "Wait for Chat"
+      - fill: { label: Message, value: "REASK_${RUN_ID}: run exactly printf 'REASK_EFFECT_${RUN_ID}\\n' with your shell tool and report the output." }
+        intent: "Trigger a genuine OpenCode bash approval"
+      - press: Enter
+      - wait:
+          fn: "(document.querySelector('[data-testid=ask-card]')?.textContent || '').includes('REASK_EFFECT_${RUN_ID}')"
+        budget: 180000
+        intent: "Show the pending native approval before interruption"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" ask restart before-restart'
+        intent: "Save the exact old native ask and turn identities"
+      - run: '"$AFT_RESTART_SERVE"'
+        intent: "Restart only this run's owned loom-local and OpenCode service while the ask is pending"
+      - reload: true
+        intent: "Reload Chat against the restarted real service"
+      - wait:
+          fn: "(document.querySelector('[data-testid=ask-card]')?.textContent || '').includes('REASK_EFFECT_${RUN_ID}')"
+        budget: 180000
+        intent: "Show the recovered native approval card"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" lost restart'
+        intent: "Require old ask.lost once, a distinct fresh ask.opened once, and a 404 stale Respond"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" ask restart fresh'
+        intent: "Save the fresh ask's exact ID and turn before answering"
+      - click: { role: button, name: Approve, exact: true }
+        intent: "Allow only the fresh ask"
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=ask-card]') &&
+            !document.querySelector('form button[title="Stop the running turn"]')
+        budget: 180000
+        intent: "Show the recovered turn finishes"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" respond-receipt restart fresh && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" resolved restart fresh allow_once && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" ask-terminal restart fresh completed && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" approval-effect restart REASK_EFFECT_${RUN_ID} 1 2'
+        intent: "Check the fresh ask resolves and the command runs once despite two asks"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" ask-history restart fresh 2,1,1'
+        intent: "Save every ask event ID, sequence, turn and full saved payload before reload"
+      - reload: true
+        intent: "Reload the actual Agent API Chat after this ask outcome"
+      - wait:
+          fn: "!!document.querySelector('[data-testid=chat-transcript]') && !document.querySelector('[data-testid=ask-card]')"
+        intent: "Show the saved Chat history without a stale pending ask"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" ask-history restart fresh 2,1,1 compare'
+        intent: "Require the full saved opened/resolved/lost ask history to be unchanged after UI reload"

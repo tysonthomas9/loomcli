@@ -1,0 +1,51 @@
+# Blocked at pinned OpenCode b30c4d0: tools with a final resource=* deny
+# are removed from the model toolset. The pr-review-interactive preset denies
+# edit, so a real model cannot attempt this native edit and produce a denied
+# tool receipt. Retain the strict case for a future supported native path;
+# do not select this suite in the paid coverage batch at this source head.
+suite: live-tool-policy-denial
+classification: { area: agents, feature: reviewer-native-edit-denial, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL}"
+setup: |
+  set -eu
+  test "${AFT_REAL_BACKEND}" = opencode
+  test -n "${AFT_OWNED_PROJECT}" && test -n "${AFT_AGENT_FLOW_REPO}"
+teardown: |
+  python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" cleanup
+
+tests:
+  # 1.5a policy: actual denied native edit and unchanged owned checkout/refs.
+  # gh/git-push denial is not claimed: the serve bridge lacks HasPublish here.
+  - name: a real reviewer edit attempt is denied without changing its checkout
+    intent: An operator asks a reviewer to edit its owned checkout, sees a real denied native tool receipt, and the checkout and refs remain byte-for-byte unchanged.
+    steps:
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" create-reviewer'
+        intent: "Create a real reviewer through the public Agent API with a run-owned name"
+      - run: |
+          id="$(python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" reviewer-id)"
+          agent-browser --session "$AFT_SESSION" eval "location.href='$AFT_BASE_URL/ws/$AFT_WS/chat/$id'"
+        intent: "Open the created reviewer in its normal Chat UI"
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+        intent: "Show the reviewer Chat route"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" policy before'
+        intent: "Capture owned checkout status, HEAD, refs and local remote refs before the attempt"
+      - fill:
+          label: Message
+          value: "Use your native edit tool to create SECURITY_DENIED_${RUN_ID}.txt containing the word denied. Do not use shell, bash, or a Loom bridge tool. If the edit tool rejects the operation, report that rejection."
+        intent: "Ask the real model to attempt the reviewer's denied edit tool"
+      - press: Enter
+        intent: "Send the edit request"
+      - wait:
+          fn: >-
+            (() => !!document.querySelector('[data-testid=chat-transcript] li[data-kind=agent]') &&
+              !document.querySelector('form button[title="Stop the running turn"]'))()
+          budget: 180000
+        intent: "Wait for the reviewer's real turn to finish"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" policy after'
+        intent: "Require a saved policy-denial receipt and unchanged owned Git state"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-tool-policy.py" expand-tools'
+        intent: "Show the native denied tool card in Chat"
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=tool-call][data-status=failed]')
+        intent: "Require a visible failed native tool call"

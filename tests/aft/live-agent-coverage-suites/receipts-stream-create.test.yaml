@@ -1,0 +1,56 @@
+# LIVE paid OpenCode public user API Create actor contract. MATRIX:1.1b/OR4a.
+# Ordinary completed Create replay across owned whole-service restart, not a
+# transaction crash-point or a UI-created Agent mutation.
+suite: live-receipts-stream-create
+classification: { area: agents, feature: real-agent-create-replay, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL}"
+setup: |
+  set -eu
+  python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" preflight
+teardown: |
+  set -eu
+  python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" cleanup
+tests:
+  - name: LIVE public user Create RequestID and ExternalKey replay preserves one Agent and first delivery
+    intent: The production user Create API makes one real OpenCode Lead and first message; same RequestID and ExternalKey replays before and after an owned serve restart keep its AgentID, worktree, NativeRef and delivered input unique.
+    steps:
+      - run: 'test -x "$AFT_RESTART_SERVE" && test -x "$AFT_SELECT_AGENT_MODEL" && test -x "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-native.sh" && test -n "$AFT_REAL_MODEL"'
+        intent: "Confirm this run owns its whole-service restart and the real model and native probe are available"
+      - open: /ws/${AFT_WS}/agents
+        intent: "Show the production Agents UI before public Create"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" create-first && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" create-native before && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" create-chat'
+        intent: "Create through the public user API, replay exact RequestID and ExternalKey once, prove registered native ownership, and open its real Chat"
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+        intent: "Show the API-created Lead in the production Chat UI"
+      - run: '"$AFT_SELECT_AGENT_MODEL" "coverage-rs-create-${RUN_ID}"'
+        intent: "Bind this Chat route to the saved real model; Create's first message already used its public API model override, so this is a readback receipt rather than a prior UI choice"
+      - wait:
+          fn: >-
+            (() => { const t=document.querySelector('[data-testid=chat-transcript]');
+              return t?.textContent.includes('CREATE_FIRST-${RUN_ID}') &&
+                t.querySelectorAll('li[data-kind=agent]').length>0 &&
+                document.querySelector('section[aria-label="Agent chat"] header')?.textContent?.includes('idle'); })()
+        budget: 180000
+        intent: "Show one first message and its actual OpenCode answer"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" capture create before && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" delivered create before "CREATE_FIRST-${RUN_ID}: use a tool to read README.md and name its documented test command with a file citation." && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" native-count create before && "$AFT_RESTART_SERVE"'
+        intent: "Save exact first-message EventID/native InputKey and one native user input, then restart only the run-owned loom-local service"
+      - wait:
+          fn: >-
+            (() => { const t=document.querySelector('[data-testid=chat-transcript]');
+              return t?.textContent.includes('CREATE_FIRST-${RUN_ID}') &&
+                t.querySelectorAll('li[data-kind=agent]').length>0 &&
+                document.querySelector('section[aria-label="Agent chat"] header')?.textContent?.includes('idle'); })()
+        budget: 120000
+        intent: "Show the first request and reply restored after the owned service reconnects"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" create-replay after-restart && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" create-native after && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" capture create after && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" prefix create before after && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" delivered create after "CREATE_FIRST-${RUN_ID}: use a tool to read README.md and name its documented test command with a file citation." && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" native-count create after'
+        intent: "Replay both Create keys after recovery and prove exact Agent/worktree/NativeRef, EventIDs and native input remain unique"
+      - reload: true
+        intent: "Reload the API-created Lead's production Chat"
+      - wait:
+          fn: >-
+            (() => { const t=document.querySelector('[data-testid=chat-transcript]');
+              return t && Array.from(t.querySelectorAll('li[data-kind=user]')).filter(x=>x.textContent.includes('CREATE_FIRST-${RUN_ID}')).length===1 &&
+                t.querySelectorAll('li[data-kind=agent]').length>0; })()
+        intent: "Show one persisted first user message and retained real answer after reload"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" capture create reloaded && python3 "$AFT_TESTS_DIR/scripts/coverage-receipts-stream-evidence.py" prefix create after reloaded'
+        intent: "Match final UI history against exact paged public Agent EventIDs"

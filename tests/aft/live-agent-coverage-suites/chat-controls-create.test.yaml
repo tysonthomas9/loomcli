@@ -1,0 +1,89 @@
+suite: live-chat-controls-create
+classification: { area: agents, feature: real-create-refusals, surface: ui, purpose: journey }
+baseUrl: "${AFT_BASE_URL}"
+tests:
+  - name: New Lead explains no repo and invalid name then refuses duplicate without changing the roster
+    intent: A person sees the actual typed reasons in the New Agent modal, successfully creates one Lead, and a duplicate-name refusal leaves that same roster intact.
+    steps:
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" roster initial'
+        intent: "Capture the run-owned roster before any Create attempt"
+      - open: /ws/${AFT_WS}/agents
+        intent: "Open the real New Agent UI"
+      - wait: { fn: "[...document.querySelectorAll('button')].some(b => b.textContent.trim() === '+ Add agent')" }
+        intent: "Wait for New Agent"
+      - click: { role: button, name: "+ Add agent", exact: true }
+        intent: "Open the Create form"
+      - wait: { fn: "!!document.querySelector('[data-testid=create-agent-overlay]')" }
+        intent: "Show the form"
+      - click: { testid: create-agent-template-lead }
+        intent: "Select Agent API Lead"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" modal-backends'
+        intent: "Compare the real wired Lead harness list with every modal option and its selected default"
+      - fill: { testid: create-agent-name, value: "cov-controls-refusal-${RUN_ID}" }
+        intent: "Enter a valid unique name"
+      - select: { testid: create-agent-backend, value: opencode }
+        intent: "Select the real harness"
+      - wait:
+          fn: >-
+            (() => { const b = [...document.querySelectorAll('[data-testid=create-agent-repo-chips] button')];
+              return b.length === 1 && b[0].getAttribute('aria-pressed') === 'true'; })()
+        intent: "Show the owned repo selected"
+      - click: { selector: '[data-testid=create-agent-repo-chips] button' }
+        intent: "Deselect the only repo to test the Lead's no-repo refusal"
+      - click: { testid: create-agent-submit }
+        intent: "Attempt Create without a repo"
+      - wait:
+          fn: "(document.querySelector('[data-testid=create-agent-error]')?.textContent || '').includes('Pick a repo for the lead')"
+        intent: "Show the typed no-repo reason in the modal"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" roster no-repo initial'
+        intent: "Check no agent was created by the refused action"
+      - click: { selector: '[data-testid=create-agent-repo-chips] button' }
+        intent: "Restore the valid owned repository"
+      - fill: { testid: create-agent-name, value: "Bad Name" }
+        intent: "Enter an invalid persisted agent name"
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=create-agent-name-error]')?.textContent || '') ===
+              'Use 1–100 lowercase letters, numbers, hyphens, dots, or underscores. Names cannot start or end with punctuation.' &&
+            document.querySelector('[data-testid=create-agent-name]')?.getAttribute('aria-invalid') === 'true' &&
+            document.querySelector('[data-testid=create-agent-name]')?.getAttribute('aria-describedby') ===
+              document.querySelector('[data-testid=create-agent-name-error]')?.id &&
+            document.querySelector('[data-testid=create-agent-submit]')?.disabled === true
+        intent: "Show the exact persisted-name rule, aria-invalid and disabled Create action"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" roster bad-name initial'
+        intent: "Check invalid typed input did not alter the roster"
+      - fill: { testid: create-agent-name, value: "cov-controls-refusal-${RUN_ID}" }
+        intent: "Restore a valid name"
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=create-agent-name-error]') &&
+            document.querySelector('[data-testid=create-agent-name]')?.getAttribute('aria-invalid') === 'false' &&
+            !document.querySelector('[data-testid=create-agent-name]')?.hasAttribute('aria-describedby') &&
+            document.querySelector('[data-testid=create-agent-submit]')?.disabled === false
+        intent: "Show the exact invalid-name state cleared before the valid Create"
+      - click: { testid: create-agent-submit }
+        intent: "Create the single intended Lead"
+      - wait: { url: "/ws/${AFT_WS}/chat/agt_" }
+        intent: "Show its Chat route"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" claim refusal && python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" roster created'
+        intent: "Record the actual created Lead and the new roster baseline"
+      - open: /ws/${AFT_WS}/agents
+        intent: "Return to the New Agent page"
+      - click: { role: button, name: "+ Add agent", exact: true }
+        intent: "Open a second Create form"
+      - click: { testid: create-agent-template-lead }
+        intent: "Choose the same Lead preset"
+      - fill: { testid: create-agent-name, value: "cov-controls-refusal-${RUN_ID}" }
+        intent: "Attempt to reuse this run's existing Lead name"
+      - select: { testid: create-agent-backend, value: opencode }
+        intent: "Use the same real harness"
+      - click: { testid: create-agent-submit }
+        intent: "Submit the duplicate name through the UI"
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=create-agent-error]')?.textContent || '';
+              return !!t && /already|exists|duplicate/i.test(t) &&
+                !!document.querySelector('[data-testid=create-agent-overlay]'); })()
+        intent: "Show the duplicate refusal in the still-open form"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/coverage-chat-controls.py" roster duplicate created'
+        intent: "Require the duplicate refusal to leave the actual roster unchanged"
