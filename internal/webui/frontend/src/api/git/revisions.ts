@@ -26,13 +26,45 @@ export async function getTaskRevisions(
   }
 }
 
+/**
+ * Approves the task's newest revision in every repo with one request: the
+ * server opens the PRs only when every repo applied, otherwise none (P2.23).
+ */
+export async function approveTask(
+  workspaceId: string,
+  taskId: string,
+  revisions: ReviewRevision[],
+  verdict: "approve" | "override",
+  reason: string,
+  lead?: string,
+): Promise<string | undefined> {
+  const { data, error, response } = await api.POST(
+    "/api/workspaces/{ws}/issues/{id}/approval",
+    {
+      params: { path: { ws: workspaceId, id: taskId } },
+      body: {
+        verdict,
+        reason,
+        ...(lead ? { lead } : {}),
+        actor: { kind: "human", id: "local-user" },
+        revisions: revisions.map((r) => ({
+          change_id: r.change_id,
+          number: r.number,
+          head_sha: r.head_sha,
+        })),
+      },
+    },
+  );
+  if (error) throw apiErrorFromResponse(error, response);
+  return (data as { status?: string } | undefined)?.status;
+}
+
 export async function submitRevisionVerdict(
   workspaceId: string,
   revision: ReviewRevision,
   verdict: "approve" | "reject" | "override",
   reason: string,
   lead?: string,
-  approveOnly?: boolean,
   merge?: boolean,
 ): Promise<string | undefined> {
   const { data, error, response } = await api.POST(
@@ -50,7 +82,6 @@ export async function submitRevisionVerdict(
         verdict,
         reason,
         ...(lead ? { lead } : {}),
-        ...(approveOnly ? { approve_only: true } : {}),
         ...(merge ? { merge: true } : {}),
         actor: { kind: "human", id: "local-user" },
       },
@@ -58,6 +89,25 @@ export async function submitRevisionVerdict(
   );
   if (error) throw apiErrorFromResponse(error, response);
   return (data as { status?: string } | undefined)?.status;
+}
+
+/**
+ * Rebuild a task whose code was built on a revision of the task it depends on
+ * that was rejected or replaced: its newest revision is rejected and the task
+ * reopens, built on that task's newest revision. Never automatic.
+ */
+export async function rebuildTask(
+  workspaceId: string,
+  taskId: string,
+): Promise<void> {
+  const { error, response } = await api.POST(
+    "/api/workspaces/{ws}/issues/{id}/rebuild",
+    {
+      params: { path: { ws: workspaceId, id: taskId } },
+      body: { actor: { kind: "human", id: "local-user" } },
+    },
+  );
+  if (error) throw apiErrorFromResponse(error, response);
 }
 
 export async function applyRevision(
@@ -79,8 +129,7 @@ export async function applyRevision(
 export type RevisionDiff = components["schemas"]["RevisionDiff"];
 export type TaskDiff = components["schemas"]["TaskDiff"];
 
-/** One diff for the task: what its PR contains (or will contain). */
-/** A task's diff per repo, ordered by repo name. */
+/** A task's diff per repo, ordered by repo name: what its PR contains. */
 export async function getTaskDiff(
   workspaceId: string,
   taskId: string,
@@ -97,44 +146,6 @@ export async function getTaskDiff(
   );
   if (error || !data) throw apiErrorFromResponse(error, response);
   return data.data;
-}
-
-/** One recorded revision against its own base (read-only history). */
-export async function getRevisionDiff(
-  workspaceId: string,
-  revision: ReviewRevision,
-): Promise<RevisionDiff> {
-  const { data, error, response } = await api.GET(
-    "/api/workspaces/{ws}/changes/{change}/revisions/{r}/diff",
-    {
-      params: {
-        path: {
-          ws: workspaceId,
-          change: revision.change_id,
-          r: revision.number,
-        },
-        query: { repo: revision.repo },
-      },
-    },
-  );
-  if (error || !data) throw apiErrorFromResponse(error, response);
-  return data.data;
-}
-
-/** Create PR for a change already applied in the lead's working area (D29). */
-export async function createRevisionPR(
-  workspaceId: string,
-  lead: string,
-  changeId: string,
-): Promise<void> {
-  const { error, response } = await api.POST(
-    "/api/workspaces/{ws}/agents/{name}/git/pr",
-    {
-      params: { path: { ws: workspaceId, name: lead } },
-      body: { change_id: changeId },
-    },
-  );
-  if (error) throw apiErrorFromResponse(error, response);
 }
 
 /**

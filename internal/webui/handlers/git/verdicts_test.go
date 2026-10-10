@@ -142,7 +142,7 @@ func freezeTaskRevision(t *testing.T) (string, string, int) {
 	return revision.Change, revision.HeadSHA, revision.Number
 }
 
-func TestVerdictApproveAndCreatePROpensPRUnlessApproveOnly(t *testing.T) {
+func TestVerdictApproveAlwaysOpensPR(t *testing.T) {
 	change, head, number := freezeTaskRevision(t)
 	previousFollow, previousArea, previousPublish := followApproved, hasWorkingArea, publishApproved
 	t.Cleanup(func() {
@@ -178,15 +178,16 @@ func TestVerdictApproveAndCreatePROpensPRUnlessApproveOnly(t *testing.T) {
 		return recorder.Code, decoded
 	}
 
-	code, response := post(map[string]any{"approve_only": true})
-	if code != 200 || response["status"] != "applied" || publishCalls != 0 {
-		t.Fatalf("Approve only = %d %v, publish calls %d", code, response, publishCalls)
-	}
-
 	outcome = publish.ApprovalOutcome{Change: change, Status: "published", PRNumber: 4, PRURL: "https://github.com/o/r/pull/4"}
+	// D40: there is no Approve only. An old client's approve_only is ignored
+	// and the approval opens its PR like any other.
+	code, response := post(map[string]any{"approve_only": true})
+	if code != 200 || response["status"] != "published" || publishCalls != 1 {
+		t.Fatalf("approve_only approval = %d %v, publish calls %d", code, response, publishCalls)
+	}
 	code, response = post(nil)
 	published, _ := response["publish"].(map[string]any)
-	if code != 200 || response["status"] != "published" || publishCalls != 1 || published["pr_url"] != outcome.PRURL {
+	if code != 200 || response["status"] != "published" || publishCalls != 2 || published["pr_url"] != outcome.PRURL {
 		t.Fatalf("Approve and create PR = %d %v", code, response)
 	}
 	get := httptest.NewRecorder()
@@ -209,7 +210,7 @@ func TestVerdictApproveAndCreatePROpensPRUnlessApproveOnly(t *testing.T) {
 	}
 
 	code, response = post(map[string]any{"verdict": "reject", "reason": "no"})
-	if code != 200 || response["status"] != "recorded" || publishCalls != 3 {
+	if code != 200 || response["status"] != "recorded" || publishCalls != 4 {
 		t.Fatalf("reject = %d %v, publish calls %d", code, response, publishCalls)
 	}
 }

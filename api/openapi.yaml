@@ -3621,6 +3621,150 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FeedbackRevisionRequest"
+  /api/workspaces/{ws}/issues/{id}/rebuild:
+    post:
+      operationId: rebuildStaleTask
+      tags: [git]
+      summary: Rebuild a task whose code was built on a rejected or replaced revision
+      description: A human action (an actor of any other kind is refused with review_required). Rejects the task's newest revision with the rebuild as the reason, cancels any approval of it still waiting to apply, and moves the task's base to the newest revision of the task it depends on, so the task reopens for a new attempt. Never automatic. Refused with 409 when the task is not stale or there is no newer revision to build on yet.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actor]
+              properties:
+                actor:
+                  type: object
+                  required: [kind, id]
+                  properties:
+                    kind:
+                      type: string
+                      enum: [human, agent, lead]
+                    id:
+                      type: string
+      responses:
+        "200":
+          description: The task was set aside for a rebuild.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    required: [change_id, revision, depends_on, rebuild_on, verdict]
+                    properties:
+                      change_id:
+                        type: string
+                      revision:
+                        type: integer
+                      depends_on:
+                        type: string
+                      rebuild_on:
+                        type: integer
+                      verdict:
+                        type: string
+                        description: reject, or empty when the revision was already rejected.
+        "409":
+          description: Not a human actor, not stale, nothing newer to build on, or the revision is already applied.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  error:
+                    type: string
+                  message:
+                    type: string
+  /api/workspaces/{ws}/issues/{id}/approval:
+    post:
+      operationId: approveTask
+      tags: [git]
+      summary: Approve a task's newest revision in every repo, all or none
+      description: >-
+        Records each repo's approval, applies them all, and opens the PRs only
+        when every repo applied. If any repo does not apply, no repo is
+        published and the reply names that repo (P2.23). A repo that applied
+        stays applied in the lead's working area with no PR until the task is
+        approved again.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [verdict, revisions, actor]
+              properties:
+                verdict:
+                  type: string
+                  enum: [approve, override]
+                reason:
+                  type: string
+                lead:
+                  type: string
+                actor:
+                  type: object
+                  required: [kind, id]
+                  properties:
+                    kind:
+                      type: string
+                      enum: [human, agent, lead]
+                    id:
+                      type: string
+                revisions:
+                  type: array
+                  description: The task's newest revision in each repo.
+                  items:
+                    type: object
+                    required: [change_id, number, head_sha]
+                    properties:
+                      change_id:
+                        type: string
+                      number:
+                        type: integer
+                      head_sha:
+                        type: string
+      responses:
+        "200":
+          description: Every repo applied. `status` is published when every PR opened; `publish` lists each repo's PR outcome.
+          content:
+            application/json:
+              schema:
+                type: object
+        "409":
+          description: >-
+            not_all_applied (the approvals are recorded, no repo is published,
+            and `repo` and `message` name the repo that did not apply),
+            stale_revision, missing_repo (the request leaves out a repo of the
+            task still without a PR), no_working_area (several repos and the
+            lead has no working area for one of them, named in `repo`; nothing
+            is recorded), or publish_failed.
+          content:
+            application/json:
+              schema:
+                type: object
+
   /api/workspaces/{ws}/changes/{change}/revisions/{r}/verdict:
     post:
       operationId: submitRevisionVerdict
@@ -3655,9 +3799,6 @@ paths:
                   type: string
                 lead:
                   type: string
-                approve_only:
-                  type: boolean
-                  description: Apply the approval without opening its PR (Approve only). By default an approval opens the change's PR as soon as it applies (D29).
                 merge:
                   type: boolean
                   description: Approve and merge for a task whose PR is already open and whose newest version needs approving again. Human only; the merge is approved at this revision's head and waits for the PR to carry it (D29).
@@ -3673,6 +3814,12 @@ paths:
       responses:
         "200":
           description: Recorded SHA-bound verdict. `status` is published when the PR opened; `publish` reports the PR outcome (published, not_published with the reason, waiting, pending).
+          content:
+            application/json:
+              schema:
+                type: object
+        "409":
+          description: Loom refused the verdict and recorded nothing. `error` is the stable code (for example review_required or stale_subject) and `message` the reason (for example "lead approval policy is off").
           content:
             application/json:
               schema:
@@ -6664,15 +6811,21 @@ components:
           type: boolean
         verdict:
           type: string
+        verdict_reason:
+          type: string
+          description: Reason recorded with the latest verdict, such as why it was rejected.
+        author:
+          type: string
+          description: The agent that recorded this revision, when known.
         applied:
           type: boolean
           description: True while this exact revision is applied in a lead working area (from the applied log, so it survives reloads and clears after unapply).
         follow_status:
           type: string
-          description: Lead follow state of this revision's approval (approved, applied, conflict, apply_pending, superseded, spent). "spent" means the approval's apply can never run (for example the change was unapplied before the follow settled); approving again re-arms it.
+          description: Lead follow state of this revision's approval (approved, waiting_for_dependency, applied, unapplied, conflict, apply_pending, superseded, spent). "waiting_for_dependency" means the approval waits for the task this code was built on, which applies first. "unapplied" means it was applied and later removed from the working area (Unapply); Apply puts it back. "spent" means the approval's apply can never run (for example the change was unapplied before the follow settled, or the code it was built on was rejected or replaced); approving again re-arms it.
         follow_reason:
           type: string
-          description: Reviewer-facing reason for a spent follow.
+          description: Reviewer-facing reason for a spent or waiting follow, such as "waiting for T1 to be approved".
         needs_working_area:
           type: boolean
           description: True when the latest verdict approves this revision, it is not applied, and the verdict's target lead has no working area yet, so Apply is needed.
@@ -6724,6 +6877,19 @@ components:
         feedback_merge_cancelled:
           type: boolean
           description: True when this fix-up cancelled the change's pending Approve and merge, so merging needs a new Approve.
+        depends_on:
+          type: string
+          description: The task this revision's code was built on, before that task's code was reviewed (a dependent starts once its blocker's agent finishes).
+        lineage_state:
+          type: string
+          enum: [stale, dependency_abandoned]
+          description: Set when the code this revision was built on is no longer the code to build on. stale means that task's revision was rejected or replaced; Approve is refused until the task is rebuilt (Override is not). Absent when the base is current.
+        lineage_reason:
+          type: string
+          description: 'Why the base is stale and what a rebuild would build on, such as "built on T1''s code, which was rejected: rebuild it on T1''s new code". Plain words; the revision numbers are in rebuild_on.'
+        rebuild_on:
+          type: integer
+          description: The revision of depends_on a rebuild would build on; absent while there is none yet.
     RevisionDiffFile:
       type: object
       required: [path, patchSize, truncated]

@@ -91,6 +91,9 @@ func init() {
 
 	driverCmd.AddCommand(driverRegisterCmd, driverRunCmd, driverExecTaskCmd, driverWorkTaskRunCmd, driverClaimReadyCmd, driverEpicGetCmd, driverEpicSnapshotCmd, driverListAgentsCmd, driverAgentOrchestrationSessionCmd, driverUpdateAgentParentCmd, driverDeliverLeadAssignmentCmd, driverDeliverAgentMessageCmd, driverActiveTaskRunsCmd, driverCompleteTaskCmd, driverReleaseTaskCmd, driverRecoverStaleTasksCmd)
 	cli.RegisterCommand(driverCmd)
+	// loom driver exec-task and work-task-run build task copies; one behind code
+	// review is built on the blocker's revision (P1.26).
+	driverpkg.UseCodeReviewBases(cli.CodeReviewBase)
 }
 
 func bindDriverRegisterFlags(cmd *cobra.Command) {

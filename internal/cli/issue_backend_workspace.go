@@ -75,3 +75,12 @@ func MarkTaskInCodeReview(ctx context.Context, workspace, task string) error {
 	ctx = middleware.WithWorkspace(ctx, workspace)
 	return backend.MarkCodeReview(ctx, WorkspaceAwareIssueBackend()(ctx), task, "")
 }
+
+// CodeReviewBase reads a task's code-review base from FleetDB: the blocker
+// whose frozen revision the driver builds the task's copy on while that
+// blocker's code awaits review (P1.26). Loom serve and loom driver register it
+// with driver.UseCodeReviewBases.
+func CodeReviewBase(ctx context.Context, workspace, task string) (string, bool, error) {
+	ctx = middleware.WithWorkspace(ctx, workspace)
+	return backend.CodeReviewBase(ctx, WorkspaceAwareIssueBackend()(ctx), task)
+}

@@ -205,7 +205,7 @@ async function runEpicWatchLoop(loom, input, epicId, started) {
 // endStateResult ports the I1 terminal conditions onto snapshot data:
 // drained -> completed; retry-exhausted child failures -> needsReview;
 // blocked with nothing runnable -> needsReview; open-but-unsatisfiable -> needsReview.
-function endStateResult(loom, epicId, snapshot, activeCount, completed, blockedFailures) {
+export function endStateResult(loom, epicId, snapshot, activeCount, completed, blockedFailures) {
   if (!snapshot || activeCount > 0) {
     return null;
   }
@@ -233,8 +233,17 @@ function endStateResult(loom, epicId, snapshot, activeCount, completed, blockedF
     });
   }
   if (open > 0) {
+    // A task whose code awaits review (D29) stays open until a reviewer
+    // decides; its dependents have already run on its code.
+    const inReview = (Array.isArray(snapshot.openChildren) ? snapshot.openChildren : [])
+      .filter((task) => task.status === "review" && Array.isArray(task.labels) && task.labels.includes("code-review"));
+    const summary = inReview.length === open
+      ? "Epic " + epicId + " is waiting for code review of " + open + " task(s): " + summarizeTasks(inReview) +
+        ". Approve or Reject each to finish the epic"
+      : "Epic " + epicId + " has " + open + " open child task(s) that cannot start: " +
+        summarizeTasks(snapshot.openChildren) + (inReview.length > 0 ? " (" + inReview.length + " awaiting code review)" : "");
     return loom.needsReview({
-      summary: "Epic " + epicId + " has " + open + " open child task(s), but none are ready, blocked, or active",
+      summary,
       errorClass: "epic_no_progress",
     });
   }

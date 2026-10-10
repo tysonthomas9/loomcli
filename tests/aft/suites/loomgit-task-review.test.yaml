@@ -1,9 +1,12 @@
 # P1.26 (D29): a task with code awaiting review stays open, in status review
 # with the code-review label, instead of closing when its attempt finishes.
 # Approve (once applied) closes it, Reject sets it back to open, and an empty
-# attempt still closes as "No changes". While it waits its dependent is
-# blocked. The task page shows Review, and only the Revisions panel offers
-# Approve/Reject. Real TaskRuns record the revisions.
+# attempt still closes as "No changes". While it waits a dependent in its stack
+# starts on its frozen code (Tyson, 2026-10-09): approving the dependent first
+# waits for it, and rejecting it makes the dependent stale until a Rebuild. A
+# dependent outside its stack stays blocked until it closes. The task page
+# shows Review, and only the review bar on Changes offers Approve/Reject. Real
+# TaskRuns record the revisions.
 suite: loomgit-task-review
 classification: { area: reviews, feature: task-review, surface: mixed, purpose: journey }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
@@ -17,12 +20,12 @@ teardown: >-
 
 tests:
   - name: stacked, a task with code waits in review until Approve closes it
-    intent: The finished attempt leaves its task in review with its dependent blocked; the task page offers Approve only in the Revisions panel; Approve closes the task and unblocks the dependent
+    intent: The finished attempt leaves its task in review with its dependent outside the stack blocked; the task page offers Approve in the review bar on Changes; Approve closes the task and unblocks the dependent
     steps:
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" attempt E2E-WS-TREV approve trev-approve.txt
         intent: A real TaskRun writes a file and records its revision
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" in-review E2E-WS-TREV approve
-        intent: The task is in review with the code-review label, its dependent is blocked and its epic is open
+        intent: The task is in review with the code-review label, its dependent outside the stack is blocked and its epic is open
       - open: /ws/E2E-WS-TREV/kanban
         intent: Load the workspace before following the task deep link
       - wait:
@@ -42,11 +45,11 @@ tests:
           fn: "!document.querySelector('[data-testid=review-action-bar]') && !document.querySelector('[data-testid=panel-approve-button]')"
         intent: The header offers no plan Approve/Reject for code awaiting review
       - click: { role: tab, name: Changes, exact: true }
-      - wait: { text: "Awaiting review" }
+      - wait: { text: "awaiting review" }
       - wait: { text: trev-approve.txt }
       - wait:
-          fn: "[...document.querySelectorAll('[data-testid=task-changes-tab] button')].some(b => b.textContent === 'Approve and create PR')"
-        intent: The Revisions panel owns Approve
+          fn: "[...document.querySelectorAll('[data-testid=task-changes-tab] button')].some(b => b.textContent === 'Approve code & create PR')"
+        intent: The review bar on Changes owns Approve
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" approve E2E-WS-TREV approve
         intent: Approve applies the code and closes the task without the label; the dependent becomes ready
       - run: >-
@@ -63,7 +66,7 @@ tests:
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" attempt E2E-WS-TREV reject trev-reject.txt
         intent: A real TaskRun runs the task until it records its revision
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" in-review E2E-WS-TREV reject
-        intent: The task waits in review with the code-review label, its dependent is blocked and its epic is open
+        intent: The task waits in review with the code-review label, its dependent outside the stack is blocked and its epic is open
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" reject E2E-WS-TREV reject
         intent: Reject sets the task to open without the label
       - open: /ws/E2E-WS-TREV/kanban
@@ -107,16 +110,93 @@ tests:
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" attempt E2E-WS-TREV-TRUNK approve trev-trunk-approve.txt
         intent: A real TaskRun runs the task until it records its revision
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" in-review E2E-WS-TREV-TRUNK approve
-        intent: The task waits in review with the code-review label, its dependent is blocked and its epic is open
+        intent: The task waits in review with the code-review label, its dependent outside the stack is blocked and its epic is open
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" approve E2E-WS-TREV-TRUNK approve
         intent: Approve applies the code and closes the task without the label; the dependent becomes ready
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" attempt E2E-WS-TREV-TRUNK reject trev-trunk-reject.txt
         intent: A real TaskRun runs the task until it records its revision
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" in-review E2E-WS-TREV-TRUNK reject
-        intent: The task waits in review with the code-review label, its dependent is blocked and its epic is open
+        intent: The task waits in review with the code-review label, its dependent outside the stack is blocked and its epic is open
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" reject E2E-WS-TREV-TRUNK reject
         intent: Reject sets the task back to open without the label; its dependent stays blocked
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" attempt E2E-WS-TREV-TRUNK empty
         intent: A real TaskRun runs the task until it records its revision
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" no-changes E2E-WS-TREV-TRUNK empty
         intent: The empty attempt closed its task as No changes
+
+  - name: stacked, a dependent starts on its blocker's code in review, and approving it first waits
+    intent: B starts once A's agent finished, built on A's revision while A waits in review; approving B first waits for A and says so; approving A then applies A and B in order
+    steps:
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" chain E2E-WS-TREV order
+        intent: Real TaskRuns run A, then B on A's frozen revision while A is still in review with no verdict
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" approve-first E2E-WS-TREV order
+        intent: Approving B before A is recorded and waits, with "waiting for A to be approved"
+      - open: /ws/E2E-WS-TREV/kanban
+        intent: Load the workspace before following the task deep link
+      - wait:
+          fn: "!!document.querySelector('[data-testid=board-toolbar]')"
+        intent: The board has mounted, so the workspace is loaded before the deep link
+      - run: >-
+          agent-browser --session "$AFT_SESSION" open
+          "$AFT_BASE_URL/ws/E2E-WS-TREV/issues/$(cat "$AFT_WORK_DIR/E2E-WS-TREV-order-b")"
+        intent: Open the dependent B
+      - click: { role: tab, name: Changes, exact: true }
+      - wait:
+          fn: "(document.querySelector('[data-testid=revision-waiting-dependency]')?.textContent || '').includes('to be approved')"
+        intent: B's revision says it waits for A's approval
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" approve-blocker E2E-WS-TREV order
+        intent: Approving A applies A, then B, and closes both
+
+  - name: stacked, rejecting the blocker makes its dependent stale until a Rebuild
+    intent: Rejecting A marks B stale with the reason; Approve on B is refused and nothing reruns it on its own; once A has a new revision, Rebuild reopens B and its next attempt is built on it
+    steps:
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" chain E2E-WS-TREV stale
+        intent: Real TaskRuns run A, then B on A's frozen revision
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" stale E2E-WS-TREV stale
+        intent: Rejecting A makes B stale; Approve on B is refused with the reason
+      - open: /ws/E2E-WS-TREV/kanban
+        intent: Load the workspace before following the task deep link
+      - wait:
+          fn: "!!document.querySelector('[data-testid=board-toolbar]')"
+        intent: The board has mounted, so the workspace is loaded before the deep link
+      - run: >-
+          agent-browser --session "$AFT_SESSION" open
+          "$AFT_BASE_URL/ws/E2E-WS-TREV/issues/$(cat "$AFT_WORK_DIR/E2E-WS-TREV-stale-b")"
+        intent: Open the stale dependent B
+      - click: { role: tab, name: Changes, exact: true }
+      - wait:
+          fn: "(document.querySelector('[data-testid=revision-stale]')?.textContent || '').includes('which was rejected')"
+        intent: B's revision says it was built on a rejected revision
+      - wait:
+          fn: "[...document.querySelectorAll('[data-testid=task-changes-tab] button')].some(b => b.textContent === 'Approve code & create PR' && b.disabled) && !document.querySelector('[data-testid=rebuild]')"
+        intent: Approve is disabled, and there is no Rebuild until A has a new revision
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" next-a E2E-WS-TREV stale
+        intent: A's next attempt offers B a rebuild on it, and an agent may not Rebuild
+      - run: >-
+          agent-browser --session "$AFT_SESSION" open
+          "$AFT_BASE_URL/ws/E2E-WS-TREV/issues/$(cat "$AFT_WORK_DIR/E2E-WS-TREV-stale-b")"
+        intent: Reopen B now that A has new code
+      - click: { role: tab, name: Changes, exact: true }
+      - wait:
+          fn: "(document.querySelector('[data-testid=rebuild]')?.textContent || '').includes(\"'s new code\") && (document.querySelector('[data-testid=revision-stale]')?.textContent || '').includes('rebuild it on')"
+        intent: B offers Rebuild on A's new code, with the reason in plain words
+      - click: { testid: rebuild }
+        intent: A human clicks Rebuild
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" rebuilt E2E-WS-TREV stale
+        intent: The Rebuild set B's revision aside and reopened B, whose next attempt is built on A's new revision
+
+  - name: PR per task, a dependent starts on its blocker's code, waits when approved first, and goes stale on reject
+    intent: In trunk mode the same dependency order and stale rules hold
+    steps:
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" chain E2E-WS-TREV-TRUNK order
+        intent: Real TaskRuns run A, then B on A's frozen revision while A is in review
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" approve-first E2E-WS-TREV-TRUNK order
+        intent: Approving B before A waits, with the reason
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" approve-blocker E2E-WS-TREV-TRUNK order
+        intent: Approving A applies A, then B, and closes both
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" chain E2E-WS-TREV-TRUNK stale
+        intent: Real TaskRuns run A, then B on A's frozen revision
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" stale E2E-WS-TREV-TRUNK stale
+        intent: Rejecting A makes B stale; Approve on B is refused with the reason
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" rebuild E2E-WS-TREV-TRUNK stale
+        intent: Rebuild reopens B once A has a new revision, and B's next attempt is built on it

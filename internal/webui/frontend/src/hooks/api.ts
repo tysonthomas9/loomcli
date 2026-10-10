@@ -22,11 +22,11 @@ export {
   applyRevision,
   approveRevisionMerge,
   cancelRevisionMerge,
-  createRevisionPR,
-  getRevisionDiff,
   getTaskDiff,
   getTaskRevisions,
+  rebuildTask,
   submitRevisionVerdict,
+  approveTask,
 } from "@/api/git/revisions";
 export type {
   ReviewRevision,

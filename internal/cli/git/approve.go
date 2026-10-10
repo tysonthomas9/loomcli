@@ -3,7 +3,6 @@ package git
 import (
 	"context"
 	"fmt"
-	"strconv"
 
 	"github.com/spf13/cobra"
 
@@ -16,36 +15,58 @@ import (
 
 var approveWorkspace string
 var approveLead string
-var approveOnly bool
+var approveChange string
+var approveRevision int
+var approveDryRun bool
+var approveHeads []string
 var approveResolver = cli.NewResolver
-var approveLocal = func(ctx context.Context, workspace, lead, change string, revision int, actor review.Actor) (apply.FollowResult, error) {
-	return apply.ApproveLocalPublishing(ctx, workspace, lead, change, revision, actor, !approveOnly)
+var approveLocal = func(ctx context.Context, workspace, lead, change string, revision int, headSHA string, actor review.Actor) (apply.FollowResult, error) {
+	return apply.ApproveLocalPinned(ctx, workspace, lead, change, revision, headSHA, actor, true)
 }
 var publishApprovedLocal = publish.PublishApproved
 
 var approveCmd = &cobra.Command{
-	Use:   "approve <change> <revision>",
-	Short: "Approve a revision, follow it in a lead working area and open its PR",
-	Long: `Approve a revision and apply it as the new top layer of the lead's working area.
+	Use:   "approve <task> | approve <change> <revision>",
+	Short: "Approve a task's current code, follow it in a lead working area and open its PR",
+	Long: `Approve the code a task is in review with: its newest revision in each repo.
+Loom prints exactly what it approves and pins that code; if a new attempt
+arrives in between, the approval is refused as stale and nothing is recorded.
+<change> <revision> (or --change and --revision) approves one revision.
+--dry-run only prints what would be approved; --head <sha> approves only if
+the code is still at the head you reviewed.
+
+The approval records whoever runs it (D42): a normal shell is a human, the
+lead's session is the lead (refused while Lead may approve is off) and a task
+agent is an agent (refused for its own task).
+
 Once applied, its PR opens straight away: the next PR of the stack (Stacked PRs),
-or its own PR to trunk (PR per task). --only applies it without opening a PR.`,
+or its own PR to trunk (PR per task). With no Git provider it stays applied
+and says "not published: no provider".`,
 	GroupID: "git",
-	Args:    cobra.ExactArgs(2),
+	Args:    cobra.RangeArgs(0, 2),
 	RunE:    runApprove,
 }
 
 func init() {
 	approveCmd.Flags().StringVarP(&approveWorkspace, "workspace", "W", "", "Workspace to operate on")
-	approveCmd.Flags().StringVar(&approveLead, "lead", "lead", "Lead working area")
-	approveCmd.Flags().BoolVar(&approveOnly, "only", false, "Approve only: apply without opening a PR")
+	approveCmd.Flags().StringVar(&approveLead, "lead", "lead", "Lead working area (default: the lead running the command, else lead)")
+	approveCmd.Flags().StringVar(&approveChange, "change", "", "Approve this change (advanced; needs --revision)")
+	approveCmd.Flags().IntVar(&approveRevision, "revision", 0, "Revision of --change to approve (advanced)")
+	approveCmd.Flags().BoolVar(&approveDryRun, "dry-run", false, "Print what would be approved and record nothing")
+	approveCmd.Flags().StringSliceVar(&approveHeads, "head", nil, "Approve only if the code is at this reviewed head (repeat for each repo)")
 	cli.RegisterCommand(approveCmd)
 }
 
-func runApprove(cmd *cobra.Command, args []string) error {
-	number, err := strconv.Atoi(args[1])
-	if err != nil || number < 1 {
-		return fmt.Errorf("revision must be a positive number")
+// verdictLead is the lead working area a verdict targets: --lead when given,
+// else the lead running the command, else the default lead.
+func verdictLead(cmd *cobra.Command, flagLead string, actor commandActor) string {
+	if cmd.Flags().Changed("lead") || actor.Kind != "lead" {
+		return flagLead
 	}
+	return actor.ID
+}
+
+func runApprove(cmd *cobra.Command, args []string) error {
 	resolver, err := resolverFor(approveWorkspace, approveResolver)
 	if err != nil {
 		return err
@@ -56,22 +77,45 @@ func runApprove(cmd *cobra.Command, args []string) error {
 		}
 	}
 	workspace := resolver.Config.Workspaces[resolver.WorkspaceName()]
-	result, err := approveLocal(cmd.Context(), workspace.ID, approveLead, args[0], number,
-		review.Actor{Kind: "human", ID: "local-user"})
+	actor := resolveCommandActor(approveLead)
+	lead := verdictLead(cmd, approveLead, actor)
+	targets, task, err := resolveVerdictTargets(cmd.Context(), workspace.ID, args, approveChange, approveRevision)
 	if err != nil {
 		return err
+	}
+	if err := refuseOwnTask("approve", actor, task); err != nil {
+		return err
+	}
+	if err := pinReviewedHeads(targets, approveHeads); err != nil {
+		return err
+	}
+	verb := "Approving"
+	if approveDryRun {
+		verb = "Would approve"
+	}
+	if err := printVerdictPlan(cmd.OutOrStdout(), verb, actor, lead, targets); err != nil || approveDryRun {
+		return err
+	}
+	for _, target := range targets {
+		if err := approveTarget(cmd, workspace.ID, lead, target, actor.Actor); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func approveTarget(cmd *cobra.Command, workspace, lead string, target verdictTarget, actor review.Actor) error {
+	result, err := approveLocal(cmd.Context(), workspace, lead, target.Change, target.Number, target.HeadSHA, actor)
+	if err != nil {
+		return staleVerdictError(target, err)
 	}
 	if len(result.Pending) > 0 {
 		_, err = fmt.Fprintln(cmd.OutOrStdout(), "Approved; waiting for the lead working area")
 		return err
 	}
-	if approveOnly {
-		_, err = fmt.Fprintln(cmd.OutOrStdout(), "Approved and added to the lead working area")
-		return err
-	}
-	outcomes, publishErr := publishApprovedLocal(cmd.Context(), workspace.ID, approveLead, stackstore.Declared())
+	outcomes, publishErr := publishApprovedLocal(cmd.Context(), workspace, lead, stackstore.Declared())
 	for _, outcome := range outcomes {
-		if outcome.Change != args[0] {
+		if outcome.Change != target.Change {
 			continue
 		}
 		switch outcome.Status {

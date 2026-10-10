@@ -2,9 +2,11 @@ package driver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/domain"
@@ -357,11 +359,76 @@ func flueTaskSessionMetadata(req TaskExecRequest, sessionID string) map[string]s
 	return metadata
 }
 
+// A task starts while its only open blocker's code awaits review when that
+// blocker is in its epic (Tyson, 2026-10-09). Its task copy is built on the
+// blocker's newest frozen revision, pinned as local lineage, whether a lead
+// delegated it or not; otherwise it would run without the code it depends
+// on. A task whose blockers are closed keeps its usual base.
+
+// CodeReviewBaseLookup names the task whose frozen revision task is built on
+// while that task's code awaits review; found is false for any other task.
+type CodeReviewBaseLookup func(ctx context.Context, workspace, task string) (string, bool, error)
+
+var codeReviewBases atomic.Pointer[CodeReviewBaseLookup]
+
+// UseCodeReviewBases sets the code-review base lookup DefaultStackLineageLookup
+// uses. The processes that own the FleetDB connection set it at startup: loom
+// serve and the loom driver commands register cli.CodeReviewBase. Unset, no
+// task copy is built behind code review.
+func UseCodeReviewBases(lookup CodeReviewBaseLookup) {
+	codeReviewBases.Store(&lookup)
+}
+
+func registeredCodeReviewBases() CodeReviewBaseLookup {
+	if lookup := codeReviewBases.Load(); lookup != nil {
+		return *lookup
+	}
+	return nil
+}
+
+// codeReviewBase returns task's code-review base in repo. A blocker with no
+// change in repo (its code is in other repositories) is none: the task keeps
+// its usual base there, as it would once the blocker closed. A failed lookup
+// stops the task copy: guessing would build the task without its blocker's
+// code.
+func (l StackLineageLookup) codeReviewBase(ctx context.Context, workspace, repo, task string) (string, bool, error) {
+	if l.CodeReviewBase == nil {
+		return "", false, nil
+	}
+	predecessor, found, err := l.CodeReviewBase(ctx, workspace, task)
+	if err != nil {
+		return "", false, loomgit.NewError(loomgit.LineageUnresolved, "read the blocker whose code awaits review", err)
+	}
+	if !found {
+		return "", false, nil
+	}
+	inRepo, err := taskcopy.TaskHasChange(ctx, workspace, predecessor, repo)
+	return predecessor, inRepo && err == nil, err
+}
+
+type codeReviewBaseLookup interface {
+	codeReviewBase(context.Context, string, string, string) (string, bool, error)
+}
+
+// choosesBase reports whether a delegated task names its own base: a base
+// revision or a conflict resolution.
+func choosesBase(input json.RawMessage) (bool, error) {
+	_, hasRevision, err := baseRevisionFromInput(input)
+	if err != nil || hasRevision {
+		return hasRevision, err
+	}
+	_, hasResolution, err := conflictResolutionFromInput(input)
+	return hasResolution, err
+}
+
 type localPredecessorLookup interface {
 	PredecessorForTask(context.Context, string, string, string) (string, bool, error)
 }
 
 func (l StackLineageLookup) PredecessorForTask(ctx context.Context, workspaceKey, repoName, taskID string) (string, bool, error) {
+	if predecessor, found, err := l.codeReviewBase(ctx, workspaceKey, repoName, taskID); err != nil || found {
+		return predecessor, found, err
+	}
 	_, node, byTask, ok, err := findTaskStack(ctx, l.Store, workspaceKey, repoName, taskID)
 	if err != nil || !ok || node.BaseTaskID == "" {
 		return "", false, err
@@ -370,6 +437,29 @@ func (l StackLineageLookup) PredecessorForTask(ctx context.Context, workspaceKey
 		return "", false, loomgit.NewError(loomgit.LineageUnresolved, "predecessor missing from local stack", nil)
 	}
 	return node.BaseTaskID, true, nil
+}
+
+// codeReviewLineageBase builds a lead-delegated task on its blocker's frozen
+// revision while that blocker's code awaits review in its epic, instead of on
+// the lead's working area. found is false when the lead's base applies.
+func (r LocalTaskWorktreeResolver) codeReviewLineageBase(ctx context.Context, req TaskExecRequest, repoPath string, selected *domain.Repo) (bool, string, taskcopy.LineageBase, error) {
+	lookup, ok := r.Lineage.(codeReviewBaseLookup)
+	if !ok {
+		return false, "", taskcopy.LineageBase{}, nil
+	}
+	if req.ParentSessionID == "" {
+		return false, "", taskcopy.LineageBase{}, nil // The plain path asks PredecessorForTask.
+	}
+	chosen, err := choosesBase(req.Input)
+	if err != nil || chosen {
+		return false, "", taskcopy.LineageBase{}, err
+	}
+	predecessor, found, err := lookup.codeReviewBase(ctx, req.WorkspaceKey, selected.Name, req.TaskID)
+	if err != nil || !found {
+		return false, "", taskcopy.LineageBase{}, err
+	}
+	base, err := taskcopy.ResolveLineageBase(ctx, repoPath, req.WorkspaceKey, req.TaskID, predecessor, selected.Name)
+	return err == nil, base.Ref, base, err
 }
 
 // resolveTaskLineageBase selects an immutable local predecessor head when one
@@ -394,4 +484,26 @@ func (r LocalTaskWorktreeResolver) resolveTaskLineageBase(ctx context.Context, r
 		return "", taskcopy.LineageBase{}, fmt.Errorf("resolve task copy base for repo %q: %w", selected.Name, err)
 	}
 	return sha, taskcopy.LineageBase{}, nil
+}
+
+// ResolveDependentBase is the frozen blocker revision a daemon-run dependent
+// task starts from (P1.28), selected and pinned as a TaskRun copy's base is.
+// found is false for a task with no local predecessor.
+func ResolveDependentBase(ctx context.Context, workspace, repo, repoPath, task string) (string, bool, error) {
+	lookup, ok := DefaultStackLineageLookup().(localPredecessorLookup)
+	if !ok {
+		return "", false, nil
+	}
+	predecessor, found, err := lookup.PredecessorForTask(ctx, workspace, repo, task)
+	if err != nil || !found {
+		return "", false, err
+	}
+	base, err := taskcopy.ResolveLineageBase(ctx, repoPath, workspace, task, predecessor, repo)
+	if err != nil {
+		return "", false, err
+	}
+	if err := taskcopy.RecordLineageBase(ctx, workspace, task, repo, base); err != nil {
+		return "", false, err
+	}
+	return base.SHA, true, nil
 }

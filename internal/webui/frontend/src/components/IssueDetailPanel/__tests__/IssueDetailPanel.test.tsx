@@ -1333,6 +1333,38 @@ describe("IssueDetailPanel", () => {
       expect(screen.getByTestId("panel-reject-button")).toBeInTheDocument();
     });
 
+    it("labels a plan approval Approve plan and a PR's code Approve code (P2.23)", () => {
+      const plan = createTestIssueDetails({ title: "Plan", status: "review" });
+      const { rerender } = render(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={plan}
+          onClose={() => {}}
+          onApprove={vi.fn()}
+          onReject={vi.fn()}
+        />,
+      );
+      expect(
+        screen.getByRole("button", { name: "Approve plan" }),
+      ).toBeInTheDocument();
+      rerender(
+        <IssueDetailPanel
+          isOpen={true}
+          issue={{
+            ...plan,
+            external_ref: "https://github.com/o/r/pull/7",
+          }}
+          onClose={() => {}}
+          onApprove={vi.fn()}
+          onReject={vi.fn()}
+        />,
+      );
+      expect(
+        screen.getByRole("button", { name: "Approve code" }),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Approve plan" })).toBeNull();
+    });
+
     it("does NOT render ReviewActionBar for a task whose code awaits review", () => {
       // D29 / P1.26: the Revisions panel owns Approve/Reject for it.
       const mockIssue = createTestIssueDetails({

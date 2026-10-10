@@ -25,9 +25,9 @@ func TestApproveCmdFollowsApprovedRevision(t *testing.T) {
 		}}, nil
 	}
 	called := false
-	approveLocal = func(_ context.Context, workspace, lead, change string, revision int, actor review.Actor) (apply.FollowResult, error) {
+	approveLocal = func(_ context.Context, workspace, lead, change string, revision int, headSHA string, actor review.Actor) (apply.FollowResult, error) {
 		called = true
-		if workspace != "workspace-1" || lead != "lead-1" || change != "change-1" || revision != 2 ||
+		if workspace != "workspace-1" || lead != "lead-1" || change != "change-1" || revision != 2 || headSHA != "head-2" ||
 			actor.Kind != "human" || actor.ID == "" {
 			t.Fatalf("unexpected approval: %s %s %s %d %+v", workspace, lead, change, revision, actor)
 		}
@@ -45,10 +45,10 @@ func TestApproveCmdFollowsApprovedRevision(t *testing.T) {
 func stubApprovePublish(t *testing.T, publisher func(context.Context, string, string) ([]publish.ApprovalOutcome, error)) {
 	t.Helper()
 	oldApprove, oldResolver, oldPublish := approveLocal, approveResolver, publishApprovedLocal
-	oldWorkspace, oldLead, oldOnly := approveWorkspace, approveLead, approveOnly
+	oldWorkspace, oldLead := approveWorkspace, approveLead
 	t.Cleanup(func() {
 		approveLocal, approveResolver, publishApprovedLocal = oldApprove, oldResolver, oldPublish
-		approveWorkspace, approveLead, approveOnly = oldWorkspace, oldLead, oldOnly
+		approveWorkspace, approveLead = oldWorkspace, oldLead
 	})
 	publishApprovedLocal = func(ctx context.Context, workspace, lead string, stacks publish.DeclaredStacks) ([]publish.ApprovalOutcome, error) {
 		if stacks == nil {
@@ -62,9 +62,10 @@ func stubApprovePublish(t *testing.T, publisher func(context.Context, string, st
 			Workspaces: map[string]config.WorkspaceConfig{"workspace": {ID: "workspace-1"}},
 		}}, nil
 	}
-	approveLocal = func(_ context.Context, _, _, change string, _ int, _ review.Actor) (apply.FollowResult, error) {
+	approveLocal = func(_ context.Context, _, _, change string, _ int, _ string, _ review.Actor) (apply.FollowResult, error) {
 		return apply.FollowResult{Applied: []string{change}}, nil
 	}
+	stubVerdictStore(t, humanEnv())
 }
 
 func runApproveForTest(t *testing.T) string {
@@ -78,14 +79,10 @@ func runApproveForTest(t *testing.T) string {
 	return out.String()
 }
 
-func TestApproveCmdOnlyDoesNotOpenPR(t *testing.T) {
-	stubApprovePublish(t, func(context.Context, string, string) ([]publish.ApprovalOutcome, error) {
-		t.Fatal("Approve only opened a PR")
-		return nil, nil
-	})
-	approveOnly = true
-	if out := runApproveForTest(t); !strings.Contains(out, "Approved and added to the lead working area") {
-		t.Fatalf("unexpected output %q", out)
+func TestApproveCmdHasNoOnlyFlag(t *testing.T) {
+	// D40: there is no Approve only; every approval opens its PR.
+	if approveCmd.Flags().Lookup("only") != nil {
+		t.Fatal("loom approve still has --only")
 	}
 }
 

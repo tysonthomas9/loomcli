@@ -42,6 +42,11 @@ func (l *Local) TaskWorkspaces(ctx context.Context) ([]string, error) {
 	return l.store.TaskWorkspaces(ctx)
 }
 
+// Revision reads one recorded revision.
+func (l *Local) Revision(ctx context.Context, workspace, change string, number int) (loomgit.Revision, error) {
+	return l.store.GetRevision(ctx, workspace, change, number)
+}
+
 func (l *Local) Submit(ctx context.Context, workspace, change string, number int, headSHA, kind, reason string, actor Actor) (loomgit.Verdict, error) {
 	return Submit(ctx, l.store, workspace, change, number, headSHA, kind, reason, actor)
 }
@@ -81,10 +86,16 @@ type TaskRevision struct {
 	Outcome    string `json:"outcome"`
 	Incomplete bool   `json:"incomplete"`
 	Verdict    string `json:"verdict,omitempty"`
-	Applied    bool   `json:"applied"`
+	// VerdictReason is the reason recorded with the latest verdict, such as
+	// why it was rejected; a rerun shows it above its diff.
+	VerdictReason string `json:"verdict_reason,omitempty"`
+	// Author is the agent that recorded this revision, when known.
+	Author  string `json:"author,omitempty"`
+	Applied bool   `json:"applied"`
 	// FollowStatus is the lead follow state of this revision's approval
-	// ("spent" when its apply can never run; approve again to re-arm), with
-	// the reviewer-facing reason.
+	// ("spent" when its apply can never run; approve again to re-arm;
+	// "unapplied" when it was applied and later removed), with the
+	// reviewer-facing reason.
 	FollowStatus string `json:"follow_status,omitempty"`
 	FollowReason string `json:"follow_reason,omitempty"`
 	// NeedsWorkingArea marks an approved, unapplied revision whose target lead
@@ -124,6 +135,15 @@ type TaskRevision struct {
 	FeedbackStatus         string `json:"feedback_status,omitempty"`
 	FeedbackReason         string `json:"feedback_reason,omitempty"`
 	FeedbackMergeCancelled bool   `json:"feedback_merge_cancelled,omitempty"`
+	// DependsOn is the task this revision's code was built on, before that
+	// task's code was reviewed. LineageState is "stale" when that task's
+	// revision was rejected or replaced, or "dependency_abandoned"; it is
+	// empty when the base is current. RebuildOn is the predecessor revision a
+	// rebuild would build on, 0 if none yet.
+	DependsOn     string `json:"depends_on,omitempty"`
+	LineageState  string `json:"lineage_state,omitempty"`
+	LineageReason string `json:"lineage_reason,omitempty"`
+	RebuildOn     int    `json:"rebuild_on,omitempty"`
 }
 
 func (l *Local) TaskRevisions(ctx context.Context, workspace, task string) ([]TaskRevision, error) {
@@ -151,18 +171,18 @@ func (l *Local) TaskRevisionsForLead(ctx context.Context, workspace, task, lead 
 		i.Superseded = latest > r.Number
 		v, err := l.store.LatestVerdict(ctx, r)
 		if err == nil {
-			i.Verdict = v.Kind
+			i.Verdict, i.VerdictReason = v.Kind, v.Reason
 		} else if !errors.Is(err, journal.ErrNotFound) {
+			return nil, err
+		}
+		if _, i.Author, err = l.store.RevisionAuthor(ctx, r); err != nil {
 			return nil, err
 		}
 		if i.Applied, err = l.store.RevisionApplied(ctx, workspace, lead, r.Change, r.Number); err != nil {
 			return nil, err
 		}
 		if v.Kind == "approve" || v.Kind == "override" || v.Kind == "policy" {
-			if i.FollowStatus, i.FollowReason, err = l.store.ApprovalFollowState(ctx, workspace, lead, r.Change, r.Number); err != nil {
-				return nil, err
-			}
-			if i.NeedsWorkingArea, err = l.needsWorkingArea(ctx, workspace, lead, r.Change, r.Number); err != nil {
+			if err := l.addFollowState(ctx, workspace, lead, &i); err != nil {
 				return nil, err
 			}
 		}
@@ -172,9 +192,27 @@ func (l *Local) TaskRevisionsForLead(ctx context.Context, workspace, task, lead 
 		if err := l.addFeedbackState(ctx, workspace, &i, statusSource(r)); err != nil {
 			return nil, err
 		}
+		if err := l.addDependencyState(ctx, workspace, lead, r.Kind, &i); err != nil {
+			return nil, err
+		}
 		out = append(out, i)
 	}
 	return out, nil
+}
+
+// addFollowState reports where an approval's Apply stands for one lead.
+func (l *Local) addFollowState(ctx context.Context, workspace, lead string, i *TaskRevision) error {
+	var err error
+	if i.FollowStatus, i.FollowReason, err = l.store.ApprovalFollowState(ctx, workspace, lead, i.ChangeID, i.Number); err != nil {
+		return err
+	}
+	// The follow stays "applied" after Unapply removed the layer (F6):
+	// report what the working area holds, so the reviewer can Apply.
+	if i.FollowStatus == "applied" && !i.Applied {
+		i.FollowStatus = "unapplied"
+	}
+	i.NeedsWorkingArea, err = l.needsWorkingArea(ctx, workspace, lead, i.ChangeID, i.Number)
+	return err
 }
 
 // needsWorkingArea reports whether a lead targeted by this revision's approval

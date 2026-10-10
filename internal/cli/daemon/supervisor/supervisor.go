@@ -124,9 +124,14 @@ type Supervisor struct {
 	// ControlStore is the fleet-db-backed control plane used for node,
 	// session, lease, terminal, artifact, and command records.
 	ControlStore store.Store
-	NodeID       string
-	NodeTTL      time.Duration
-	NodeInterval time.Duration
+
+	// DependentBase resolves the frozen blocker revision a claimed dependent
+	// task starts from (P1.28); found=false, or a nil func, keeps the lead's
+	// head. The daemon wires driver.ResolveDependentBase.
+	DependentBase func(ctx context.Context, workspace, repo, repoPath, task string) (sha string, found bool, err error)
+	NodeID        string
+	NodeTTL       time.Duration
+	NodeInterval  time.Duration
 
 	// backendRecheckInterval is the fixed delay computeBackoff returns for a
 	// BackendUnavailable block (agent's backend CLI missing from PATH). Zero
@@ -432,6 +437,9 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 		if err := s.recoverAgent(ap, 0, false); err != nil {
 			slog.Warn("pre-flight recovery failed", "worktree", ap.Entry.Worktree, "err", err)
 		}
+		if !s.startFromLead(ap) {
+			return false
+		}
 	}
 	ap.Mu.Lock()
 	ap.RecoveryMode = mode // consumed by recordResumeOutcome after the run
@@ -445,8 +453,112 @@ func (s *Supervisor) preFlightSetup(ap *AgentProcess) bool {
 	if !s.claimTask(ap, epicID) {
 		return false
 	}
+	if mode == recoverCold && !s.startFromDependentBase(ap) {
+		return false
+	}
 	s.createAgentSession(ap, epicID)
 	return true
+}
+
+// startAttemptFromLead moves a reused checkout to the lead's head; tests replace it.
+var startAttemptFromLead = agentcapture.StartFromLead
+
+// startAttemptFromBase moves a reused checkout to a dependent's blocker revision; tests replace it.
+var startAttemptFromBase = agentcapture.StartFromBase
+
+// startFromLead puts a cold-started agent's reused checkout on its lead's
+// current working-area head, so the new attempt's base is the lead's state and
+// not an earlier attempt's leftover commits (P1.28, D23). Unsaved work in the
+// checkout refuses the start instead of being carried or discarded.
+func (s *Supervisor) startFromLead(ap *AgentProcess) bool {
+	if s.WorkspaceID == "" {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	source := ""
+	if ap.RepoConfig != nil {
+		source = s.freezeSourcePath(ap)
+	}
+	lead := s.attemptLead(ctx, ap)
+	result, err := startAttemptFromLead(ctx, source, ap.WorktreePath, s.WorkspaceID, lead, s.freezeRepoName(ap))
+	if err != nil {
+		s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.SpawnFailureOutcome),
+			"start from lead working area: "+err.Error())
+		slog.Error("agent checkout cannot start from the lead's working area; not starting",
+			"worktree", ap.Entry.Worktree, "lead", lead, "err", err)
+		return false
+	}
+	if result.Moved {
+		slog.Info("agent checkout moved to the lead's working-area head",
+			"worktree", ap.Entry.Worktree, "lead", lead, "base", result.BaseSHA)
+	}
+	return true
+}
+
+// startFromDependentBase moves a cold start's checkout, already clean on the
+// lead's head, to a claimed dependent task's frozen blocker revision. A base
+// that cannot be resolved refuses the start and hands the claim back (open, lock
+// released, unassigned), so the task is not stranded in progress.
+func (s *Supervisor) startFromDependentBase(ap *AgentProcess) bool {
+	ap.Mu.Lock()
+	taskID := ap.AssignedTaskID
+	ap.Mu.Unlock()
+	if s.DependentBase == nil || s.WorkspaceID == "" || taskID == "" {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	source := ap.WorktreePath
+	if ap.RepoConfig != nil {
+		source = s.freezeSourcePath(ap)
+	}
+	lead, repo := s.attemptLead(ctx, ap), s.freezeRepoName(ap)
+	base, found, err := s.DependentBase(ctx, s.WorkspaceID, repo, source, taskID)
+	if err == nil && found {
+		var result agentcapture.StartResult
+		if result, err = startAttemptFromBase(ctx, source, ap.WorktreePath, s.WorkspaceID, lead, repo, base); err == nil && result.Moved {
+			slog.Info("agent checkout moved to the dependent task's blocker revision",
+				"worktree", ap.Entry.Worktree, "task_id", taskID, "base", base)
+		}
+	}
+	if err == nil {
+		return true
+	}
+	s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.SpawnFailureOutcome),
+		"start from dependent task's blocker revision: "+err.Error())
+	slog.Error("dependent task's base cannot be resolved; not starting", "worktree", ap.Entry.Worktree, "task_id", taskID, "err", err)
+	s.handBackClaim(ap, taskID)
+	return false
+}
+
+// handBackClaim undoes a claim whose attempt never started.
+func (s *Supervisor) handBackClaim(ap *AgentProcess, taskID string) {
+	if s.IssueBackend != nil {
+		ctx, cancel := s.operationContext(claimOperationTimeout)
+		if err := s.reopenForNextStage(ctx, taskID, ""); err != nil {
+			slog.Warn("claimed task not returned to open", "worktree", ap.Entry.Worktree, "task_id", taskID, "err", err)
+		}
+		cancel()
+	}
+	s.releaseAssignedTaskClaim(ap, taskID)
+	ap.Mu.Lock()
+	ap.AssignedTaskID = ""
+	ap.Mu.Unlock()
+}
+
+// attemptLead is the lead whose working area an attempt starts from: the
+// requesting lead session's agent, else the workspace lead Apply uses.
+func (s *Supervisor) attemptLead(ctx context.Context, ap *AgentProcess) string {
+	ap.Mu.Lock()
+	parent := ap.ParentSessionID
+	ap.Mu.Unlock()
+	if parent != "" && s.ControlStore != nil {
+		if session, err := s.ControlStore.AgentSessions().Get(ctx, s.WorkspaceID, parent); err == nil && session != nil && session.AgentID != "" {
+			return session.AgentID
+		}
+	}
+	return "lead"
 }
 
 // assignEpic assigns and emits an epic for the agent.

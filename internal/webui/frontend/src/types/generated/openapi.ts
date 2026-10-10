@@ -1851,6 +1851,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/issues/{id}/rebuild": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Rebuild a task whose code was built on a rejected or replaced revision
+     * @description A human action (an actor of any other kind is refused with review_required). Rejects the task's newest revision with the rebuild as the reason, cancels any approval of it still waiting to apply, and moves the task's base to the newest revision of the task it depends on, so the task reopens for a new attempt. Never automatic. Refused with 409 when the task is not stale or there is no newer revision to build on yet.
+     */
+    post: operations["rebuildStaleTask"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/issues/{id}/approval": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Approve a task's newest revision in every repo, all or none
+     * @description Records each repo's approval, applies them all, and opens the PRs only when every repo applied. If any repo does not apply, no repo is published and the reply names that repo (P2.23). A repo that applied stays applied in the lead's working area with no PR until the task is approved again.
+     */
+    post: operations["approveTask"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/changes/{change}/revisions/{r}/verdict": {
     parameters: {
       query?: never;
@@ -3421,11 +3461,15 @@ export interface components {
       outcome: string;
       incomplete: boolean;
       verdict?: string;
+      /** @description Reason recorded with the latest verdict, such as why it was rejected. */
+      verdict_reason?: string;
+      /** @description The agent that recorded this revision, when known. */
+      author?: string;
       /** @description True while this exact revision is applied in a lead working area (from the applied log, so it survives reloads and clears after unapply). */
       applied: boolean;
-      /** @description Lead follow state of this revision's approval (approved, applied, conflict, apply_pending, superseded, spent). "spent" means the approval's apply can never run (for example the change was unapplied before the follow settled); approving again re-arms it. */
+      /** @description Lead follow state of this revision's approval (approved, waiting_for_dependency, applied, unapplied, conflict, apply_pending, superseded, spent). "waiting_for_dependency" means the approval waits for the task this code was built on, which applies first. "unapplied" means it was applied and later removed from the working area (Unapply); Apply puts it back. "spent" means the approval's apply can never run (for example the change was unapplied before the follow settled, or the code it was built on was rejected or replaced); approving again re-arms it. */
       follow_status?: string;
-      /** @description Reviewer-facing reason for a spent follow. */
+      /** @description Reviewer-facing reason for a spent or waiting follow, such as "waiting for T1 to be approved". */
       follow_reason?: string;
       /** @description True when the latest verdict approves this revision, it is not applied, and the verdict's target lead has no working area yet, so Apply is needed. */
       needs_working_area: boolean;
@@ -3475,6 +3519,17 @@ export interface components {
       feedback_reason?: string;
       /** @description True when this fix-up cancelled the change's pending Approve and merge, so merging needs a new Approve. */
       feedback_merge_cancelled?: boolean;
+      /** @description The task this revision's code was built on, before that task's code was reviewed (a dependent starts once its blocker's agent finishes). */
+      depends_on?: string;
+      /**
+       * @description Set when the code this revision was built on is no longer the code to build on. stale means that task's revision was rejected or replaced; Approve is refused until the task is rebuilt (Override is not). Absent when the base is current.
+       * @enum {string}
+       */
+      lineage_state?: "stale" | "dependency_abandoned";
+      /** @description Why the base is stale and what a rebuild would build on, such as "built on T1's code, which was rejected: rebuild it on T1's new code". Plain words; the revision numbers are in rebuild_on. */
+      lineage_reason?: string;
+      /** @description The revision of depends_on a rebuild would build on; absent while there is none yet. */
+      rebuild_on?: number;
     };
     RevisionDiffFile: {
       path: string;
@@ -8115,6 +8170,116 @@ export interface operations {
       };
     };
   };
+  rebuildStaleTask: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          actor: {
+            /** @enum {string} */
+            kind: "human" | "agent" | "lead";
+            id: string;
+          };
+        };
+      };
+    };
+    responses: {
+      /** @description The task was set aside for a rebuild. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data: {
+              change_id: string;
+              revision: number;
+              depends_on: string;
+              rebuild_on: number;
+              /** @description reject, or empty when the revision was already rejected. */
+              verdict: string;
+            };
+          };
+        };
+      };
+      /** @description Not a human actor, not stale, nothing newer to build on, or the revision is already applied. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success?: boolean;
+            error?: string;
+            message?: string;
+          };
+        };
+      };
+    };
+  };
+  approveTask: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          /** @enum {string} */
+          verdict: "approve" | "override";
+          reason?: string;
+          lead?: string;
+          actor: {
+            /** @enum {string} */
+            kind: "human" | "agent" | "lead";
+            id: string;
+          };
+          /** @description The task's newest revision in each repo. */
+          revisions: {
+            change_id: string;
+            number: number;
+            head_sha: string;
+          }[];
+        };
+      };
+    };
+    responses: {
+      /** @description Every repo applied. `status` is published when every PR opened; `publish` lists each repo's PR outcome. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": Record<string, never>;
+        };
+      };
+      /** @description not_all_applied (the approvals are recorded, no repo is published, and `repo` and `message` name the repo that did not apply), stale_revision, missing_repo (the request leaves out a repo of the task still without a PR), no_working_area (several repos and the lead has no working area for one of them, named in `repo`; nothing is recorded), or publish_failed. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": Record<string, never>;
+        };
+      };
+    };
+  };
   submitRevisionVerdict: {
     parameters: {
       query?: never;
@@ -8135,8 +8300,6 @@ export interface operations {
           verdict: "approve" | "reject" | "override";
           reason?: string;
           lead?: string;
-          /** @description Apply the approval without opening its PR (Approve only). By default an approval opens the change's PR as soon as it applies (D29). */
-          approve_only?: boolean;
           /** @description Approve and merge for a task whose PR is already open and whose newest version needs approving again. Human only; the merge is approved at this revision's head and waits for the PR to carry it (D29). */
           merge?: boolean;
           actor: {
@@ -8150,6 +8313,15 @@ export interface operations {
     responses: {
       /** @description Recorded SHA-bound verdict. `status` is published when the PR opened; `publish` reports the PR outcome (published, not_published with the reason, waiting, pending). */
       200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": Record<string, never>;
+        };
+      };
+      /** @description Loom refused the verdict and recorded nothing. `error` is the stable code (for example review_required or stale_subject) and `message` the reason (for example "lead approval policy is off"). */
+      409: {
         headers: {
           [name: string]: unknown;
         };

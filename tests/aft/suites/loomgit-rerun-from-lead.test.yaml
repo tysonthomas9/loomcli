@@ -1,0 +1,67 @@
+# P1.28 (D23, walk-through F7): a rerun of a daemon-managed agent starts from
+# the lead's current working area. Each workspace owns a real `loom daemon`
+# with one auto coder on the deterministic local-mode backend, which appends
+# five lines to local-mode-agent-output.txt and commits. Approve revision 1,
+# Unapply it, reopen the task: the daemon reruns it in the same reused agent
+# checkout, revision 2's base is the lead's head, and Approve applies it with
+# no conflict. Both delivery modes.
+suite: loomgit-rerun-from-lead
+classification: { area: reviews, feature: rerun-from-lead, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: >-
+  set -e;
+  bash "$AFT_TESTS_DIR/scripts/loomgit-rerun-from-lead.sh" setup E2E-WS-RERUN stack;
+  bash "$AFT_TESTS_DIR/scripts/loomgit-rerun-from-lead.sh" setup E2E-WS-RERUN-TRUNK trunk
+teardown: >-
+  bash "$AFT_TESTS_DIR/scripts/loomgit-rerun-from-lead.sh" teardown E2E-WS-RERUN;
+  bash "$AFT_TESTS_DIR/scripts/loomgit-rerun-from-lead.sh" teardown E2E-WS-RERUN-TRUNK
+
+tests:
+  - name: stacked, a rerun after Unapply starts from the lead and approves cleanly
+    intent: Approve, Unapply, reopen and rerun; the new attempt is based on the lead's head and Approve applies it with no conflict
+    steps:
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-rerun-from-lead.sh" attempt E2E-WS-RERUN
+        intent: The daemon's coder commits its file and its attempt freezes revision 1
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-rerun-from-lead.sh" approve E2E-WS-RERUN 1
+        intent: Approve applies revision 1 into the lead's working area
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-rerun-from-lead.sh" unapply E2E-WS-RERUN
+        intent: Unapply removes the layer; the file leaves the lead
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-rerun-from-lead.sh" rerun E2E-WS-RERUN
+        intent: The reopened task reruns; revision 2's base is the lead's current head, not the coder's leftover commit
+      - open: /ws/E2E-WS-RERUN/kanban
+        intent: Load the workspace before following the task deep link
+      - wait:
+          fn: "!!document.querySelector('[data-testid=board-toolbar]')"
+        intent: The board has mounted, so the workspace is loaded before the deep link
+      - run: >-
+          agent-browser --session "$AFT_SESSION" open
+          "$AFT_BASE_URL/ws/E2E-WS-RERUN/issues/$(cat "$AFT_WORK_DIR/E2E-WS-RERUN-task")"
+        intent: Open the rerun task
+      - click: { role: tab, name: Changes, exact: true }
+      - wait: { text: "awaiting review" }
+        intent: Revision 2 waits for review
+      - wait: { text: local-mode-agent-output.txt }
+        intent: Its diff adds the whole file the lead does not have
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-rerun-from-lead.sh" approve E2E-WS-RERUN 2
+        intent: Approve applies revision 2 with no conflict and closes the task
+      - run: >-
+          agent-browser --session "$AFT_SESSION" open
+          "$AFT_BASE_URL/ws/E2E-WS-RERUN/issues/$(cat "$AFT_WORK_DIR/E2E-WS-RERUN-task")"
+        intent: Reopen the approved task
+      - wait:
+          fn: "(document.querySelector('[data-testid=status-dropdown]') || document.querySelector('[data-testid=issue-status-badge]'))?.getAttribute('data-status') === 'closed'"
+        intent: The approved rerun shows Closed
+
+  - name: PR per task, a rerun after Unapply starts from the lead and approves cleanly
+    intent: In trunk mode the rerun is also based on the lead's head and Approve applies it with no conflict
+    steps:
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-rerun-from-lead.sh" attempt E2E-WS-RERUN-TRUNK
+        intent: The daemon's coder commits its file and its attempt freezes revision 1
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-rerun-from-lead.sh" approve E2E-WS-RERUN-TRUNK 1
+        intent: Approve applies revision 1 into the lead's working area
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-rerun-from-lead.sh" unapply E2E-WS-RERUN-TRUNK
+        intent: Unapply removes the layer; the file leaves the lead
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-rerun-from-lead.sh" rerun E2E-WS-RERUN-TRUNK
+        intent: The reopened task reruns; revision 2's base is the lead's current head
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-rerun-from-lead.sh" approve E2E-WS-RERUN-TRUNK 2
+        intent: Approve applies revision 2 with no conflict and closes the task

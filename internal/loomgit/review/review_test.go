@@ -331,3 +331,44 @@ func TestTaskRevisionsExposeSpentFollow(t *testing.T) {
 		t.Fatalf("re-approved: %+v, %v", got, err)
 	}
 }
+
+// P2.23: the review bar reads the agent that wrote an attempt, why the previous
+// attempt was rejected, and (F6) that an applied approval was later unapplied,
+// so it can offer Apply instead of saying it is still applied.
+func TestTaskRevisionsReportAuthorRejectReasonAndUnapply(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	if _, err := s.DriverChange(ctx, "W", "T", "repo", "C"); err != nil {
+		t.Fatal(err)
+	}
+	first := revision(t, s, "1source", "source")
+	if err := s.SetRevisionAuthor(ctx, first, "agent", "coder"); err != nil {
+		t.Fatal(err)
+	}
+	actor := Actor{Kind: "human", ID: "reviewer"}
+	if _, err := SubmitForLead(ctx, s, "W", "C", first.Number, first.HeadSHA, "reject", "use the helper", actor, "L"); err != nil {
+		t.Fatal(err)
+	}
+	second := revision(t, s, "2source", "source")
+	v, err := SubmitForLead(ctx, s, "W", "C", second.Number, second.HeadSHA, "approve", "", actor, "L")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The follow recorded the apply; Unapply then removed the layer, so the
+	// applied log no longer holds it.
+	if err := s.SetApprovalFollow(ctx, journal.PendingApproval{Workspace: "W", Lead: "L", Change: "C",
+		Revision: second.Number, VerdictID: int(v.ID)}, "applied", nil); err != nil {
+		t.Fatal(err)
+	}
+	got, err := (&Local{store: s}).TaskRevisionsForLead(ctx, "W", "T", "L")
+	if err != nil || len(got) != 2 {
+		t.Fatalf("revisions = %+v, %v", got, err)
+	}
+	byNumber := map[int]TaskRevision{got[0].Number: got[0], got[1].Number: got[1]}
+	if r := byNumber[first.Number]; r.Verdict != "reject" || r.VerdictReason != "use the helper" || r.Author != "coder" {
+		t.Fatalf("rejected attempt = %+v", r)
+	}
+	if r := byNumber[second.Number]; r.FollowStatus != "unapplied" || r.Applied {
+		t.Fatalf("unapplied approval = %+v", r)
+	}
+}

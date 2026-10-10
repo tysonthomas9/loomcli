@@ -15,6 +15,9 @@ func TestBlockedIncludesExplicitBlockedStatusIssues(t *testing.T) {
 	parent := "epic-1"
 	seen := map[string]bool{}
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if answersCodeReviewLookup(w, r) {
+			return
+		}
 		seen[r.URL.Path+"?"+r.URL.RawQuery] = true
 		switch r.URL.Path {
 		case "/api/v1/test-ws/issues/blocked":
@@ -78,6 +81,9 @@ func TestBlockedClientFiltersLabelsAndSourceReposWithoutServerLimit(t *testing.T
 	now := time.Now().UTC().Truncate(time.Second)
 	var gotQuery string
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if answersCodeReviewLookup(w, r) {
+			return
+		}
 		gotQuery = r.URL.RawQuery
 		switch r.URL.Path {
 		case "/api/v1/test-ws/issues/blocked":

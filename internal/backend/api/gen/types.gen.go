@@ -953,6 +953,24 @@ func (e ReviewRevisionFeedbackStatus) Valid() bool {
 	}
 }
 
+// Defines values for ReviewRevisionLineageState.
+const (
+	DependencyAbandoned ReviewRevisionLineageState = "dependency_abandoned"
+	Stale               ReviewRevisionLineageState = "stale"
+)
+
+// Valid indicates whether the value is a known member of the ReviewRevisionLineageState enum.
+func (e ReviewRevisionLineageState) Valid() bool {
+	switch e {
+	case DependencyAbandoned:
+		return true
+	case Stale:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ReviewRevisionPublishStatus.
 const (
 	ReviewRevisionPublishStatusNotPublished ReviewRevisionPublishStatus = "not_published"
@@ -1312,19 +1330,19 @@ func (e SubmitRevisionVerdictJSONBodyActorKind) Valid() bool {
 
 // Defines values for SubmitRevisionVerdictJSONBodyVerdict.
 const (
-	Approve  SubmitRevisionVerdictJSONBodyVerdict = "approve"
-	Override SubmitRevisionVerdictJSONBodyVerdict = "override"
-	Reject   SubmitRevisionVerdictJSONBodyVerdict = "reject"
+	SubmitRevisionVerdictJSONBodyVerdictApprove  SubmitRevisionVerdictJSONBodyVerdict = "approve"
+	SubmitRevisionVerdictJSONBodyVerdictOverride SubmitRevisionVerdictJSONBodyVerdict = "override"
+	SubmitRevisionVerdictJSONBodyVerdictReject   SubmitRevisionVerdictJSONBodyVerdict = "reject"
 )
 
 // Valid indicates whether the value is a known member of the SubmitRevisionVerdictJSONBodyVerdict enum.
 func (e SubmitRevisionVerdictJSONBodyVerdict) Valid() bool {
 	switch e {
-	case Approve:
+	case SubmitRevisionVerdictJSONBodyVerdictApprove:
 		return true
-	case Override:
+	case SubmitRevisionVerdictJSONBodyVerdictOverride:
 		return true
-	case Reject:
+	case SubmitRevisionVerdictJSONBodyVerdictReject:
 		return true
 	default:
 		return false
@@ -1606,19 +1624,19 @@ func (e GetScopedFileTreeParamsScope) Valid() bool {
 
 // Defines values for UpdateGitSettingsJSONBodyActorKind.
 const (
-	Agent UpdateGitSettingsJSONBodyActorKind = "agent"
-	Human UpdateGitSettingsJSONBodyActorKind = "human"
-	Lead  UpdateGitSettingsJSONBodyActorKind = "lead"
+	UpdateGitSettingsJSONBodyActorKindAgent UpdateGitSettingsJSONBodyActorKind = "agent"
+	UpdateGitSettingsJSONBodyActorKindHuman UpdateGitSettingsJSONBodyActorKind = "human"
+	UpdateGitSettingsJSONBodyActorKindLead  UpdateGitSettingsJSONBodyActorKind = "lead"
 )
 
 // Valid indicates whether the value is a known member of the UpdateGitSettingsJSONBodyActorKind enum.
 func (e UpdateGitSettingsJSONBodyActorKind) Valid() bool {
 	switch e {
-	case Agent:
+	case UpdateGitSettingsJSONBodyActorKindAgent:
 		return true
-	case Human:
+	case UpdateGitSettingsJSONBodyActorKindHuman:
 		return true
-	case Lead:
+	case UpdateGitSettingsJSONBodyActorKindLead:
 		return true
 	default:
 		return false
@@ -1733,6 +1751,66 @@ func (e GetGraphParamsStatus) Valid() bool {
 	case GetGraphParamsStatusClosed:
 		return true
 	case GetGraphParamsStatusOpen:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApproveTaskJSONBodyActorKind.
+const (
+	ApproveTaskJSONBodyActorKindAgent ApproveTaskJSONBodyActorKind = "agent"
+	ApproveTaskJSONBodyActorKindHuman ApproveTaskJSONBodyActorKind = "human"
+	ApproveTaskJSONBodyActorKindLead  ApproveTaskJSONBodyActorKind = "lead"
+)
+
+// Valid indicates whether the value is a known member of the ApproveTaskJSONBodyActorKind enum.
+func (e ApproveTaskJSONBodyActorKind) Valid() bool {
+	switch e {
+	case ApproveTaskJSONBodyActorKindAgent:
+		return true
+	case ApproveTaskJSONBodyActorKindHuman:
+		return true
+	case ApproveTaskJSONBodyActorKindLead:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ApproveTaskJSONBodyVerdict.
+const (
+	ApproveTaskJSONBodyVerdictApprove  ApproveTaskJSONBodyVerdict = "approve"
+	ApproveTaskJSONBodyVerdictOverride ApproveTaskJSONBodyVerdict = "override"
+)
+
+// Valid indicates whether the value is a known member of the ApproveTaskJSONBodyVerdict enum.
+func (e ApproveTaskJSONBodyVerdict) Valid() bool {
+	switch e {
+	case ApproveTaskJSONBodyVerdictApprove:
+		return true
+	case ApproveTaskJSONBodyVerdictOverride:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RebuildStaleTaskJSONBodyActorKind.
+const (
+	Agent RebuildStaleTaskJSONBodyActorKind = "agent"
+	Human RebuildStaleTaskJSONBodyActorKind = "human"
+	Lead  RebuildStaleTaskJSONBodyActorKind = "lead"
+)
+
+// Valid indicates whether the value is a known member of the RebuildStaleTaskJSONBodyActorKind enum.
+func (e RebuildStaleTaskJSONBodyActorKind) Valid() bool {
+	switch e {
+	case Agent:
+		return true
+	case Human:
+		return true
+	case Lead:
 		return true
 	default:
 		return false
@@ -3059,11 +3137,17 @@ type PullRequestReviewResult struct {
 // ReviewRevision defines model for ReviewRevision.
 type ReviewRevision struct {
 	// Applied True while this exact revision is applied in a lead working area (from the applied log, so it survives reloads and clears after unapply).
-	Applied  bool   `json:"applied"`
-	ChangeId string `json:"change_id"`
+	Applied bool `json:"applied"`
+
+	// Author The agent that recorded this revision, when known.
+	Author   *string `json:"author,omitempty"`
+	ChangeId string  `json:"change_id"`
 
 	// Date Commit date (ISO 8601) of the revision head, when the repo is readable.
 	Date *string `json:"date,omitempty"`
+
+	// DependsOn The task this revision's code was built on, before that task's code was reviewed (a dependent starts once its blocker's agent finishes).
+	DependsOn *string `json:"depends_on,omitempty"`
 
 	// FeedbackMergeCancelled True when this fix-up cancelled the change's pending Approve and merge, so merging needs a new Approve.
 	FeedbackMergeCancelled *bool `json:"feedback_merge_cancelled,omitempty"`
@@ -3074,13 +3158,19 @@ type ReviewRevision struct {
 	// FeedbackStatus For a review fix-up of a change whose PR is open, how Loom's automatic update of that PR stands (no Approve needed).
 	FeedbackStatus *ReviewRevisionFeedbackStatus `json:"feedback_status,omitempty"`
 
-	// FollowReason Reviewer-facing reason for a spent follow.
+	// FollowReason Reviewer-facing reason for a spent or waiting follow, such as "waiting for T1 to be approved".
 	FollowReason *string `json:"follow_reason,omitempty"`
 
-	// FollowStatus Lead follow state of this revision's approval (approved, applied, conflict, apply_pending, superseded, spent). "spent" means the approval's apply can never run (for example the change was unapplied before the follow settled); approving again re-arms it.
+	// FollowStatus Lead follow state of this revision's approval (approved, waiting_for_dependency, applied, unapplied, conflict, apply_pending, superseded, spent). "waiting_for_dependency" means the approval waits for the task this code was built on, which applies first. "unapplied" means it was applied and later removed from the working area (Unapply); Apply puts it back. "spent" means the approval's apply can never run (for example the change was unapplied before the follow settled, or the code it was built on was rejected or replaced); approving again re-arms it.
 	FollowStatus *string `json:"follow_status,omitempty"`
 	HeadSha      string  `json:"head_sha"`
 	Incomplete   bool    `json:"incomplete"`
+
+	// LineageReason Why the base is stale and what a rebuild would build on, such as "built on T1's code, which was rejected: rebuild it on T1's new code". Plain words; the revision numbers are in rebuild_on.
+	LineageReason *string `json:"lineage_reason,omitempty"`
+
+	// LineageState Set when the code this revision was built on is no longer the code to build on. stale means that task's revision was rejected or replaced; Approve is refused until the task is rebuilt (Override is not). Absent when the base is current.
+	LineageState *ReviewRevisionLineageState `json:"lineage_state,omitempty"`
 
 	// MergeAfter Open PRs below this one in its stack, bottom first. Empty when it is the bottom PR (Approve and merge merges it now).
 	MergeAfter *[]int `json:"merge_after,omitempty"`
@@ -3117,16 +3207,25 @@ type ReviewRevision struct {
 	// PublishStatus Outcome of this revision's Approve and create PR request, if it made one.
 	PublishStatus *ReviewRevisionPublishStatus `json:"publish_status,omitempty"`
 
+	// RebuildOn The revision of depends_on a rebuild would build on; absent while there is none yet.
+	RebuildOn *int `json:"rebuild_on,omitempty"`
+
 	// Repo Workspace repo name the revision diff route accepts.
 	Repo string `json:"repo"`
 
 	// Superseded True when a newer source revision of the same change exists; verdicts on it are refused.
 	Superseded bool    `json:"superseded"`
 	Verdict    *string `json:"verdict,omitempty"`
+
+	// VerdictReason Reason recorded with the latest verdict, such as why it was rejected.
+	VerdictReason *string `json:"verdict_reason,omitempty"`
 }
 
 // ReviewRevisionFeedbackStatus For a review fix-up of a change whose PR is open, how Loom's automatic update of that PR stands (no Approve needed).
 type ReviewRevisionFeedbackStatus string
+
+// ReviewRevisionLineageState Set when the code this revision was built on is no longer the code to build on. stale means that task's revision was rejected or replaced; Approve is refused until the task is rebuilt (Override is not). Absent when the base is current.
+type ReviewRevisionLineageState string
 
 // ReviewRevisionPublishStatus Outcome of this revision's Approve and create PR request, if it made one.
 type ReviewRevisionPublishStatus string
@@ -3867,11 +3966,8 @@ type SubmitRevisionVerdictJSONBody struct {
 		Id   string                                 `json:"id"`
 		Kind SubmitRevisionVerdictJSONBodyActorKind `json:"kind"`
 	} `json:"actor"`
-
-	// ApproveOnly Apply the approval without opening its PR (Approve only). By default an approval opens the change's PR as soon as it applies (D29).
-	ApproveOnly *bool   `json:"approve_only,omitempty"`
-	HeadSha     string  `json:"head_sha"`
-	Lead        *string `json:"lead,omitempty"`
+	HeadSha string  `json:"head_sha"`
+	Lead    *string `json:"lead,omitempty"`
 
 	// Merge Approve and merge for a task whose PR is already open and whose newest version needs approving again. Human only; the merge is approved at this revision's head and waits for the PR to carry it (D29).
 	Merge   *bool                                `json:"merge,omitempty"`
@@ -4150,6 +4246,30 @@ type GetGraphParams struct {
 // GetGraphParamsStatus defines parameters for GetGraph.
 type GetGraphParamsStatus string
 
+// ApproveTaskJSONBody defines parameters for ApproveTask.
+type ApproveTaskJSONBody struct {
+	Actor struct {
+		Id   string                       `json:"id"`
+		Kind ApproveTaskJSONBodyActorKind `json:"kind"`
+	} `json:"actor"`
+	Lead   *string `json:"lead,omitempty"`
+	Reason *string `json:"reason,omitempty"`
+
+	// Revisions The task's newest revision in each repo.
+	Revisions []struct {
+		ChangeId string `json:"change_id"`
+		HeadSha  string `json:"head_sha"`
+		Number   int    `json:"number"`
+	} `json:"revisions"`
+	Verdict ApproveTaskJSONBodyVerdict `json:"verdict"`
+}
+
+// ApproveTaskJSONBodyActorKind defines parameters for ApproveTask.
+type ApproveTaskJSONBodyActorKind string
+
+// ApproveTaskJSONBodyVerdict defines parameters for ApproveTask.
+type ApproveTaskJSONBodyVerdict string
+
 // GetTaskDiffParams defines parameters for GetTaskDiff.
 type GetTaskDiffParams struct {
 	// Lead Lead whose stack to compare in. Defaults to the lead that most recently applied the change.
@@ -4164,6 +4284,17 @@ type GetIssueEventsParams struct {
 	// Since Opaque fleet-db history cursor. When present (including an empty value), returns one oldest-first page; a bare `since=` starts at the beginning of the issue history.
 	Since *string `form:"since,omitempty" json:"since,omitempty"`
 }
+
+// RebuildStaleTaskJSONBody defines parameters for RebuildStaleTask.
+type RebuildStaleTaskJSONBody struct {
+	Actor struct {
+		Id   string                            `json:"id"`
+		Kind RebuildStaleTaskJSONBodyActorKind `json:"kind"`
+	} `json:"actor"`
+}
+
+// RebuildStaleTaskJSONBodyActorKind defines parameters for RebuildStaleTask.
+type RebuildStaleTaskJSONBodyActorKind string
 
 // ListTaskRevisionsParams defines parameters for ListTaskRevisions.
 type ListTaskRevisionsParams struct {
@@ -4370,6 +4501,9 @@ type CreateIssueJSONRequestBody = CreateIssueRequest
 // PatchIssueJSONRequestBody defines body for PatchIssue for application/json ContentType.
 type PatchIssueJSONRequestBody = PatchIssueRequest
 
+// ApproveTaskJSONRequestBody defines body for ApproveTask for application/json ContentType.
+type ApproveTaskJSONRequestBody ApproveTaskJSONBody
+
 // CloseIssueJSONRequestBody defines body for CloseIssue for application/json ContentType.
 type CloseIssueJSONRequestBody = CloseRequest
 
@@ -4381,6 +4515,9 @@ type AddDependencyJSONRequestBody = AddDependencyRequest
 
 // MoveIssueJSONRequestBody defines body for MoveIssue for application/json ContentType.
 type MoveIssueJSONRequestBody = MoveIssueRequest
+
+// RebuildStaleTaskJSONRequestBody defines body for RebuildStaleTask for application/json ContentType.
+type RebuildStaleTaskJSONRequestBody RebuildStaleTaskJSONBody
 
 // SaveIssueTabsJSONRequestBody defines body for SaveIssueTabs for application/json ContentType.
 type SaveIssueTabsJSONRequestBody SaveIssueTabsJSONBody
