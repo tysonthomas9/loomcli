@@ -154,13 +154,15 @@ tests:
           "$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" begin-sweep "$AFT_WORK_DIR/agv1-prwatch-w1"
         intent: "Script the Lead's replies, watch PR 7, and start waiting for the next sweep"
       - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w1"'
-        intent: "Wait for a whole sweep after the watch (poll 1 of 4)"
+        intent: "Wait for a whole sweep after the watch (poll 1 of 5)"
       - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w1"'
-        intent: "Wait for a whole sweep after the watch (poll 2 of 4)"
+        intent: "Wait for a whole sweep after the watch (poll 2 of 5)"
       - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w1"'
-        intent: "Wait for a whole sweep after the watch (poll 3 of 4)"
+        intent: "Wait for a whole sweep after the watch (poll 3 of 5)"
       - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w1"'
-        intent: "Wait for a whole sweep after the watch (poll 4 of 4)"
+        intent: "Wait for a whole sweep after the watch (poll 4 of 5)"
+      - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w1"'
+        intent: "Wait for a whole sweep after the watch (poll 5 of 5)"
       - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" end "$AFT_WORK_DIR/agv1-prwatch-w1"'
         intent: "Check the wait for wait for a whole sweep after the watch is over"
       - run: |
@@ -183,13 +185,15 @@ tests:
           "$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" begin-wakes "$AFT_WORK_DIR/agv1-prwatch-w2" E2E-AGV1-PRWATCH "$(cat "$AFT_WORK_DIR/agv1PrWatch-gh-Id")" 1
         intent: "Add a failed check, a conflict, a comment by octocat and one by the host viewer, and start waiting for a wake"
       - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w2"'
-        intent: "Wait for the Lead's wake (poll 1 of 4)"
+        intent: "Wait for the Lead's wake (poll 1 of 5)"
       - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w2"'
-        intent: "Wait for the Lead's wake (poll 2 of 4)"
+        intent: "Wait for the Lead's wake (poll 2 of 5)"
       - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w2"'
-        intent: "Wait for the Lead's wake (poll 3 of 4)"
+        intent: "Wait for the Lead's wake (poll 3 of 5)"
       - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w2"'
-        intent: "Wait for the Lead's wake (poll 4 of 4)"
+        intent: "Wait for the Lead's wake (poll 4 of 5)"
+      - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w2"'
+        intent: "Wait for the Lead's wake (poll 5 of 5)"
       - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" end "$AFT_WORK_DIR/agv1-prwatch-w2"'
         intent: "Check the wait for wait for the lead's wake is over"
       - run: |
@@ -212,13 +216,15 @@ tests:
           "$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" begin-sweep "$AFT_WORK_DIR/agv1-prwatch-w2b"
         intent: "Check the one wake tells the failed check, the conflict and octocat's comment but not the host's, and start waiting for the next sweep"
       - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w2b"'
-        intent: "Wait for the sweep after the wake (poll 1 of 4)"
+        intent: "Wait for the sweep after the wake (poll 1 of 5)"
       - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w2b"'
-        intent: "Wait for the sweep after the wake (poll 2 of 4)"
+        intent: "Wait for the sweep after the wake (poll 2 of 5)"
       - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w2b"'
-        intent: "Wait for the sweep after the wake (poll 3 of 4)"
+        intent: "Wait for the sweep after the wake (poll 3 of 5)"
       - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w2b"'
-        intent: "Wait for the sweep after the wake (poll 4 of 4)"
+        intent: "Wait for the sweep after the wake (poll 4 of 5)"
+      - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w2b"'
+        intent: "Wait for the sweep after the wake (poll 5 of 5)"
       - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" end "$AFT_WORK_DIR/agv1-prwatch-w2b"'
         intent: "Check the wait for wait for the sweep after the wake is over"
       - run: |
@@ -236,13 +242,15 @@ tests:
           "$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" begin-wakes "$AFT_WORK_DIR/agv1-prwatch-w3" E2E-AGV1-PRWATCH "$(cat "$AFT_WORK_DIR/agv1PrWatch-gh-Id")" 2
         intent: "Close PR 7 and start waiting for a second wake"
       - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w3"'
-        intent: "Wait for the close wake (poll 1 of 4)"
+        intent: "Wait for the close wake (poll 1 of 5)"
       - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w3"'
-        intent: "Wait for the close wake (poll 2 of 4)"
+        intent: "Wait for the close wake (poll 2 of 5)"
       - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w3"'
-        intent: "Wait for the close wake (poll 3 of 4)"
+        intent: "Wait for the close wake (poll 3 of 5)"
       - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w3"'
-        intent: "Wait for the close wake (poll 4 of 4)"
+        intent: "Wait for the close wake (poll 4 of 5)"
+      - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w3"'
+        intent: "Wait for the close wake (poll 5 of 5)"
       - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" end "$AFT_WORK_DIR/agv1-prwatch-w3"'
         intent: "Check the wait for wait for the close wake is over"
       - run: |
@@ -262,7 +270,7 @@ tests:
         intent: "Check the close wake's text and that the watch is gone"
 
   - name: W4 a merged PR ends the watch quietly (OR8)
-    intent: When a watched PR is merged, the next sweep ends the watch without waking the Lead
+    intent: When a watched PR is merged, a sweep ends the watch without waking the Lead, and no later sweep reads it
     steps:
       - run: |
           set -e
@@ -272,18 +280,21 @@ tests:
           "$call" E2E-AGV1-PRWATCH "$(cat "$AFT_WORK_DIR/agv1PrWatch-gh-Id")" github/watch '{"number":7}' |
             python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["status"] == 200 and r["body"].get("created") is True, r'
           "$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" pr-events E2E-AGV1-PRWATCH "$(cat "$AFT_WORK_DIR/agv1PrWatch-gh-Id")" > "$AFT_WORK_DIR/agv1-prwatch-w4-before"
-          curl -sf -X POST "$AFT_FAKE_GH_BASE/__fixture" -H "Content-Type: application/json" \
-            -d '{"pr": {"state": "closed", "merged": true, "merged_at": "2026-01-02T00:00:00Z"}}' >/dev/null
-          "$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" begin-sweep "$AFT_WORK_DIR/agv1-prwatch-w4"
-        intent: "Watch the reopened PR 7 again, merge it, and start waiting for the next sweep"
+          mark="$(curl -sf -X POST "$AFT_FAKE_GH_BASE/__fixture" -H "Content-Type: application/json" \
+            -d '{"pr": {"state": "closed", "merged": true, "merged_at": "2026-01-02T00:00:00Z"}}' |
+            python3 -c 'import json,sys; print(json.load(sys.stdin)["requests"])')"
+          "$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" begin-gone "$AFT_WORK_DIR/agv1-prwatch-w4" "$mark"
+        intent: "Watch the reopened PR 7 again, merge it, and start waiting until sweeps stop reading it"
       - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w4"'
-        intent: "Wait for a whole sweep after the merge (poll 1 of 4)"
+        intent: "Wait for a sweep of the merged PR and then none (poll 1 of 5)"
       - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w4"'
-        intent: "Wait for a whole sweep after the merge (poll 2 of 4)"
+        intent: "Wait for a sweep of the merged PR and then none (poll 2 of 5)"
       - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w4"'
-        intent: "Wait for a whole sweep after the merge (poll 3 of 4)"
+        intent: "Wait for a sweep of the merged PR and then none (poll 3 of 5)"
       - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w4"'
-        intent: "Wait for a whole sweep after the merge (poll 4 of 4)"
+        intent: "Wait for a sweep of the merged PR and then none (poll 4 of 5)"
+      - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w4"'
+        intent: "Wait for a sweep of the merged PR and then none (poll 5 of 5)"
       - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" end "$AFT_WORK_DIR/agv1-prwatch-w4"'
         intent: "Check the wait for wait for a whole sweep after the merge is over"
       - run: |

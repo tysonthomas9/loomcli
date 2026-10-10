@@ -4,14 +4,21 @@
 The dispatcher sweeps PR watches every two minutes, longer than an AFT run
 step may last (120 s), so a wait is spread over steps through a state file:
 
-  agv1-prwatch-wait.py begin-sweep <state>
-      Wait for the next sweep: one that reads PR 7 after now. It is over once
-      fake-github logged all of its reads, plus 5 s for Loom to decide and send.
+  agv1-prwatch-wait.py begin-sweep <state> [<mark>]
+      Wait until a whole sweep that read PR 7 after now (or after request
+      <mark> of fake-github's log, which /__fixture returns) is over: fake-github
+      logged all of its reads, and then all of the next sweep's. Sweeps run
+      one after another, so that proves the first one also decided and sent
+      whatever it would, and a fixture patched now waits for a later sweep.
+  agv1-prwatch-wait.py begin-gone <state> [<mark>]
+      Wait for a whole sweep after now (or <mark>), then 150 s, more than a
+      sweep interval, in which no sweep reads PR 7: its watch is gone, and
+      the last sweep that read it is over.
   agv1-prwatch-wait.py begin-wakes <state> <ws> <agent_id> <n>
       Wait until the agent was handed at least n PR-watch wakes.
   agv1-prwatch-wait.py poll <state>
       Poll for up to 90 s; a no-op once done. Fails only past the wait's
-      300 s deadline.
+      420 s deadline.
   agv1-prwatch-wait.py end <state>
       Fail unless the wait is done.
   agv1-prwatch-wait.py wakes <ws> <agent_id>
@@ -31,7 +38,8 @@ PR = "/repos/loom-e2e/agv1-prwatch/pulls/7"
 SWEEP_READS = ("/check-runs", "/status", "/issues/7/comments", "/pulls/7/reviews", "/pulls/7/comments")
 SETTLE_S = 5  # after a sweep's last read, for its in-process decide and send
 SENDER = "loom:pr-watch"
-DEADLINE_S, POLL_S = 300, 90
+QUIET_S = 150  # longer than the dispatcher's two-minute sweep interval
+DEADLINE_S, POLL_S = 420, 90
 
 
 def get(url):
@@ -75,19 +83,31 @@ def wakes(ws, agent):
     return out
 
 
+def sweep_end(paths):
+    """The index just past the reads of the first whole sweep in paths, or None."""
+    if PR not in paths:
+        return None
+    first = paths.index(PR)
+    hits = [next((i for i, p in enumerate(paths) if i > first and p.endswith(r)), None) for r in SWEEP_READS]
+    return None if None in hits else max(hits) + 1
+
+
 def done(st):
     """Whether st's wait is over, updating st; each call is one quick probe."""
     if st["kind"] == "wakes":
         return len(wakes(st["ws"], st["agent"])) >= st["n"]
+    paths = [r["url"].split("?")[0] for r in requests()[st["mark"]:]]
     if "complete_at" not in st:
-        paths = [r["url"].split("?")[0] for r in requests()[st["mark"]:]]
-        if PR not in paths:
+        end = sweep_end(paths)
+        if end is None:
             return False
-        after = paths[paths.index(PR) + 1:]
-        if not all(any(p.endswith(read) for p in after) for read in SWEEP_READS):
-            return False
-        st["complete_at"] = time.time()
-    return time.time() >= st["complete_at"] + SETTLE_S
+        st["complete_at"], st["reads"] = time.time(), st["mark"] + end
+    later = paths[st["reads"] - st["mark"]:]
+    if st["kind"] == "sweep":  # the next sweep read everything too
+        return sweep_end(later) is not None
+    if PR in later:  # gone: a later sweep still read the PR
+        sys.exit("a sweep read PR 7 again, so its watch is not gone")
+    return time.time() >= st["complete_at"] + QUIET_S
 
 
 def save(path, st):
@@ -96,8 +116,9 @@ def save(path, st):
 
 
 cmd, args = sys.argv[1], sys.argv[2:]
-if cmd == "begin-sweep":
-    save(args[0], {"kind": "sweep", "mark": len(requests()), "deadline": time.time() + DEADLINE_S, "done": False})
+if cmd in ("begin-sweep", "begin-gone"):
+    mark = int(args[1]) if len(args) > 1 else len(requests())
+    save(args[0], {"kind": cmd[6:], "mark": mark, "deadline": time.time() + DEADLINE_S, "done": False})
 elif cmd == "begin-wakes":
     save(args[0], {"kind": "wakes", "ws": args[1], "agent": args[2], "n": int(args[3]),
                    "deadline": time.time() + DEADLINE_S, "done": False})
@@ -108,6 +129,8 @@ elif cmd == "poll":
         if time.time() > st["deadline"]:
             sys.exit(f"{st['kind']} wait timed out after {DEADLINE_S}s")
         st["done"] = done(st)
+        if st["done"] and time.time() > st["deadline"]:
+            sys.exit(f"{st['kind']} wait timed out after {DEADLINE_S}s")
         save(args[0], st)
         if st["done"] or time.time() > stop:
             break

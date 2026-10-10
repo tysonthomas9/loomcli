@@ -90,7 +90,8 @@ const server = createServer(async (req, res) => {
     if (patch.files) files = patch.files;
     for (const k of Object.keys(lists)) if (patch[k]) lists[k] = patch[k];
     forced = patch.force || null;
-    return send(res, 200, { ok: true, pr, files: files.length });
+    // requests: the log length at the patch, so a test can wait for reads after it.
+    return send(res, 200, { ok: true, pr, files: files.length, requests: requests.length });
   }
 
   record(req, bodyText);
