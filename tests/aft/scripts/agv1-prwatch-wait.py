@@ -36,7 +36,6 @@ PR = "/repos/loom-e2e/agv1-prwatch/pulls/7"
 # Every read one PR-watch sweep makes of PR 7 (internal/prwatch Observe),
 # after the PR itself; the host viewer is cached, so /user is not one.
 SWEEP_READS = ("/check-runs", "/status", "/issues/7/comments", "/pulls/7/reviews", "/pulls/7/comments")
-SETTLE_S = 5  # after a sweep's last read, for its in-process decide and send
 SENDER = "loom:pr-watch"
 QUIET_S = 150  # longer than the dispatcher's two-minute sweep interval
 DEADLINE_S, POLL_S = 420, 90
