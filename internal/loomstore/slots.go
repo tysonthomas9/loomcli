@@ -136,11 +136,7 @@ func sendTx(ctx context.Context, tx *sql.Tx, in SlotSend) (r Receipt, saved []Ev
 		if err != nil {
 			return err
 		}
-		q := `DELETE FROM agent_limit_resumes WHERE agent_id = ?`
-		if in.LimitResume {
-			q = `UPDATE agent_limit_resumes SET due_at = '' WHERE agent_id = ?`
-		}
-		if _, err = tx.ExecContext(ctx, q, in.AgentID); err != nil {
+		if err = sendLimitResume(ctx, tx, in); err != nil {
 			return err
 		}
 		saved, err = sendEvents(ctx, tx, in, rev)

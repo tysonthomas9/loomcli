@@ -81,3 +81,14 @@ func (s *Store) DueLimitResumes(ctx context.Context, workspace string, now time.
 	}
 	return out, rows.Err()
 }
+
+// sendLimitResume is a Send's change to its agent's resume owed, in tx: a
+// resume marks it sent, keeping its attempt count; any other Send drops it.
+func sendLimitResume(ctx context.Context, tx *sql.Tx, in SlotSend) error {
+	q := `DELETE FROM agent_limit_resumes WHERE agent_id = ?`
+	if in.LimitResume {
+		q = `UPDATE agent_limit_resumes SET due_at = '' WHERE agent_id = ?`
+	}
+	_, err := tx.ExecContext(ctx, q, in.AgentID)
+	return err
+}

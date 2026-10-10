@@ -224,6 +224,29 @@ func TestUsageLimitArchiveRace(t *testing.T) {
 	}
 }
 
+// TestUsageLimitWaitsForOtherTurn (OR7): while another input's turn runs
+// (a child's record, which is not a Send), a due resume waits and stays
+// owed: that turn's end decides.
+func TestUsageLimitWaitsForOtherTurn(t *testing.T) {
+	l := newLimitEnv(t, "opencode", true)
+	l.fh.Script(l.a.AgentID, limitFail, fake.Turn{Steps: []fake.Step{{Ask: "hold"}}})
+	l.userTurn("u1")
+	ctx := context.Background()
+	if _, err := l.s.store.Notify(ctx, l.a.AgentID, "agent:kid", "system", []loomstore.Notice{{Key: "rec1", Text: "kid done"}},
+		func(string, bool) (string, error) { return "{}", nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.s.dispatchWake(ctx, l.a.AgentID); err != nil {
+		t.Fatal(err)
+	}
+	drained(t, l.s, "the record's turn runs", func() bool { return l.s.get(t, l.a.AgentID).RunningTurnID != nil })
+	l.advance(time.Hour)
+	l.wantResumes("while another turn runs", 0)
+	if r := l.owed(); r == nil || r.DueAt == "" {
+		t.Fatalf("owed while another turn runs = %+v; want still owed", r)
+	}
+}
+
 // TestUsageLimitOptInOff (OR7): with the workspace not opted in, a limit
 // owes nothing and nothing is resumed.
 func TestUsageLimitOptInOff(t *testing.T) {
