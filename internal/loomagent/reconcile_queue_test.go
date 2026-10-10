@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -884,5 +885,54 @@ func TestCascadeChildFailureQueued(t *testing.T) {
 	settled(t, s)
 	if row, _ := e.st.GetAgent(ctx, child.AgentID); row.DeletedAt == nil {
 		t.Fatal("the child's retry did not delete it")
+	}
+}
+
+// TestReconcileCreateHungOpen (HANG1): the harness takes the session Open
+// and never answers, as a frozen OpenCode did. The Create gives up within
+// openWait and shows create_retrying, rather than sitting in creating with
+// no Attention; reconcile finishes it once the harness answers, with one
+// session and the first message handed over once. Same on every harness.
+func TestReconcileCreateHungOpen(t *testing.T) {
+	defer func(d time.Duration) { openWait = d }(openWait)
+	openWait = 50 * time.Millisecond
+	for _, harness := range []string{"opencode", "codex", "claude"} {
+		t.Run(harness, func(t *testing.T) {
+			e := newCreateEnv(t)
+			e.name = harness
+			s := e.service(ServiceConfig{})
+			c := useTestClock(s)
+			runDispatcher(t, s)
+			settled(t, s)
+			ctx, cancel := context.WithCancel(context.Background()) // ends a Create still hung at the test's end
+			t.Cleanup(cancel)
+			e.h.hang.Store(true)
+			req := leadReq("r1")
+			req.Overrides.Harness, req.FirstMessage = harness, "hello"
+			done := make(chan error, 1)
+			go func() { _, err := s.Create(ctx, req); done <- err }()
+			select {
+			case err := <-done:
+				if err == nil || !strings.Contains(err.Error(), "did not open") {
+					t.Fatalf("Create = %v; want the hung Open given up", err)
+				}
+			case <-time.After(drainGuard):
+				t.Fatal("Create still hung in the harness Open")
+			}
+			retrying(t, onlyRow(t, e), "hung open")
+			if r := deref(onlyRow(t, e).AttentionReason); r != AttentionCreateRetrying {
+				t.Fatalf("Attention = %q; want %s", r, AttentionCreateRetrying)
+			}
+			e.h.hang.Store(false)
+			if c.fire() != 1 {
+				t.Fatal("the hung Create was not queued for reconcile")
+			}
+			settled(t, s)
+			a := finished(t, e, onlyRow(t, e).AgentID)
+			handedOnce(t, e, a.AgentID)
+			if n := len(e.h.specs); n != 2 || e.h.specs[0].Key != e.h.specs[1].Key {
+				t.Fatalf("opens = %d; want the hung one and one retry, same key", n)
+			}
+		})
 	}
 }

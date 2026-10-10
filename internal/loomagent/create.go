@@ -551,16 +551,35 @@ func (s *Service) openSession(ctx context.Context, a loomstore.Agent, cfg Config
 	if err != nil {
 		return loomharness.NativeRef{}, err
 	}
-	ref, err := h.Open(ctx, loomharness.OpenSpec{Key: a.AgentID, Launch: launch, Preset: cfg.Open,
+	hctx, cancel := context.WithTimeoutCause(ctx, openWait,
+		fmt.Errorf("loomagent: %s did not open the session within %s", a.Harness, openWait))
+	defer cancel()
+	ref, err := h.Open(hctx, loomharness.OpenSpec{Key: a.AgentID, Launch: launch, Preset: cfg.Open,
 		Dir: deref(a.WorktreePath), Model: cfg.Model, Rules: rules, Metadata: map[string]string{"agent_id": a.AgentID}})
 	if err != nil {
-		return loomharness.NativeRef{}, s.leftover(ctx, a.AgentID, a.Harness, ref, openErr(err))
+		return loomharness.NativeRef{}, s.leftover(ctx, a.AgentID, a.Harness, ref, openErr(timedOut(hctx, err)))
 	}
 	createCrash("recorded")
 	if err := s.owned(ctx, a.AgentID, a.Harness, ref); err != nil {
 		return ref, err
 	}
-	return ref, s.reapply(ctx, a.Harness, ref, cfg, true)
+	return ref, s.reapply(hctx, a.Harness, ref, cfg, true)
+}
+
+// openWait bounds the harness calls that open a Create's session (HANG1): a
+// harness that takes the call and never answers, as a frozen OpenCode does,
+// would otherwise leave the agent creating with no Attention and its lock
+// held. The failure is retried (create_retrying), and Open is idempotent by
+// key, so the retry gets the same session. It is above the harnesses' own
+// server start bound (a minute), so a cold start is not cut short.
+var openWait = 90 * time.Second
+
+// timedOut adds why ctx ended, when openWait ran out, to the harness's error.
+func timedOut(ctx context.Context, err error) error {
+	if cause := context.Cause(ctx); cause != nil && cause != ctx.Err() {
+		return fmt.Errorf("%w: %w", cause, err)
+	}
+	return err
 }
 
 // openErr is harnessErr for a harness call that sets up a session; a bad
