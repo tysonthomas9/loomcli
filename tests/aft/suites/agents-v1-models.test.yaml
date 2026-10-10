@@ -1,0 +1,291 @@
+# Agent API model choice (MCS1 unknown models, MCS3 custom models, SM1 a
+# model PATCH applies on the next turn) on an OpenCode lead. EMU-first: the
+# emulator (LOOM_HARNESS_EMU=1) keeps each session's model in emu-state.json
+# beside $AFT_OPENCODE_SERVICE, which is what an SM1 turn is checked against;
+# on real OpenCode the fake model's request names the model instead, and an
+# unlisted model's turn fails readably rather than running.
+suite: agents-v1-models
+classification: { area: agents, feature: agent-api-models, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: |
+  set -e
+  curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-MODELS" >/dev/null || true
+  repo="$AFT_WORK_DIR/agv1-models-repo"
+  mkdir -p "$repo"
+  git -C "$repo" init -q -b main
+  echo "agents-v1 models ${RUN_ID:-local}" > "$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" -c user.email=e2e@x -c user.name=e2e commit -q -m init
+  printf '{"name":"e2e-agv1-models","type":"empty","repos":["%s"]}' "$repo" |
+    curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @- >/dev/null
+  # models.py <command> ...: the suite's Agent API actor and readbacks.
+  #   lead <name> <saved var> [model]  create an OpenCode lead; its id goes to $AFT_WORK_DIR/<saved var>
+  #   listed                           save the catalog's default model id and name to $AFT_WORK_DIR/models-listed{,-name}
+  #   turn <reply>                     script the next turn's reply on the fake model
+  #   patch <id> <model> <0|1>         PATCH the model; 200 with that model and model_unverified as given
+  #   warned <id> <count> [model]      exactly <count> model.unverified events, the last naming model
+  #   settled <id> <prompt> <stop>     the turn that delivered prompt has ended once as <stop> (completed or failed)
+  #   used <id> <prompt> <model>       the turn that sent prompt reached the model, run on <model>
+  #   custom <present|absent> <model>  GET custom and the catalog list (or not) model with source=custom
+  cat > "$AFT_WORK_DIR/models.py" <<'PY'
+  import json, os, sys, time, urllib.error, urllib.request
+  base = os.environ["AFT_BASE_URL"] + "/api/workspaces/E2E-AGV1-MODELS/v1"
+  work, fake = os.environ["AFT_WORK_DIR"], os.environ["AFT_FAKE_MODEL_URL"]
+  emu = bool(os.environ.get("AFT_EMU_SCENARIOS"))
+
+  def call(method, url, body=None, key=None):
+      req = urllib.request.Request(url, method=method, data=None if body is None else json.dumps(body).encode(),
+                                   headers={"Content-Type": "application/json", **({"Idempotency-Key": key} if key else {})})
+      try:
+          with urllib.request.urlopen(req) as r:
+              return r.status, json.loads(r.read() or b"null")
+      except urllib.error.HTTPError as e:
+          return e.code, e.read().decode()
+
+  def get(path):
+      code, body = call("GET", base + path)
+      assert code == 200, (path, code, body)
+      return body
+
+  def warnings(agent):
+      return [e for e in get(f"/agents/{agent}/events?limit=500")["events"] if e["kind"] == "model.unverified"]
+
+  def session_model(agent):
+      wt = os.path.realpath(get(f"/agents/{agent}")["worktree_path"])
+      state = json.load(open(os.path.join(os.path.dirname(os.environ["AFT_OPENCODE_SERVICE"]), "emu-state.json")))
+      roots = [s["info"] for s in state["sessions"].values() if not s["info"].get("parentID") and
+               os.path.realpath((s["info"].get("location") or {}).get("directory", "")) == wt]
+      assert len(roots) == 1, f"want one emulator session in {wt}, got {roots}"
+      m = roots[0].get("model") or {}
+      return f'{m.get("providerID")}/{m.get("id")}'
+
+  cmd, args = sys.argv[1], sys.argv[2:]
+  if cmd == "lead":
+      body = {"preset": "lead", "name": args[0], "repo": work + "/agv1-models-repo", "base_ref": "main",
+              "overrides": {"harness": "opencode", **({"model": args[2]} if len(args) > 2 else {})}}
+      code, out = call("POST", base + "/agents", body, args[0])
+      assert code == 201, (code, out)
+      open(f"{work}/{args[1]}", "w").write(out["agent_id"])
+      print(json.dumps({k: out[k] for k in ("agent_id", "model", "model_unverified")}))
+  elif cmd == "listed":
+      ms = [m for p in get("/harnesses/opencode/models")["providers"] for m in p["models"] if m["source"] == "harness"]
+      d = next(m for m in ms if m["is_default"]) if any(m["is_default"] for m in ms) else ms[0]
+      open(f"{work}/models-listed", "w").write(d["id"])
+      open(f"{work}/models-listed-name", "w").write(d["name"])
+      print("listed model:", d["id"])
+  elif cmd == "turn":
+      urllib.request.urlopen(urllib.request.Request(fake + "/__reset", method="POST")).read()
+      urllib.request.urlopen(urllib.request.Request(fake + "/__script", data=json.dumps({"steps": [{"text": args[0]}]}).encode(),
+                                                    headers={"Content-Type": "application/json"})).read()
+  elif cmd == "patch":
+      agent, model, unverified = args[0], args[1], args[2] == "1"
+      code, out = call("PATCH", f"{base}/agents/{agent}", {"model": model}, f"agv1-models-{agent}-{model}")
+      assert code == 200, (code, out)
+      assert out["model"] == model and out["model_unverified"] is unverified, out
+      assert get(f"/agents/{agent}")["model_unverified"] is unverified, "the saved agent lost model_unverified"
+      print("patched:", model, "model_unverified:", unverified)
+  elif cmd == "warned":
+      ws = warnings(args[0])
+      assert len(ws) == int(args[1]), [w["payload"] for w in ws]
+      if len(args) > 2:
+          p = ws[-1]["payload"]
+          assert p["model"] == args[2] and p["harness"] == "opencode" and args[2] in p["message"], p
+      print("model.unverified events:", [w["payload"] for w in ws])
+  elif cmd == "settled":
+      agent, prompt, stop = args
+      for _ in range(60):
+          rows = get(f"/agents/{agent}/events?limit=500")["events"]
+          sent = [e for e in rows if e["kind"] == "message.delivered" and prompt in e["payload"].get("text", "")]
+          ends = [e for e in rows if sent and e["kind"] == "agent.turn_completed" and
+                  e["turn_id"] == sent[0]["turn_id"] and e["seq"] > sent[0]["seq"]]
+          if ends and get(f"/agents/{agent}")["running_turn_id"] is None:
+              break
+          time.sleep(1)
+      else:
+          sys.exit(f"turn {prompt!r} did not end with the agent idle in 60s: delivered {sent}, ends {ends}")
+      assert len(sent) == 1 and sent[0]["turn_id"], f"{prompt!r} was not delivered to one turn: {sent}"
+      assert len(ends) == 1 and ends[0]["payload"].get("stopReason") == stop, f"turn did not end once as {stop}: {ends}"
+      if stop == "failed":
+          assert "Model unavailable" in ends[0]["payload"].get("error", ""), ends[0]["payload"]
+      print("turn", prompt, "ended", stop)
+  elif cmd == "used":
+      agent, prompt, model = args
+      reqs = [r for r in json.loads(urllib.request.urlopen(fake + "/__requests").read())["requests"] if prompt in json.dumps(r)]
+      assert reqs, f"{prompt!r} never reached the model"
+      got = session_model(agent) if emu else f'{model.split("/", 1)[0]}/{reqs[-1]["model"]}'
+      assert got == model, f"the turn ran on {got}, want {model}"
+      print("turn", prompt, "ran on", got)
+  elif cmd == "custom":
+      want, model = args[0] == "present", args[1]
+      ids = get("/harnesses/opencode/custom")["models"]
+      rows = [m for p in get("/harnesses/opencode/models")["providers"] for m in p["models"] if m["id"] == model]
+      if want:
+          assert ids == [model], ids
+          assert len(rows) == 1 and rows[0]["source"] == "custom", rows
+      else:
+          assert model not in ids and not rows, (ids, rows)
+      print("custom", args[0], ids, rows)
+  else:
+      sys.exit("unknown command " + cmd)
+  PY
+teardown: |
+  set +e
+  curl -s -X PUT "$AFT_BASE_URL/api/workspaces/E2E-AGV1-MODELS/v1/harnesses/opencode/custom" \
+    -H "Content-Type: application/json" -H "Idempotency-Key: agv1-models-clear-${RUN_ID:-local}" -d '{"models":[]}' >/dev/null
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-MODELS" >/dev/null
+
+tests:
+  # covers: MCS1 an unlisted model passes through with model_unverified and a warning; SM1 each PATCH is used by the next turn
+  - name: MCS1 SM1 an unlisted model PATCH is saved unverified with a warning and runs next, and a PATCH back to a listed model is used by the turn after
+    intent: An API actor switches an OpenCode lead to a well formed model the catalog does not list and back; the operator sees the model marked Unavailable and then not, and each next turn runs on the model just set
+    steps:
+      - run: |
+          set -e
+          m() { python3 "$AFT_WORK_DIR/models.py" "$@"; }
+          m listed
+          m lead "agv1-models-sm1-${RUN_ID:-local}" modelsSm1Id
+          m turn AGV1-MODELS-ONE
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-MODELS/chat/$(cat "$AFT_WORK_DIR/modelsSm1Id")"
+        intent: "API actor: read the catalog's listed default model, create an OpenCode lead and script its first reply; open the lead's chat"
+      - wait:
+          fn: >-
+            (() => { const m = document.querySelector('[data-chat-provider-model-picker]');
+              return document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode' &&
+                !!m && !m.disabled && !(m.textContent || '').includes('Unavailable'); })()
+        intent: "Wait until the chat shows the lead's listed model with no Unavailable mark"
+      - fill: { label: Message, value: "models first" }
+      - press: Enter
+      - wait:
+          fn: "(document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-MODELS-ONE')"
+        budget: 90000
+        intent: "Wait until the first reply streams in"
+      - run: |
+          set -e
+          m() { python3 "$AFT_WORK_DIR/models.py" "$@"; }
+          id="$(cat "$AFT_WORK_DIR/modelsSm1Id")"; listed="$(cat "$AFT_WORK_DIR/models-listed")"
+          m settled "$id" "models first" completed
+          m warned "$id" 0
+          m patch "$id" "${listed%%/*}/agv1-unlisted-${RUN_ID:-local}" 1
+          m warned "$id" 1 "${listed%%/*}/agv1-unlisted-${RUN_ID:-local}"
+          m turn AGV1-MODELS-TWO
+        intent: "Once the first turn has ended, API actor: PATCH a well formed model the catalog does not list; it answers 200 with model_unverified, and one model.unverified event names it; script the next reply"
+      - reload: true
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-chat-provider-model-picker]')?.textContent || '';
+              return t.includes('agv1-unlisted-${RUN_ID:-local}') && t.includes('Unavailable'); })()
+        intent: "Wait until the chat shows the unlisted model marked Unavailable"
+      - fill: { label: Message, value: "models second" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-MODELS-TWO') ||
+            ('${AFT_EMU_SCENARIOS:-}' === '' && (document.querySelector('[data-testid=turn-end-error]')?.textContent || '').includes('Model unavailable'))
+        budget: 90000
+        intent: "Wait until the turn on the unlisted model ends: the emulator runs it, real OpenCode refuses it readably"
+      - run: |
+          set -e
+          m() { python3 "$AFT_WORK_DIR/models.py" "$@"; }
+          id="$(cat "$AFT_WORK_DIR/modelsSm1Id")"; listed="$(cat "$AFT_WORK_DIR/models-listed")"
+          if [ -z "${AFT_EMU_SCENARIOS:-}" ]; then
+            m settled "$id" "models second" failed
+            exit 0
+          fi
+          m settled "$id" "models second" completed
+          m used "$id" "models second" "${listed%%/*}/agv1-unlisted-${RUN_ID:-local}"
+        intent: "Check the turn after the PATCH ended: on the emulator it ran on the unlisted model, passed through to the harness; real OpenCode failed that turn with Model unavailable"
+      - run: |
+          set -e
+          m() { python3 "$AFT_WORK_DIR/models.py" "$@"; }
+          id="$(cat "$AFT_WORK_DIR/modelsSm1Id")"; listed="$(cat "$AFT_WORK_DIR/models-listed")"
+          m patch "$id" "$listed" 0
+          m warned "$id" 1
+          m turn AGV1-MODELS-THREE
+        intent: "API actor: PATCH back to the listed model; it answers 200 without model_unverified and adds no warning; script the next reply"
+      - reload: true
+      - wait:
+          fn: >-
+            (() => { const m = document.querySelector('[data-chat-provider-model-picker]');
+              const t = m?.textContent || '';
+              return !!m && !m.disabled && !t.includes('Unavailable') && !t.includes('agv1-unlisted'); })()
+        intent: "Wait until the chat shows the listed model again with no Unavailable mark"
+      - run: |
+          set -e
+          name="$(cat "$AFT_WORK_DIR/models-listed-name")"
+          label="$(agent-browser --session "$AFT_SESSION" eval "document.querySelector('[data-chat-provider-model-picker]')?.getAttribute('aria-label') || ''")"
+          echo "picker: $label"
+          [ "$label" = "\"Model: $name\"" ] || [ "$label" = "Model: $name" ] || { echo "the picker does not show the listed model $name" >&2; exit 1; }
+        intent: "Check the picker names the listed catalog model, not just any model"
+      - fill: { label: Message, value: "models third" }
+      - press: Enter
+      - wait:
+          fn: "(document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-MODELS-THREE')"
+        budget: 90000
+        intent: "Wait until the third reply streams in"
+      - run: |
+          set -e
+          m() { python3 "$AFT_WORK_DIR/models.py" "$@"; }
+          id="$(cat "$AFT_WORK_DIR/modelsSm1Id")"
+          m settled "$id" "models third" completed
+          m used "$id" "models third" "$(cat "$AFT_WORK_DIR/models-listed")"
+        intent: "Check the turn after the PATCH back ran on the listed model (SM1)"
+
+  # covers: MCS3 a custom model is added in the picker's Custom section, creates without a warning, and is removed there
+  - name: MCS3 a custom model added in the picker is listed as custom, an agent created with it has no warning, and removing it takes it off the list
+    intent: An operator adds a custom model id in the chat's model picker and later removes it; in between an API actor creates a lead on that id, which is saved without model_unverified or a warning and shows no Unavailable mark
+    steps:
+      - run: |
+          set -e
+          python3 "$AFT_WORK_DIR/models.py" lead "agv1-models-pick-${RUN_ID:-local}" modelsPickId
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-MODELS/chat/$(cat "$AFT_WORK_DIR/modelsPickId")"
+        intent: "Create an OpenCode lead for the operator and open its chat"
+      - wait:
+          fn: >-
+            (() => { const m = document.querySelector('[data-chat-provider-model-picker]'); return !!m && !m.disabled; })()
+        intent: "Wait until the model picker is ready"
+      - click: { selector: "[data-chat-provider-model-picker]" }
+      - click: { selector: '[data-model-picker-provider="provider:custom"]' }
+        intent: "Open the picker's Custom section"
+      - fill: { label: Custom model id, value: "aftcustom/agv1-custom-${RUN_ID:-local}" }
+      - click: { role: button, name: Add, exact: true }
+        intent: "Add the custom model id through the picker"
+      - wait:
+          fn: "!!document.querySelector('li[role=option][title=\"aftcustom/agv1-custom-${RUN_ID:-local}\"]')"
+        intent: "Wait until the custom model shows as a row in the Custom section"
+      - press: Escape
+      - run: |
+          set -e
+          m() { python3 "$AFT_WORK_DIR/models.py" "$@"; }
+          model="aftcustom/agv1-custom-${RUN_ID:-local}"
+          m custom present "$model"
+          out="$(m lead "agv1-models-custom-${RUN_ID:-local}" modelsCustomId "$model")"
+          echo "$out"
+          python3 -c 'import json,sys; o=json.loads(sys.argv[1]); assert o["model"]==sys.argv[2] and o["model_unverified"] is False, o' "$out" "$model"
+          m warned "$(cat "$AFT_WORK_DIR/modelsCustomId")" 0
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-MODELS/chat/$(cat "$AFT_WORK_DIR/modelsCustomId")"
+        intent: "Check the id is saved and listed with source=custom; then the API actor creates a lead on it, saved without model_unverified or a model.unverified event; open that lead's chat"
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-chat-provider-model-picker]')?.textContent || '';
+              return t.includes('agv1-custom-${RUN_ID:-local}') && !t.includes('Unavailable'); })()
+        intent: "Wait until the custom-model lead's chat shows its model with no Unavailable mark"
+      - run: |
+          set -e
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-MODELS/chat/$(cat "$AFT_WORK_DIR/modelsPickId")"
+        intent: "Return to the operator's lead"
+      - wait:
+          fn: >-
+            (() => { const m = document.querySelector('[data-chat-provider-model-picker]'); return !!m && !m.disabled; })()
+        intent: "Wait until the operator's model picker is ready again"
+      - click: { selector: "[data-chat-provider-model-picker]" }
+      - click: { selector: '[data-model-picker-provider="provider:custom"]' }
+      - click: { role: button, name: "Remove custom model aftcustom/agv1-custom-${RUN_ID:-local}" }
+        intent: "Remove the custom model id through the picker"
+      - wait:
+          fn: "!document.querySelector('li[role=option][title=\"aftcustom/agv1-custom-${RUN_ID:-local}\"]')"
+        intent: "Wait until the custom row is gone"
+      - run: |
+          set -e
+          python3 "$AFT_WORK_DIR/models.py" custom absent "aftcustom/agv1-custom-${RUN_ID:-local}"
+        intent: "Check GET custom and the catalog no longer list the removed id"
