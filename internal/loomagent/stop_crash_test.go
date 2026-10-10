@@ -149,8 +149,11 @@ func TestSettleFinishesStoppingCancelled(t *testing.T) {
 			if err := s.reconcileAgent(context.Background(), "a1"); err != nil {
 				t.Fatal(err)
 			}
-			row := s.get(t, "a1")
-			if row.State != StateArchived || deref(row.ArchiveReason) != ArchiveCancelled || (interrupts == 1) != c.running ||
+			row, want := s.get(t, "a1"), 0
+			if c.running {
+				want = 1
+			}
+			if row.State != StateArchived || deref(row.ArchiveReason) != ArchiveCancelled || interrupts != want ||
 				(c.mode == "single_task") != (deref(row.Outcome) == ArchiveCancelled) {
 				t.Fatalf("%s, reason %q, outcome %q, %d interrupts; want archived as cancelled",
 					row.State, deref(row.ArchiveReason), deref(row.Outcome), interrupts)
