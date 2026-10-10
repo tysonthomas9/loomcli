@@ -35,3 +35,25 @@ func TestStartedFromBlockerLeadOrTrunk(t *testing.T) {
 	}
 	check("B", "blocker", "A")
 }
+
+// A task's "Started from" is the start recorded when its attempt began, so it
+// does not change when the lead later gains a working area.
+func TestStartedFromKeepsTheRecordedStart(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	local := &Local{store: s}
+	kind, blocker, err := s.DeriveTaskStart(ctx, "W", "T", "L")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordTaskStart(ctx, "W", "T", kind, blocker); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveWorkingAreas(ctx, []journal.WorkingArea{{Workspace: "W", Lead: "L", Repo: "repo",
+		Path: t.TempDir(), Branch: "loom/lead", BaseSHA: "abc", Mode: "worktree"}}); err != nil {
+		t.Fatal(err)
+	}
+	if kind, _, err := local.StartedFrom(ctx, "W", "T", "L"); err != nil || kind != "trunk" {
+		t.Fatalf("recorded trunk start drifted to %q (%v)", kind, err)
+	}
+}

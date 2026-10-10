@@ -53,8 +53,18 @@ vi.mock("../OpenInEditor", () => ({
 
 // Mock ChangesTab to avoid its hook dependencies (useDiff, started-from)
 vi.mock("./ChangesTab", () => ({
-  ChangesTab: ({ agent }: { agent: { name: string } }) => (
-    <div data-testid="changes-tab-mock" data-agent={agent.name} />
+  ChangesTab: ({
+    agent,
+    onOpenTaskChanges,
+  }: {
+    agent: { name: string };
+    onOpenTaskChanges?: (task: { id: string }) => void;
+  }) => (
+    <div data-testid="changes-tab-mock" data-agent={agent.name}>
+      <button onClick={() => onOpenTaskChanges?.({ id: "T-7" })}>
+        open task changes
+      </button>
+    </div>
   ),
 }));
 
@@ -94,6 +104,7 @@ function makeAgent(overrides: Partial<LoomAgentStatus> = {}): LoomAgentStatus {
 function renderPanel(
   agentOverrides: Partial<LoomAgentStatus> = {},
   agentTasks: Record<string, LoomTaskInfo> = {},
+  onTaskClick?: (taskId: string, tab?: "changes") => void,
 ) {
   const agent = makeAgent(agentOverrides);
   return render(
@@ -103,6 +114,7 @@ function renderPanel(
       agents={[agent]}
       agentTasks={agentTasks}
       onClose={vi.fn()}
+      {...(onTaskClick && { onTaskClick })}
     />,
   );
 }
@@ -203,6 +215,16 @@ describe("AgentDetailPanel", () => {
         "agent-panel-tab-changes",
       );
     });
+  });
+
+  it("opens a finished task on its Changes tab from the Changes link", async () => {
+    const onTaskClick = vi.fn();
+    renderPanel({ name: "nova" }, {}, onTaskClick);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Changes" }));
+    fireEvent.click(await screen.findByText("open task changes"));
+
+    expect(onTaskClick).toHaveBeenCalledWith("T-7", "changes");
   });
 
   describe("Files tab in tab bar", () => {

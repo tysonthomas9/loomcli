@@ -37,23 +37,17 @@ func (l *Local) TaskForChange(ctx context.Context, workspace, change string) (st
 	return l.store.TaskForChange(ctx, workspace, change)
 }
 
-// StartedFrom says where a task's attempt starts (P2.24): from its blocker
+// StartedFrom says where a task's attempt started (P2.24): from its blocker
 // task's revision ("blocker", with that task), from lead's working area
-// ("lead"), or from trunk ("trunk") when lead has none.
+// ("lead"), or from trunk ("trunk"). It reads the start recorded when the
+// attempt began; tasks started before that record existed fall back to the
+// current derivation.
 func (l *Local) StartedFrom(ctx context.Context, workspace, task, lead string) (string, string, error) {
-	predecessor, err := l.store.TaskPredecessor(ctx, workspace, task)
-	if err != nil {
-		return "", "", err
+	kind, blocker, err := l.store.TaskStart(ctx, workspace, task)
+	if err != nil || kind != "" {
+		return kind, blocker, err
 	}
-	if predecessor != "" {
-		blocker, err := l.store.TaskForChange(ctx, workspace, predecessor)
-		return "blocker", blocker, err
-	}
-	areas, err := l.store.WorkingAreas(ctx, workspace, lead)
-	if err != nil || len(areas) == 0 {
-		return "trunk", "", err
-	}
-	return "lead", "", nil
+	return l.store.DeriveTaskStart(ctx, workspace, task, lead)
 }
 
 // TaskWorkspaces lists the workspaces whose tasks have changes.

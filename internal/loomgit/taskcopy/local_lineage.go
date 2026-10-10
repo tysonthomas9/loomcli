@@ -114,6 +114,23 @@ func RecordLineageBase(ctx context.Context, workspace, task, repo string, base L
 	})
 }
 
+// RecordTaskStart records where a task's attempt starts, at the moment it
+// starts (P2.24 "Started from"): the blocker pinned in local lineage, else
+// lead's working area when lead has one, else trunk. lead is "" when the
+// attempt was not started from a lead.
+func RecordTaskStart(ctx context.Context, workspace, task, lead string) error {
+	st, err := open()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = st.Close() }()
+	kind, blocker, err := st.DeriveTaskStart(ctx, workspace, task, lead)
+	if err != nil {
+		return err
+	}
+	return st.RecordTaskStart(ctx, workspace, task, kind, blocker)
+}
+
 // ReadLineageStatus computes current status without moving the dependent's base.
 func ReadLineageStatus(ctx context.Context, workspace, task, repo string) (LineageStatus, error) {
 	st, err := open()

@@ -29,37 +29,43 @@ wait_status() {
 task="$(cat "$work-$slot-task" 2>/dev/null || true)"
 
 case "$phase" in
-running)
-  # running <ws> <slot> <blocker|lead|trunk>: the coder claims a new task and
-  # commits its file; while it still works, its committed file is in the
-  # agent's diff and the task reports where it started.
+claimed)
+  # claimed <ws> <slot> <blocker|lead|trunk>: the coder claims a new task;
+  # while it works, the task reports where its attempt started.
   task="$(curl -fsS -X POST "$api/issues" -H 'Content-Type: application/json' \
     -d "{\"title\":\"changes tab $slot\",\"issue_type\":\"task\",\"priority\":0,\"source_repo\":\"$repo_name\",\"design\":\"Approved design: append a short result to $output_file, commit it, then close the task.\"}" | id_of)"
   printf '%s\n' "$task" > "$work-$slot-task"
+  wait_status "$task" in_progress
+  for _ in $(seq 1 30); do
+    curl -fsS "$api/issues/$task/started-from?lead=lead" > "$work-started.json"
+    python3 - "$work-started.json" "$4" <<'PY' && exit 0
+import json, sys
+d = json.load(open(sys.argv[1]))["data"]
+sys.exit(0 if d["kind"] == sys.argv[2] else 1)
+PY
+    sleep 1
+  done
+  echo "task $task started from $(cat "$work-started.json"), want $4" >&2
+  exit 1
+  ;;
+live-files)
+  # live-files <ws> <slot>: while the coder still works, its committed file is
+  # in the agent's diff (needs B8: the daemon must run in the recorded checkout).
   for _ in $(seq 1 60); do
     issue "$task"
     if [[ "$(field "$work-issue.json" status)" == in_progress ]] &&
       curl -fsS "$api/agents/rerun-coder/diff/files?to=HEAD" > "$work-diff.json" 2>/dev/null &&
       grep -q "\"$output_file\"" "$work-diff.json"; then
-      curl -fsS "$api/issues/$task/started-from?lead=lead" > "$work-started.json"
-      python3 - "$work-started.json" "$4" <<'PY'
-import json, sys
-d = json.load(open(sys.argv[1]))["data"]
-assert d["kind"] == sys.argv[2], d
-PY
       exit 0
     fi
     sleep 1
   done
   echo "rerun-coder never showed $output_file while task $task was in progress" >&2
   cat "$work-issue.json" "$work-diff.json" >&2 || true
-  curl -sS "$api/agents/rerun-coder/diff/commits" >&2 || true
-  curl -sS "$api/issues/$task/revisions" >&2 || true
   ws_path="$(cat "$work-ws-path")"
   find "$ws_path" -maxdepth 4 -type d -name '*rerun-coder*' 2>/dev/null | while read -r d; do
     echo "== $d" >&2
     git -C "$d" log --oneline --decorate -4 >&2 || true
-    git -C "$d" status --short >&2 || true
   done
   exit 1
   ;;

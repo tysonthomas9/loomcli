@@ -129,9 +129,12 @@ type Supervisor struct {
 	// task starts from (P1.28); found=false, or a nil func, keeps the lead's
 	// head. The daemon wires driver.ResolveDependentBase.
 	DependentBase func(ctx context.Context, workspace, repo, repoPath, task string) (sha string, found bool, err error)
-	NodeID        string
-	NodeTTL       time.Duration
-	NodeInterval  time.Duration
+	// TaskStarted records where a cold-started attempt began, for the Changes
+	// tab's "Started from" line. The daemon wires taskcopy.RecordTaskStart.
+	TaskStarted  func(ctx context.Context, workspace, task, lead string) error
+	NodeID       string
+	NodeTTL      time.Duration
+	NodeInterval time.Duration
 
 	// backendRecheckInterval is the fixed delay computeBackoff returns for a
 	// BackendUnavailable block (agent's backend CLI missing from PATH). Zero
@@ -523,6 +526,11 @@ func (s *Supervisor) startFromDependentBase(ap *AgentProcess) bool {
 		}
 	}
 	if err == nil {
+		if s.TaskStarted != nil {
+			if recErr := s.TaskStarted(ctx, s.WorkspaceID, taskID, lead); recErr != nil {
+				slog.Warn("task start not recorded", "worktree", ap.Entry.Worktree, "task_id", taskID, "err", recErr)
+			}
+		}
 		return true
 	}
 	s.setPreflightError(ap, agenterr.OutcomeFromDomain(agenterr.SpawnFailureOutcome),

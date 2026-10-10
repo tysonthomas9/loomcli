@@ -26,6 +26,10 @@ func createLocalLineageSchema(db *sql.DB) error {
 	CREATE TABLE IF NOT EXISTS abandoned_changes (
 		workspace TEXT NOT NULL, change_id TEXT NOT NULL,
 		PRIMARY KEY(workspace, change_id)
+	);
+	CREATE TABLE IF NOT EXISTS task_starts (
+		workspace TEXT NOT NULL, task_id TEXT NOT NULL, kind TEXT NOT NULL,
+		blocker TEXT NOT NULL DEFAULT '', PRIMARY KEY(workspace, task_id)
 	)`)
 	return err
 }
@@ -248,6 +252,48 @@ func (s *SQLite) TaskPredecessor(ctx context.Context, workspace, task string) (s
 		return "", nil
 	}
 	return predecessor, err
+}
+
+// DeriveTaskStart says where a task's attempt starts right now: from its
+// blocker task's revision ("blocker", with that task), from lead's working area
+// ("lead"), or from trunk ("trunk") when lead has none.
+func (s *SQLite) DeriveTaskStart(ctx context.Context, workspace, task, lead string) (string, string, error) {
+	predecessor, err := s.TaskPredecessor(ctx, workspace, task)
+	if err != nil {
+		return "", "", err
+	}
+	if predecessor != "" {
+		blocker, err := s.TaskForChange(ctx, workspace, predecessor)
+		return "blocker", blocker, err
+	}
+	if lead == "" {
+		return "trunk", "", nil
+	}
+	areas, err := s.WorkingAreas(ctx, workspace, lead)
+	if err != nil || len(areas) == 0 {
+		return "trunk", "", err
+	}
+	return "lead", "", nil
+}
+
+// RecordTaskStart saves where a task's latest attempt started, so the label
+// does not drift as the lead's working area or lineage changes later.
+func (s *SQLite) RecordTaskStart(ctx context.Context, workspace, task, kind, blocker string) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO task_starts(workspace,task_id,kind,blocker) VALUES(?,?,?,?)
+		ON CONFLICT(workspace,task_id) DO UPDATE SET kind=excluded.kind, blocker=excluded.blocker`,
+		workspace, task, kind, blocker)
+	return err
+}
+
+// TaskStart reads the recorded start; kind is "" when none was recorded.
+func (s *SQLite) TaskStart(ctx context.Context, workspace, task string) (string, string, error) {
+	var kind, blocker string
+	err := s.db.QueryRowContext(ctx, `SELECT kind, blocker FROM task_starts WHERE workspace=? AND task_id=?`,
+		workspace, task).Scan(&kind, &blocker)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", nil
+	}
+	return kind, blocker, err
 }
 
 func (s *SQLite) DependencyForChange(ctx context.Context, workspace, change string) (string, error) {

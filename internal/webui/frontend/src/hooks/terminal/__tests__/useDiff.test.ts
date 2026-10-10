@@ -880,4 +880,41 @@ describe("useDiff", () => {
       });
     });
   });
+  describe("live refresh (P2.24)", () => {
+    it("refreshes a loaded patch and drops one whose file left the list", async () => {
+      vi.useFakeTimers();
+      try {
+        const [a, b] = createMockFiles(2);
+        mockFetchDiffFiles.mockResolvedValue([a!, b!]);
+        mockFetchDiffFile
+          .mockResolvedValueOnce(createMockPatch({ patch: "old a" }))
+          .mockResolvedValueOnce(createMockPatch({ patch: "old b" }));
+        const { result } = renderHook(() =>
+          useDiff({ agentName: "agent-1", enabled: true, refreshMs: 1000 }),
+        );
+        await flushPromises();
+        await act(async () => {
+          await result.current.fetchPatch(a!.path);
+          await result.current.fetchPatch(b!.path);
+        });
+        expect(result.current.patchCache.get(a!.path)?.patch).toBe("old a");
+
+        mockFetchDiffFiles.mockResolvedValue([a!]);
+        mockFetchDiffFile.mockResolvedValue(
+          createMockPatch({ patch: "new a" }),
+        );
+        await act(async () => {
+          vi.advanceTimersByTime(1000);
+        });
+        await flushPromises();
+        await flushPromises();
+
+        expect(result.current.files).toEqual([a]);
+        expect(result.current.patchCache.get(a!.path)?.patch).toBe("new a");
+        expect(result.current.patchCache.has(b!.path)).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
 });

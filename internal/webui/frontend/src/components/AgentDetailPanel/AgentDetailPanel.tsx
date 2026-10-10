@@ -63,8 +63,8 @@ export interface AgentDetailPanelProps {
   agentTasks: Record<string, LoomTaskInfo>;
   /** Callback when panel should close */
   onClose: () => void;
-  /** Callback when task link is clicked (opens IssueDetailPanel) */
-  onTaskClick?: (taskId: string) => void;
+  /** Callback when task link is clicked (opens IssueDetailPanel, on Changes when asked) */
+  onTaskClick?: (taskId: string, tab?: "changes") => void;
   /** Workspace tasks, for the Changes tab header */
   issues?: Issue[];
 }
@@ -111,8 +111,8 @@ export function AgentDetailPanel({
   useFocusTrap(panelRef, isOpen);
 
   const handleTaskClick = useCallback(
-    (taskId: string) => {
-      onTaskClick?.(taskId);
+    (taskId: string, tab?: "changes") => {
+      onTaskClick?.(taskId, tab);
     },
     [onTaskClick],
   );
@@ -414,7 +414,7 @@ export function AgentDetailPanel({
                     agent={agent}
                     isActive={activeTab === "changes"}
                     issues={issues}
-                    onOpenTaskChanges={(t) => handleTaskClick(t.id)}
+                    onOpenTaskChanges={(t) => handleTaskClick(t.id, "changes")}
                   />
                 </Suspense>
               </div>

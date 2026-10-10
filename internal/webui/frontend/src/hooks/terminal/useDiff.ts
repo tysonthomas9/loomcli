@@ -118,14 +118,34 @@ export function useDiff({
       });
   }, [enabled, agentName, commitSignal]);
 
-  // Keep the list live while the agent works; a failed refresh keeps the last list.
+  // Keep the list and any loaded patches live while the agent works; a failed
+  // refresh keeps what was shown.
   useEffect(() => {
     if (!enabled || !agentName || !refreshMs) return;
     const timer = window.setInterval(() => {
       if (fetchInProgressRef.current) return;
       fetchDiffFiles(workspaceId, agentName, "HEAD")
         .then((result) => {
-          if (mountedRef.current) setFiles(result);
+          if (!mountedRef.current) return;
+          setFiles(result);
+          const live = new Set(result.map((f) => f.path));
+          for (const path of patchCacheRef.current.keys()) {
+            if (!live.has(path)) {
+              setPatchCache((prev) => {
+                const next = new Map(prev);
+                next.delete(path);
+                return next;
+              });
+              continue;
+            }
+            fetchDiffFile(workspaceId, agentName, path, "HEAD")
+              .then((patch) => {
+                if (mountedRef.current) {
+                  setPatchCache((prev) => new Map(prev).set(path, patch));
+                }
+              })
+              .catch(() => undefined);
+          }
         })
         .catch(() => undefined);
     }, refreshMs);

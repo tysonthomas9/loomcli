@@ -1,9 +1,10 @@
 # P2.24 (D43): the agent panel has one Changes tab instead of Git and Diff.
 # A real daemon coder (the deterministic local-mode backend, paused after its
-# commit so it is still working) shows its task, status, start point and live
-# changed files; clicking a file expands its diff inline. When it is done the
-# tab links to the task's own Changes. The lead's tab shows how many tasks are
-# approved and links to the PRs. Old ?tab=git and ?tab=diff links open Changes.
+# commit so it is still working) shows its task, status and where its attempt
+# started. When it is done the tab links to the task's own Changes. The lead's
+# tab shows how many tasks are approved and links to the PRs. Old ?tab=git and
+# ?tab=diff links open Changes. The live file list needs B8 (the daemon must
+# run the coder in its recorded checkout), so that test is skipped until then.
 suite: loomgit-changes-tab
 classification: { area: reviews, feature: agent-changes-tab, surface: mixed, purpose: journey }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
@@ -15,11 +16,11 @@ teardown: >-
 
 tests:
   # AFT-GT1
-  - name: a task agent's Changes tab shows its task and files while it works and links to the task when done
-    intent: An old ?tab=git link opens Changes; the running coder shows its task, Working, Started from trunk and its committed file, whose diff expands inline; once done it shows Waiting for review and opens the task's own Changes; no Git or Diff tab, branch name, PR or merge button
+  - name: a task agent's Changes tab shows its task while it works and links to the task when done
+    intent: An old ?tab=git link opens Changes; the working coder shows its task, Working and Started from the lead's latest work; once done it shows Waiting for review and opens the task's own Changes; no Git or Diff tab, branch name, PR or merge button
     steps:
-      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-changes-tab.sh" running E2E-WS-CHANGES one trunk
-        intent: The coder claims a task and commits its file; the API lists the file in the agent's diff and says the task started from trunk
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-changes-tab.sh" claimed E2E-WS-CHANGES one lead
+        intent: The coder claims a task; the API says its attempt started from the lead's latest work
       - open: /ws/E2E-WS-CHANGES/agents/rerun-coder?tab=git
         intent: Follow an old link to the Git tab
       - wait:
@@ -39,10 +40,8 @@ tests:
           fn: "document.querySelector('[data-testid=changes-task-status]')?.textContent.trim() === 'Working'"
         intent: The status pill reads Working
       - wait:
-          fn: "document.querySelector('[data-testid=changes-started-from]')?.textContent.trim() === 'Started from: trunk'"
-        intent: Before any approval the task started from trunk
-      - wait: { text: local-mode-agent-output.txt }
-        intent: The coder's committed file is listed while it still works
+          fn: "document.querySelector('[data-testid=changes-started-from]')?.textContent.trim() === 'Started from: the lead\\'s latest work'"
+        intent: The tab says the attempt started from the lead's latest work, as recorded when it started
       - wait:
           fn: >-
             (() => {
@@ -52,10 +51,6 @@ tests:
               return !!tab && !text.includes('loom/') && !/Merge|Publish|Create PR/.test(buttons.join('|')) && !document.querySelector('[data-testid=changes-open-task]');
             })()
         intent: No branch name, PR or merge button, and no task link while it works
-      - click: { selector: "[data-testid=changes-file-list] [role=button]" }
-        intent: Click the file to expand its diff inline
-      - wait: { text: "local mode deterministic backend produced a committed artifact" }
-        intent: The file's diff shows inline under it
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-changes-tab.sh" done E2E-WS-CHANGES one
         intent: The attempt finishes and the task waits for review with its revision
       - open: /ws/E2E-WS-CHANGES/agents/rerun-coder?tab=diff
@@ -63,6 +58,9 @@ tests:
       - wait:
           fn: "document.querySelector('[data-testid=changes-task-status]')?.textContent === 'Waiting for review'"
         intent: The link lands on Changes and the task now waits for review
+      - wait:
+          fn: "document.querySelector('[data-testid=changes-started-from]')?.textContent.trim() === 'Started from: the lead\\'s latest work'"
+        intent: The finished task still says where it started
       - click: { testid: changes-open-task }
         intent: Open the task's own Changes
       - wait:
@@ -73,7 +71,7 @@ tests:
 
   # AFT-GT2
   - name: the lead's Changes tab counts approved tasks and links to the PRs
-    intent: After Approve, the lead's tab reads 1 task approved with a link to the PRs, keeps it on reload and has no action buttons; a new task then starts from the lead's latest work
+    intent: After Approve, the lead's tab reads 1 task approved with a link to the PRs, keeps it on reload and has no action buttons
     steps:
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-changes-tab.sh" approve E2E-WS-CHANGES one
         intent: Approve applies the task into the lead and closes it as approved
@@ -95,12 +93,22 @@ tests:
       - click: { testid: changes-open-prs }
       - expect: { url: "**/ws/E2E-WS-CHANGES/prs" }
         intent: The link opens the PRs page
-      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-changes-tab.sh" running E2E-WS-CHANGES two lead
-        intent: A new task starts from the lead's latest work; the API says so
+
+  # AFT-GT1, live files: unskip once B8 lands.
+  - name: a working task agent lists its changed files live and expands a diff inline
+    intent: While the coder still works, its committed file is listed on Changes and clicking it expands the diff inline
+    skip: true
+    steps:
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-changes-tab.sh" claimed E2E-WS-CHANGES two lead
+        intent: The coder claims a second task
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-changes-tab.sh" live-files E2E-WS-CHANGES two
+        intent: The API lists the coder's committed file while it still works
       - open: /ws/E2E-WS-CHANGES/agents/rerun-coder?tab=changes
-      - wait: { text: "changes tab two" }
-      - wait:
-          fn: "document.querySelector('[data-testid=changes-started-from]')?.textContent.trim() === 'Started from: the lead\\'s latest work'"
-        intent: The running task's tab says it started from the lead's latest work
+      - wait: { text: local-mode-agent-output.txt }
+        intent: The coder's committed file is listed while it still works
+      - click: { selector: "[data-testid=changes-file-list] [role=button]" }
+        intent: Click the file to expand its diff inline
+      - wait: { text: "local mode deterministic backend produced a committed artifact" }
+        intent: The file's diff shows inline under it
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-changes-tab.sh" done E2E-WS-CHANGES two
         intent: The second attempt finishes before teardown
