@@ -3677,6 +3677,12 @@ paths:
             application/json:
               schema:
                 type: object
+        "409":
+          description: Loom refused the verdict and recorded nothing. `error` is the stable code (for example review_required or stale_subject) and `message` the reason (for example "lead approval policy is off").
+          content:
+            application/json:
+              schema:
+                type: object
 
   /api/workspaces/{ws}/changes/{change}/merge-approval:
     parameters:

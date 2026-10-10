@@ -18,6 +18,8 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
 
+// writeReviewError reports a Loom refusal as its stable code, with the
+// human-readable reason (e.g. "lead approval policy is off") in message.
 func writeReviewError(w http.ResponseWriter, err error) {
 	code, status := "internal_error", http.StatusInternalServerError
 	var coded *loomgit.Error
@@ -26,7 +28,11 @@ func writeReviewError(w http.ResponseWriter, err error) {
 	} else if review.IsNotFound(err) {
 		code, status = "not_found", http.StatusNotFound
 	}
-	handler.WriteJSON(w, status, map[string]any{"success": false, "error": code})
+	body := map[string]any{"success": false, "error": code}
+	if coded != nil && coded.Message != "" {
+		body["message"] = coded.Message
+	}
+	handler.WriteJSON(w, status, body)
 }
 
 type verdictRequest struct {

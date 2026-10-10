@@ -59,9 +59,16 @@ func TestGitCommandsSelectWorkspaceWithoutActiveWorkspace(t *testing.T) {
 		got = request.Workspace
 		return apply.Result{}, nil
 	}
-	approveLocal = func(_ context.Context, workspace, _, _ string, _ int, _ review.Actor) (apply.FollowResult, error) {
+	approveLocal = func(_ context.Context, workspace, _, _ string, _ int, _ string, _ review.Actor) (apply.FollowResult, error) {
 		got = workspace
 		return apply.FollowResult{}, nil
+	}
+	stubVerdictStore(t, humanEnv())
+	oldReject, oldRejectWS := rejectLocal, rejectWorkspace
+	t.Cleanup(func() { rejectLocal, rejectWorkspace = oldReject, oldRejectWS })
+	rejectLocal = func(_ context.Context, workspace, _, _ string, _ int, _, _ string, _ review.Actor) error {
+		got = workspace
+		return nil
 	}
 	pullLocal = func(_ context.Context, path, _, _, _ string) (pull.PullResult, error) {
 		got = path
@@ -87,6 +94,7 @@ func TestGitCommandsSelectWorkspaceWithoutActiveWorkspace(t *testing.T) {
 		{name: "pr", cmd: prCmd, args: []string{"lead", "change"}},
 		{name: "push", cmd: pushCmd, args: []string{"change", "2"}, want: "SELECTED"},
 		{name: "approve", cmd: approveCmd, args: []string{"change", "2"}, want: "SELECTED"},
+		{name: "reject", cmd: rejectCmd, args: []string{"change", "2"}, want: "SELECTED"},
 		{name: "pull", cmd: pullCmd, args: []string{"repo"}, want: repoDir},
 		{name: "restack", cmd: restackCmd, args: []string{"repo", "base"}, want: repoDir},
 		{name: "unapply", cmd: unapplyCmd, args: []string{"repo", "change"}, want: repoDir},
