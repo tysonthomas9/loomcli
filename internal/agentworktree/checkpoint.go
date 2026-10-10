@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/gitrunner"
@@ -181,15 +182,15 @@ func (w *Worktrees) diffFailed(ctx context.Context, repo string, err error, refs
 }
 
 // DropCheckpoints deletes every ref under prefix, one agent's checkpoint
-// refs, in repo. A repo that is gone holds none.
+// refs, in repo. A repo that is gone, or has no .git of its own, holds none.
 func (w *Worktrees) DropCheckpoints(ctx context.Context, repo, prefix string) error {
 	agent := strings.TrimSuffix(strings.TrimPrefix(prefix, checkpointPrefix), "/")
 	if !strings.HasPrefix(prefix, checkpointPrefix) || !strings.HasSuffix(prefix, "/") || agent == "" ||
 		strings.ContainsAny(agent, "/*?[\\") {
 		return fmt.Errorf("agentworktree: %q is not one agent's checkpoint refs", prefix)
 	}
-	if _, err := os.Stat(repo); errors.Is(err, fs.ErrNotExist) {
-		return nil
+	if _, err := os.Stat(filepath.Join(repo, ".git")); errors.Is(err, fs.ErrNotExist) {
+		return nil // git would find an enclosing repository's refs
 	}
 	refs, err := w.git.Run(ctx, repo, "for-each-ref", "--format=%(refname)", prefix)
 	if err != nil {
