@@ -3461,6 +3461,20 @@ export interface components {
       merge_status?: string;
       /** @description Why the approved merge has not happened, such as "merges after */
       merge_reason?: string;
+      /**
+       * @description For a review fix-up of a change whose PR is open, how Loom's automatic update of that PR stands (no Approve needed).
+       * @enum {string}
+       */
+      feedback_status?:
+        | "pushing"
+        | "pushed"
+        | "held"
+        | "not_pushed"
+        | "superseded";
+      /** @description Why a review fix-up is held or was not pushed, such as a conflict, an incomplete capture or a secret-pattern path. */
+      feedback_reason?: string;
+      /** @description True when this fix-up cancelled the change's pending Approve and merge, so merging needs a new Approve. */
+      feedback_merge_cancelled?: boolean;
     };
     RevisionDiffFile: {
       path: string;
