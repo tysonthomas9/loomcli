@@ -574,10 +574,11 @@ func (s *Service) openSession(ctx context.Context, a loomstore.Agent, cfg Config
 // server start bound (a minute), so a cold start is not cut short.
 var openWait = 90 * time.Second
 
-// timedOut adds why ctx ended, when openWait ran out, to the harness's error.
+// timedOut adds why ctx ended, when openWait ran out, to the harness's
+// error, keeping only its text: a timeout is always retried, never permanent.
 func timedOut(ctx context.Context, err error) error {
 	if cause := context.Cause(ctx); cause != nil && cause != ctx.Err() {
-		return fmt.Errorf("%w: %w", cause, err)
+		return fmt.Errorf("%w: %v", cause, err)
 	}
 	return err
 }
@@ -624,13 +625,16 @@ func (s *Service) leftover(ctx context.Context, agentID, harness string, ref loo
 	return cause
 }
 
-// purgeLeftover purges one purge-pending session and drops its mark.
+// purgeLeftover purges one purge-pending session and drops its mark. The
+// Purge is bounded as Open is (openWait), since it runs under the agent lock.
 func (s *Service) purgeLeftover(ctx context.Context, n loomstore.NativeSession) error {
 	h, ok := s.harnesses[n.Harness]
 	if !ok {
 		return fmt.Errorf("loomagent: %s is not available to purge %s", n.Harness, n.NativeID)
 	}
-	if err := h.Purge(ctx, []loomharness.NativeRef{{Root: n.NativeRoot, NativeID: n.NativeID}}); err != nil {
+	hctx, cancel := context.WithTimeout(ctx, openWait)
+	defer cancel()
+	if err := h.Purge(hctx, []loomharness.NativeRef{{Root: n.NativeRoot, NativeID: n.NativeID}}); err != nil {
 		return err
 	}
 	return s.store.ClearPurgePending(ctx, n)
