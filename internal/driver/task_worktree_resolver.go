@@ -115,6 +115,9 @@ func LineageFromInput(input json.RawMessage) (TaskLineage, bool) {
 // the worktree resolver.
 type StackLineageLookup struct {
 	Store stackstore.Store
+	// CodeReviewBase, when set, names a task's blocker whose code awaits
+	// review in its epic; the task is built on that blocker's revision.
+	CodeReviewBase CodeReviewBaseLookup
 }
 
 var _ TaskLineageLookup = StackLineageLookup{}
@@ -140,7 +143,7 @@ func DefaultStackLineageLookup() TaskLineageLookup {
 	if err != nil {
 		return nil
 	}
-	return StackLineageLookup{Store: store}
+	return StackLineageLookup{Store: store, CodeReviewBase: FleetCodeReviewBase}
 }
 
 // DefaultStackStore returns the per-user loom stack store, or nil when the loom
@@ -374,10 +377,19 @@ func (r LocalTaskWorktreeResolver) ResolveTaskWorktree(ctx context.Context, req 
 			return TaskWorktree{}, fmt.Errorf("resolve delegated retry source for repo %q: %w", selected.Name, err)
 		}
 	} else {
-		var delegated bool
-		repoPath, base, delegated, err = r.delegatedBase(ctx, req, repoPath, selected.Name)
+		// A lead's working area lacks the code of a blocker still in review.
+		behindReview, reviewBase, reviewLineage, err := r.codeReviewLineageBase(ctx, req, repoPath, selected)
 		if err != nil {
-			return TaskWorktree{}, fmt.Errorf("resolve delegated task base for repo %q: %w", selected.Name, err)
+			return TaskWorktree{}, err
+		}
+		delegated := behindReview
+		if behindReview {
+			base, localBase = reviewBase, reviewLineage
+		} else {
+			repoPath, base, delegated, err = r.delegatedBase(ctx, req, repoPath, selected.Name)
+			if err != nil {
+				return TaskWorktree{}, fmt.Errorf("resolve delegated task base for repo %q: %w", selected.Name, err)
+			}
 		}
 		if !delegated {
 			base, localBase, err = r.resolveTaskLineageBase(ctx, req, repoPath, selected)

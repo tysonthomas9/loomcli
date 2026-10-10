@@ -362,6 +362,9 @@ type localPredecessorLookup interface {
 }
 
 func (l StackLineageLookup) PredecessorForTask(ctx context.Context, workspaceKey, repoName, taskID string) (string, bool, error) {
+	if predecessor, found, err := l.codeReviewBase(ctx, workspaceKey, taskID); err != nil || found {
+		return predecessor, found, err
+	}
 	_, node, byTask, ok, err := findTaskStack(ctx, l.Store, workspaceKey, repoName, taskID)
 	if err != nil || !ok || node.BaseTaskID == "" {
 		return "", false, err
@@ -370,6 +373,29 @@ func (l StackLineageLookup) PredecessorForTask(ctx context.Context, workspaceKey
 		return "", false, loomgit.NewError(loomgit.LineageUnresolved, "predecessor missing from local stack", nil)
 	}
 	return node.BaseTaskID, true, nil
+}
+
+// codeReviewLineageBase builds a lead-delegated task on its blocker's frozen
+// revision while that blocker's code awaits review in its epic, instead of on
+// the lead's working area. found is false when the lead's base applies.
+func (r LocalTaskWorktreeResolver) codeReviewLineageBase(ctx context.Context, req TaskExecRequest, repoPath string, selected *domain.Repo) (bool, string, taskcopy.LineageBase, error) {
+	lookup, ok := r.Lineage.(codeReviewBaseLookup)
+	if !ok {
+		return false, "", taskcopy.LineageBase{}, nil
+	}
+	if req.ParentSessionID == "" {
+		return false, "", taskcopy.LineageBase{}, nil // The plain path asks PredecessorForTask.
+	}
+	chosen, err := choosesBase(req.Input)
+	if err != nil || chosen {
+		return false, "", taskcopy.LineageBase{}, err
+	}
+	predecessor, found, err := lookup.codeReviewBase(ctx, req.WorkspaceKey, req.TaskID)
+	if err != nil || !found {
+		return false, "", taskcopy.LineageBase{}, err
+	}
+	base, err := taskcopy.ResolveLineageBase(ctx, repoPath, req.WorkspaceKey, req.TaskID, predecessor, selected.Name)
+	return err == nil, base.Ref, base, err
 }
 
 // resolveTaskLineageBase selects an immutable local predecessor head when one

@@ -20,19 +20,6 @@ func answersCodeReviewLookup(w http.ResponseWriter, r *http.Request) bool {
 	return false
 }
 
-// stackBases registers a stack lookup with these bases for the test.
-func stackBases(t *testing.T, bases map[string]string) {
-	t.Helper()
-	previous := stackBase
-	t.Cleanup(func() { stackBase = previous })
-	SetStackBaseLookup(func(_ context.Context, workspace, taskID string) (string, error) {
-		if workspace != "test-ws" {
-			t.Fatalf("stack lookup in workspace %q", workspace)
-		}
-		return bases[taskID], nil
-	})
-}
-
 func ids(issues []backend.IssueData) []string {
 	out := make([]string, 0, len(issues))
 	for _, issue := range issues {
@@ -42,12 +29,11 @@ func ids(issues []backend.IssueData) []string {
 }
 
 // reviewReadyServer serves FleetDB's ready list, its blocked list and the
-// tasks in review. A is in code review; X is a plan review without the label.
-// Every task is based on its blocker in an epic's stack except K, in another
-// stack (or none), and L, whose stack base is another task.
+// tasks in review. A and A2 in epic e1, and A3 in epic-2, are in code review;
+// X in e1 is a plan review without the label. K is in no epic and L in
+// another epic than its blocker A.
 func reviewReadyServer(t *testing.T, seen *[]string, ready []*readyIssueWithParent) (*FleetBackend, func()) {
 	t.Helper()
-	stackBases(t, map[string]string{"B": "A", "C": "A", "D": "X", "E": "A", "F": "A", "G": "A", "H": "A", "L": "Z", "M": "A"})
 	now := time.Now().UTC().Truncate(time.Second)
 	future := now.Add(time.Hour)
 	blocked := func(id, status, parent string, blockers ...string) blockedIssueResponseWire {
@@ -58,9 +44,9 @@ func reviewReadyServer(t *testing.T, seen *[]string, ready []*readyIssueWithPare
 		}
 		return entry
 	}
-	assigned := blocked("H", "open", "", "A")
+	assigned := blocked("H", "open", "e1", "A")
 	assigned.Issue.Assignee = "agent-1"
-	deferred := blocked("G", "open", "", "A")
+	deferred := blocked("G", "open", "e1", "A")
 	deferred.Issue.DeferUntil = &future
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		*seen = append(*seen, r.URL.Path)
@@ -72,23 +58,26 @@ func reviewReadyServer(t *testing.T, seen *[]string, ready []*readyIssueWithPare
 				t.Fatalf("unexpected list: %s", r.URL.String())
 			}
 			respondOK(w, []fleetIssueWire{
-				{ID: "A", Title: "A", Status: "review", Labels: []string{backend.CodeReviewLabel}, CreatedAt: now, UpdatedAt: now},
-				{ID: "X", Title: "X", Status: "review", CreatedAt: now, UpdatedAt: now},
-				{ID: "A2", Title: "A2", Status: "review", Labels: []string{backend.CodeReviewLabel}, CreatedAt: now, UpdatedAt: now},
+				{ID: "A", Title: "A", Status: "review", Labels: []string{backend.CodeReviewLabel}, ParentID: "e1", CreatedAt: now, UpdatedAt: now},
+				{ID: "X", Title: "X", Status: "review", ParentID: "e1", CreatedAt: now, UpdatedAt: now},
+				{ID: "A2", Title: "A2", Status: "review", Labels: []string{backend.CodeReviewLabel}, ParentID: "e1", CreatedAt: now, UpdatedAt: now},
+				{ID: "A4", Title: "A4", Status: "review", Labels: []string{backend.CodeReviewLabel}, CreatedAt: now, UpdatedAt: now},
+				{ID: "A3", Title: "A3", Status: "review", Labels: []string{backend.CodeReviewLabel}, ParentID: "epic-2", CreatedAt: now, UpdatedAt: now},
 			})
 		case "/api/v1/test-ws/issues/blocked":
 			respondOK(w, []blockedIssueResponseWire{
-				blocked("B", "open", "", "A"),
-				blocked("C", "open", "", "A", "Y"),
-				blocked("D", "open", "", "X"),
+				blocked("B", "open", "e1", "A"),
+				blocked("C", "open", "e1", "A", "Y"),
+				blocked("D", "open", "e1", "X"),
 				blocked("epic-2", "open", "", "Z"),
-				blocked("E", "open", "epic-2", "A"),
-				blocked("F", "in_progress", "", "A"),
+				blocked("E", "open", "epic-2", "A3"),
+				blocked("F", "in_progress", "e1", "A"),
 				deferred,
 				assigned,
 				blocked("K", "open", "", "A"),
-				blocked("L", "open", "", "A"),
-				blocked("M", "open", "", "A", "A2"),
+				blocked("N", "open", "", "A4"),
+				blocked("L", "open", "e2", "A"),
+				blocked("M", "open", "e1", "A", "A2"),
 			})
 		default:
 			t.Fatalf("unexpected request: %s", r.URL.String())
@@ -112,12 +101,12 @@ func TestReadyStartsATaskWhoseOnlyOpenBlockersAreInCodeReview(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Ready: %v", err)
 	}
-	// B and H wait only on A, which is in code review. C also waits on an open
-	// task, D on a plan review, E's parent is blocked, F is already running
-	// and G is deferred: they keep waiting. K is in another stack (or none)
-	// and L's stack base is another task, so neither can be built on A's
-	// code: they wait until A closes. M is based on A but A2, also in code
-	// review, is not its base: it waits too.
+	// B and H wait only on A, in code review in their epic. C also waits on
+	// an open task, D on a plan review, E's parent is blocked, F is already
+	// running and G is deferred: they keep waiting. K is in no epic and L in
+	// another epic, so neither can be built on A's code: they wait until A
+	// closes; N and its blocker A4 are both in no epic, so N waits too. M waits on A and on A2, both in code review: it can be built on
+	// only one, so it waits too.
 	if got, want := ids(ready), []string{"r1", "B", "H", "r3"}; !slices.Equal(got, want) {
 		t.Fatalf("Ready = %v, want %v (B in priority order)", got, want)
 	}
@@ -132,8 +121,8 @@ func TestReadyStartsATaskWhoseOnlyOpenBlockersAreInCodeReview(t *testing.T) {
 		t.Fatalf("Blocked: %v", err)
 	}
 	if got := ids(blocked); slices.Contains(got, "B") || !slices.Contains(got, "C") ||
-		!slices.Contains(got, "D") || !slices.Contains(got, "E") || !slices.Contains(got, "K") || !slices.Contains(got, "L") || !slices.Contains(got, "M") {
-		t.Fatalf("Blocked = %v, want C, D, E, K, L and M but not B", got)
+		!slices.Contains(got, "D") || !slices.Contains(got, "E") || !slices.Contains(got, "K") || !slices.Contains(got, "L") || !slices.Contains(got, "M") || !slices.Contains(got, "N") {
+		t.Fatalf("Blocked = %v, want C, D, E, K, L, M and N but not B", got)
 	}
 }
 
@@ -164,24 +153,7 @@ func TestReadyKeepsCallerFiltersForTasksBehindReview(t *testing.T) {
 	}
 }
 
-// Without a stack store no dependent can be built on its blocker's code, so
-// none starts before its blocker closes.
-func TestReadyStartsNothingBehindReviewWithoutStacks(t *testing.T) {
-	var seen []string
-	fb, done := reviewReadyServer(t, &seen, nil)
-	defer done()
-	SetStackBaseLookup(nil)
-	ready, err := fb.Ready(context.Background(), backend.ReadyOpts{})
-	if err != nil || len(ready) != 0 {
-		t.Fatalf("Ready = %v, %v; want nothing", ids(ready), err)
-	}
-	if slices.Contains(seen, "/api/v1/test-ws/issues/blocked") {
-		t.Fatalf("requests = %v: nothing can start, so the blocked list is not needed", seen)
-	}
-}
-
 func TestReadyAsksForBlockedTasksOnlyWhenATaskIsInCodeReview(t *testing.T) {
-	stackBases(t, nil)
 	var seen []string
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		seen = append(seen, r.URL.Path)
@@ -204,7 +176,6 @@ func TestReadyAsksForBlockedTasksOnlyWhenATaskIsInCodeReview(t *testing.T) {
 }
 
 func TestReadyFallsBackToFleetDBWhenTheReviewLookupFails(t *testing.T) {
-	stackBases(t, nil)
 	now := time.Now().UTC().Truncate(time.Second)
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/test-ws/issues/ready" {
