@@ -916,3 +916,67 @@ func TestHandleStaleDetector_NotEnabled(t *testing.T) {
 		t.Error("response body should not be empty")
 	}
 }
+
+// A UI refresh triggered by a mutation event sends Cache-Control: no-cache;
+// the status endpoint must then return the lead's new parent instead of the
+// store metadata it cached before the assignment.
+func TestHandleStatusNoCacheReturnsFreshAgentParent(t *testing.T) {
+	ctx := context.Background()
+	st := memstore.New()
+	if _, err := st.Workspaces().Create(ctx, store.WorkspaceCreate{Key: "WS1", Name: "Workspace"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Agents().Create(ctx, store.AgentCreate{WorkspaceKey: "WS1", Name: "lead", RoleName: "lead"}); err != nil {
+		t.Fatal(err)
+	}
+	dataSource := NewMonitorDataSourceWithTTL(func() *monitor.MonitorData {
+		return &monitor.MonitorData{Timestamp: time.Unix(1, 0).UTC()}
+	}, nil, time.Minute)
+	handler := HandleStatusWithSources(dataSource, NewMonitorStoreDataSourceWithTTL(st, time.Minute))
+
+	leadParent := func(cacheControl string) string {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/monitor/status?workspace=WS1", nil)
+		if cacheControl != "" {
+			req.Header.Set("Cache-Control", cacheControl)
+		}
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200, body = %s", rr.Code, rr.Body.String())
+		}
+		var resp struct {
+			Agents []struct {
+				Name   string `json:"name"`
+				Parent string `json:"parent"`
+			} `json:"agents"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatal(err)
+		}
+		for _, a := range resp.Agents {
+			if a.Name == "lead" {
+				return a.Parent
+			}
+		}
+		t.Fatalf("lead missing from status agents: %s", rr.Body.String())
+		return ""
+	}
+
+	if got := leadParent(""); got != "" {
+		t.Fatalf("initial parent = %q, want empty", got)
+	}
+	parent := "WS1-1"
+	if _, err := st.Agents().Update(ctx, "WS1", "lead", store.AgentUpdate{Parent: &parent}); err != nil {
+		t.Fatal(err)
+	}
+	if got := leadParent(""); got != "" {
+		t.Fatalf("cached parent = %q, want the pre-assignment cache within TTL", got)
+	}
+	if got := leadParent("no-cache"); got != parent {
+		t.Fatalf("no-cache parent = %q, want %q", got, parent)
+	}
+	if got := leadParent(""); got != parent {
+		t.Fatalf("parent after fresh read = %q, want refreshed cache %q", got, parent)
+	}
+}

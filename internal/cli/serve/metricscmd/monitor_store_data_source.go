@@ -77,7 +77,25 @@ func (s *MonitorStoreDataSource) Resolve(ctx context.Context, workspaceHint stri
 	if !entry.cachedAt.IsZero() && now.Sub(entry.cachedAt) < s.ttl {
 		return entry.data
 	}
+	return s.refreshLocked(ctx, entry, workspaceHint, now)
+}
 
+// ResolveFresh re-reads store-backed monitor metadata for workspaceHint,
+// bypassing the TTL, and refreshes the cache entry. Callers use it when a
+// client explicitly asks for fresh data (Cache-Control: no-cache), e.g. a UI
+// refresh triggered by a mutation event that the cached copy predates.
+func (s *MonitorStoreDataSource) ResolveFresh(ctx context.Context, workspaceHint string) monitorStoreData {
+	if s == nil || s.st == nil {
+		return emptyMonitorStoreData()
+	}
+
+	entry := s.cacheEntry(monitorStoreCacheKey(workspaceHint))
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	return s.refreshLocked(ctx, entry, workspaceHint, time.Now())
+}
+
+func (s *MonitorStoreDataSource) refreshLocked(ctx context.Context, entry *monitorStoreCacheEntry, workspaceHint string, now time.Time) monitorStoreData {
 	data := collectMonitorStoreData(ctx, s.st, workspaceHint)
 	entry.data = data
 	entry.cachedAt = now

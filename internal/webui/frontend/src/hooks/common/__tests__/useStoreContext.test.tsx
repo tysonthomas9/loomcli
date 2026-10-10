@@ -319,6 +319,11 @@ describe("useStoreContext", () => {
       });
 
       expect(agentMethodsRef.current.fetchData).toHaveBeenCalledTimes(1);
+      // The server caches monitor metadata briefly; a mutation-triggered
+      // refresh must bypass it or a just-assigned lead epic stays hidden.
+      expect(agentMethodsRef.current.fetchData).toHaveBeenCalledWith({
+        fresh: true,
+      });
     });
 
     it("ignores terminal-only SSE mutations for monitor refresh", () => {

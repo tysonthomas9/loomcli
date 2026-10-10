@@ -192,6 +192,27 @@ describe("fetchAgents", () => {
     );
     expect(mockApiGet).not.toHaveBeenCalled();
   });
+
+  it("asks the server to skip its monitor cache for fresh status reads", async () => {
+    mockGet.mockResolvedValueOnce({
+      agents: null,
+      tasks: {},
+      agent_tasks: null,
+      sync: {},
+      stats: {},
+      timestamp: "",
+    } as never);
+
+    await fetchStatus("test-ws", { fresh: true });
+
+    expect(mockGet).toHaveBeenCalledWith(
+      "/api/workspaces/test-ws/monitor/status",
+      {
+        signal: expect.any(AbortSignal),
+        headers: { "Cache-Control": "no-cache" },
+      },
+    );
+  });
 });
 
 describe("checkLoomHealth", () => {

@@ -113,7 +113,8 @@ export interface AgentStoreState {
 }
 
 export interface AgentStoreActions {
-  fetchData: () => Promise<void>;
+  /** `fresh` bypasses the server's cached monitor metadata. */
+  fetchData: (options?: { fresh?: boolean }) => Promise<void>;
   startPolling: (options?: PollingOptions) => void;
   stopPolling: () => void;
   retryNow: () => void;
@@ -203,6 +204,9 @@ export function createAgentStore(
   let activeWorkspaceId: string | undefined;
   let staleBannerTimeoutId: ReturnType<typeof setTimeout> | null = null;
   let fetchInProgress = false;
+  // A fresh fetch requested while another fetch was in flight; that fetch may
+  // carry pre-mutation data, so run the fresh one once it finishes.
+  let pendingFreshFetch = false;
   let fetchStartTime = 0;
   let currentRetryDelay = INITIAL_RETRY_DELAY_S;
   let consecutiveFailuresAtCeiling = 0;
@@ -321,8 +325,11 @@ export function createAgentStore(
   const store = createStore<AgentStore>((set, get) => ({
     ...INITIAL_STATE,
 
-    async fetchData(): Promise<void> {
-      if (fetchInProgress) return;
+    async fetchData(options?: { fresh?: boolean }): Promise<void> {
+      if (fetchInProgress) {
+        if (options?.fresh) pendingFreshFetch = true;
+        return;
+      }
 
       fetchInProgress = true;
       fetchStartTime = Date.now();
@@ -330,7 +337,9 @@ export function createAgentStore(
 
       try {
         const statusResult = await withTimeout(
-          fetchStatus(activeWorkspaceId),
+          options?.fresh
+            ? fetchStatus(activeWorkspaceId, { fresh: true })
+            : fetchStatus(activeWorkspaceId),
           FETCH_TIMEOUT_MS,
           "Status fetch",
         );
@@ -385,6 +394,10 @@ export function createAgentStore(
         });
       } finally {
         fetchInProgress = false;
+        if (pendingFreshFetch) {
+          pendingFreshFetch = false;
+          void get().fetchData({ fresh: true });
+        }
       }
     },
 
@@ -476,6 +489,7 @@ export function createAgentStore(
       get().stopPolling();
 
       fetchInProgress = false;
+      pendingFreshFetch = false;
       fetchStartTime = 0;
       currentRetryDelay = INITIAL_RETRY_DELAY_S;
       consecutiveFailuresAtCeiling = 0;
