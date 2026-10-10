@@ -87,3 +87,25 @@ func TestMonitorLeadDeliveryState(t *testing.T) {
 		})
 	}
 }
+
+func TestMonitorLeadDeliveryErrorSitsBesideDeliveredState(t *testing.T) {
+	updatedAt := time.Date(2026, 10, 10, 15, 5, 21, 0, time.UTC)
+	version := updatedAt.Format(time.RFC3339Nano)
+	lead := &domain.Agent{Name: "nova", RoleName: "lead", Parent: "EPIC-1", UpdatedAt: updatedAt}
+	session := &domain.AgentSession{Metadata: map[string]string{
+		"lead_assignment_delivered_version": version,
+		"lead_assignment_delivery_error":    "inbox completion failed: HTTP 403",
+	}}
+	if got := monitorLeadDeliveryState(lead, session); got != "delivered" {
+		t.Fatalf("delivery state = %q, want delivered", got)
+	}
+	if got := monitorLeadDeliveryError(lead, session); got != "inbox completion failed: HTTP 403" {
+		t.Fatalf("delivery error = %q, want the recorded completion failure", got)
+	}
+	if got := monitorLeadDeliveryError(&domain.Agent{Name: "w", RoleName: "task"}, session); got != "" {
+		t.Fatalf("worker delivery error = %q, want empty", got)
+	}
+	if got := monitorLeadDeliveryError(lead, nil); got != "" {
+		t.Fatalf("delivery error without session = %q, want empty", got)
+	}
+}

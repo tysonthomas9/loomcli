@@ -201,6 +201,7 @@ func monitorAgentStatus(
 		DaemonManaged:         assignment.Auto,
 		Parent:                assignment.Parent,
 		DeliveryState:         monitorLeadDeliveryState(assignment, orchestrationByAgent[assignment.Name]),
+		DeliveryError:         monitorLeadDeliveryError(assignment, orchestrationByAgent[assignment.Name]),
 		InboxQueuedCount:      inboxSummary.QueuedCount,
 		InboxFailedCount:      inboxSummary.FailedCount,
 		InboxLatestMessage:    inboxSummary.LatestMessage,
@@ -284,6 +285,16 @@ func monitorLeadDeliveryState(agent *domain.Agent, session *domain.AgentSession)
 		return "delivered"
 	}
 	return "pending"
+}
+
+// monitorLeadDeliveryError surfaces the lead session's recorded assignment
+// delivery error (for example a failed inbox completion after the turn
+// landed) beside delivery_state.
+func monitorLeadDeliveryError(agent *domain.Agent, session *domain.AgentSession) string {
+	if agent == nil || !epicrunner.IsLeadRole(agent.RoleName) || session == nil {
+		return ""
+	}
+	return strings.TrimSpace(session.Metadata["lead_assignment_delivery_error"])
 }
 
 func monitorLeadAssignmentVersion(agent *domain.Agent) string {

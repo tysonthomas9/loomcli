@@ -48,6 +48,7 @@ type AgentStatus struct {
 	DaemonManaged         bool           `json:"daemon_managed,omitempty"`          // true if under daemon supervision
 	Parent                string         `json:"parent,omitempty"`                  // active epic for leads/workers
 	DeliveryState         string         `json:"delivery_state,omitempty"`          // lead assignment delivery state
+	DeliveryError         string         `json:"delivery_error,omitempty"`          // last lead assignment delivery error
 	InboxQueuedCount      int            `json:"inbox_queued_count,omitempty"`      // queued agent inbox messages
 	InboxFailedCount      int            `json:"inbox_failed_count,omitempty"`      // failed agent inbox messages
 	InboxLatestMessage    string         `json:"inbox_latest_message,omitempty"`    // newest queued/failed inbox message body

@@ -24,6 +24,7 @@ type AgentMessageDeliveryResult struct {
 	RuntimeProvider string `json:"runtimeProvider,omitempty"`
 	RuntimeStatus   string `json:"runtimeStatus,omitempty"`
 	Controlled      bool   `json:"controlled,omitempty"`
+	DeliveryError   string `json:"deliveryError,omitempty"`
 }
 
 // AgentMessageDeliveryOptions carries optional delivery metadata for
@@ -101,6 +102,7 @@ func NewAgentMessageDeliveryResult(agentName string, delivery *leadcontrol.Deliv
 		result.Reason = delivery.Reason
 		result.SessionID = delivery.SessionID
 		result.InboxMessageID = delivery.InboxMessageID
+		result.DeliveryError = delivery.DeliveryError
 		result.RuntimeProvider = delivery.Provider
 		if delivery.Provider != "" && delivery.Provider != leadcontrol.RuntimeProviderCodex {
 			result.RuntimeStatus = delivery.HarnessRuntime.Status

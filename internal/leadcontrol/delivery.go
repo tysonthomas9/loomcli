@@ -33,6 +33,9 @@ type DeliveryResult struct {
 	Thread         *CodexThread
 	SessionID      string
 	InboxMessageID string
+	// DeliveryError is set when the turn landed but finishing the inbox
+	// message failed; State stays delivered.
+	DeliveryError string
 }
 
 type LeadMessageDeliveryOptions struct {
@@ -53,6 +56,11 @@ const (
 	assignmentInboxSourceRefPrefix = "lead-assignment://"
 	leadMessageDrainInterval       = 2 * time.Second
 )
+
+// leadInboxLeaseTTL is how long a claimed lead inbox message stays leased
+// before another delivery attempt may reclaim it. A var so tests can let a
+// real lease lapse.
+var leadInboxLeaseTTL = 2 * time.Minute
 
 // leadTurnDeliverer is the per-provider strategy for injecting a queued inbox
 // message into a lead's live session. The codex implementation dials the
@@ -341,7 +349,7 @@ func claimLeadInboxMessage(ctx context.Context, st store.Store, workspace, leadN
 		TargetAgentID: leadName,
 		SessionID:     sessionID,
 		ClaimedBy:     claimant,
-		LeaseTTL:      2 * time.Minute,
+		LeaseTTL:      leadInboxLeaseTTL,
 	})
 	if err == nil && msg.ClaimedBy == "" {
 		msg.ClaimedBy = claimant
@@ -463,7 +471,8 @@ func completeLeadInboxDelivered(
 		return nil, err
 	}
 	if completeErr != nil {
-		_ = MarkAssignmentDeliveryAttempt(ctx, st, workspace, sessionID, "inbox completion failed: "+completeErr.Error())
+		delivered.DeliveryError = "inbox completion failed: " + completeErr.Error()
+		_ = MarkAssignmentDeliveryAttempt(ctx, st, workspace, sessionID, delivered.DeliveryError)
 	}
 	return delivered, nil
 }
