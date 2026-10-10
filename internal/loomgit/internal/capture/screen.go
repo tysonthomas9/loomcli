@@ -10,10 +10,10 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/gitexec"
 )
 
-// ScreenStaged applies the capture rules for untracked secret-pattern paths
-// (D18) to a tree staged in a private index, such as a runner's flat patch.
-// A path the patch adds that parent does not track is untracked: an ignored
-// one is listed, any other is secret_suspect, and neither stays in the index.
+// ScreenStaged applies the capture rules for untracked paths (D18) to a tree
+// staged in a private index, such as a runner's flat patch. A path the patch
+// adds that parent does not track is untracked: an ignored one is listed, a
+// secret-pattern one is secret_suspect, and neither stays in the index.
 // The returned entries are sorted; any secret_suspect makes the capture
 // incomplete. Tracked secret-pattern paths are captured as they are.
 func ScreenStaged(ctx context.Context, runner *gitexec.Runner, env map[string]string, parent string) ([]Entry, error) {
@@ -21,21 +21,25 @@ func ScreenStaged(ctx context.Context, runner *gitexec.Runner, env map[string]st
 	if err != nil {
 		return nil, err
 	}
-	var suspects []string
-	for _, path := range lines(out) {
-		if SecretPath(path) {
-			suspects = append(suspects, path)
-		}
-	}
-	if len(suspects) == 0 {
+	added := lines(out)
+	if len(added) == 0 {
 		return nil, nil
 	}
-	ignored, err := ignoredPaths(ctx, runner, suspects)
+	ignored, err := ignoredPaths(ctx, runner, added)
 	if err != nil {
 		return nil, err
 	}
-	entries := make([]Entry, 0, len(suspects))
-	for _, path := range suspects {
+	var excluded []string
+	for _, path := range added {
+		if ignored[path] || SecretPath(path) {
+			excluded = append(excluded, path)
+		}
+	}
+	if len(excluded) == 0 {
+		return nil, nil
+	}
+	entries := make([]Entry, 0, len(excluded))
+	for _, path := range excluded {
 		entry := Entry{Path: path, Class: SecretSuspect}
 		if ignored[path] {
 			entry.Class = Listed
@@ -50,7 +54,7 @@ func ScreenStaged(ctx context.Context, runner *gitexec.Runner, env map[string]st
 		}
 		entries = append(entries, entry)
 	}
-	input := strings.Join(suspects, "\x00") + "\x00"
+	input := strings.Join(excluded, "\x00") + "\x00"
 	if _, err := runner.RunWithInput(ctx, []byte(input), env, "update-index", "--force-remove", "-z", "--stdin"); err != nil {
 		return nil, err
 	}

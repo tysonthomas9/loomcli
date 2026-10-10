@@ -257,3 +257,35 @@ func TestIgnoredSecretPathIsListedNotCaptured(t *testing.T) {
 		t.Fatalf("manifest = %v", classes)
 	}
 }
+
+func TestIgnoredNonSecretPathIsListedNotCaptured(t *testing.T) {
+	r := newSecretRepo(t, map[string]string{".gitignore": "*.out\n"})
+	r.write("kept.out", "tracked\n")
+	r.git("add", "--force", "kept.out")
+	r.git("commit", "-qm", "track an ignored-pattern file")
+	r.base = r.git("rev-parse", "HEAD")
+	r.write("generated.out", "ignored build output\n")
+	r.write("kept.out", "tracked edit\n")
+	r.write("work.txt", "work\n")
+	journalPath := filepath.Join(t.TempDir(), "journal.db")
+	rev, err := driverfreeze.FreezeAt(context.Background(), journalPath, driverfreeze.Request{
+		Workspace: "WS", Task: "TASK", Repo: "repo", Attempt: "ignored-plain", Worktree: r.dir,
+		Base: r.base, Patch: r.patch("generated.out"), Outcome: "completed",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree := r.tree(rev.HeadSHA)
+	if rev.Incomplete || contains(tree, "generated.out") || !contains(tree, "work.txt") {
+		t.Fatalf("ignored path: %+v tree %v", rev, tree)
+	}
+	if got := r.git("show", rev.HeadSHA+":kept.out"); got != "tracked edit" {
+		t.Fatalf("tracked ignored-pattern file = %q, want captured edit", got)
+	}
+	if classes := r.manifest("ignored-plain"); classes["generated.out"] != "listed" || len(classes) != 1 {
+		t.Fatalf("manifest = %v", classes)
+	}
+	if !retainedComplete(t, journalPath, "ignored-plain") {
+		t.Fatal("listed ignored path made the capture incomplete")
+	}
+}
