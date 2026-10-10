@@ -166,12 +166,34 @@ func verdictCarriedFrom(ctx context.Context, store *journal.SQLite, revision loo
 	return false, err
 }
 
+// conflictReaches reports whether publication's change conflicted or is
+// stacked above a change that did. Stack layers are ordered by PR number. A
+// conflict recorded without its changes reaches the whole stack.
+func conflictReaches(ctx context.Context, store *journal.SQLite, publication journal.Publication,
+	changes []string) (bool, error) {
+	if len(changes) == 0 {
+		return true, nil
+	}
+	for _, change := range changes {
+		conflicted, found, err := store.Publication(ctx, publication.Workspace, change)
+		if err != nil {
+			return false, err
+		}
+		if !found || conflicted.StackID != publication.StackID || conflicted.PRNumber <= publication.PRNumber {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 const rebuildNotCleanReason = "the rebuild after the PRs below merged was not clean; approve again"
 
 // restackPending returns the approval status and reason for a rebuild of the
 // change, after a PR below it merged, that has not finished or needs
 // attention, or "" when there is none. A conflicted rebuild can never carry
-// the approval, so it asks again; the stack keeps its resolve attention.
+// the approval, so the conflicting change and those stacked above it ask
+// again; clean changes below keep theirs. The stack keeps its resolve
+// attention.
 func restackPending(ctx context.Context, store *journal.SQLite, approval journal.MergeApproval,
 	publication journal.Publication) (string, string, error) {
 	if publication.StackID != "" {
@@ -181,7 +203,10 @@ func restackPending(ctx context.Context, store *journal.SQLite, approval journal
 		}
 		switch state.Status {
 		case "restack_conflict":
-			return MergeApprovalReapproval, rebuildNotCleanReason, nil
+			reached, err := conflictReaches(ctx, store, publication, state.ConflictChanges)
+			if err != nil || reached {
+				return MergeApprovalReapproval, rebuildNotCleanReason, err
+			}
 		case "swap_held":
 			return MergeApprovalWaiting, "the rebuild after the PRs below merged needs attention: " + state.Status, nil
 		case "review_required":

@@ -220,27 +220,27 @@ func recordNativeRestackError(ctx context.Context, store *journal.SQLite, runner
 	forge landing.Forge, offer journal.RestackOffer, publication journal.Publication,
 	layers []loomgit.AppliedLayer, heads map[string]string, paths []string, cause error) error {
 	if !errors.Is(cause, loomgit.NewError(loomgit.StackNotLinear, "", nil)) {
-		return recordRestackError(ctx, store, offer, publication.StackID, paths, cause)
+		return recordRestackError(ctx, store, offer, publication.StackID, paths, offer.Change, cause)
 	}
-	conflicted, err := nativeProviderConflict(ctx, store, runner, forge, offer, publication.Slug, layers, heads)
+	change, conflicted, err := nativeProviderConflict(ctx, store, runner, forge, offer, publication.Slug, layers, heads)
 	if err != nil || len(conflicted) == 0 {
 		return errors.Join(cause, err)
 	}
-	return recordRestackError(ctx, store, offer, publication.StackID, conflicted,
+	return recordRestackError(ctx, store, offer, publication.StackID, conflicted, change,
 		loomgit.NewError(loomgit.Conflict, "the provider cannot rebuild the stack on the new trunk", cause))
 }
 
-// nativeProviderConflict returns the conflicting paths of the first remaining
-// layer whose provider head does not descend from the layer below it, when
-// the provider reports that layer's PR as conflicting; otherwise nil.
+// nativeProviderConflict returns the first remaining layer whose provider head
+// does not descend from the layer below it, with its conflicting paths, when
+// the provider reports that layer's PR as conflicting; otherwise no paths.
 func nativeProviderConflict(ctx context.Context, store *journal.SQLite, runner *gitexec.Runner,
 	forge landing.Forge, offer journal.RestackOffer, slug string, layers []loomgit.AppliedLayer,
-	heads map[string]string) ([]string, error) {
+	heads map[string]string) (string, []string, error) {
 	statusForge, ok := forge.(interface {
 		PRStatuses(context.Context, string, string, string) (map[string]stackpublish.PRStatus, error)
 	})
 	if !ok {
-		return nil, nil
+		return "", nil, nil
 	}
 	owner, repo, _ := strings.Cut(slug, "/")
 	cursor := offer.TrunkSHA
@@ -255,19 +255,19 @@ func nativeProviderConflict(ctx context.Context, store *journal.SQLite, runner *
 		}
 		item, _, err := store.Publication(ctx, offer.Workspace, layer.Change)
 		if err != nil {
-			return nil, err
+			return "", nil, err
 		}
 		statuses, err := statusForge.PRStatuses(ctx, owner, repo, item.Branch)
 		if err != nil {
-			return nil, err
+			return "", nil, err
 		}
 		status, found := statuses[item.Branch]
 		if !found || status.Number != item.PRNumber || (status.Mergeable != "conflicting" && status.MergeState != "dirty") {
-			return nil, nil
+			return "", nil, nil
 		}
-		return layerConflictPaths(ctx, runner, layer, cursor, head), nil
+		return layer.Change, layerConflictPaths(ctx, runner, layer, cursor, head), nil
 	}
-	return nil, nil
+	return "", nil, nil
 }
 
 // layerConflictPaths merges the layer's own changes onto base without writing

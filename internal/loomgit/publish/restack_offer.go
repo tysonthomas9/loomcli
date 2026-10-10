@@ -54,7 +54,7 @@ func RestackOffer(ctx context.Context, offer journal.RestackOffer, forge landing
 		var restackErr error
 		revision, paths, restackErr = pull.RestackOfferWithPaths(lockedCtx, offer)
 		if restackErr != nil {
-			return recordRestackError(lockedCtx, store, offer, publication.StackID, paths, fmt.Errorf("restack published offer: %w", restackErr))
+			return recordRestackError(lockedCtx, store, offer, publication.StackID, paths, offer.Change, fmt.Errorf("restack published offer: %w", restackErr))
 		}
 		if err := store.ClearStackAttention(lockedCtx, offer.Workspace, publication.StackID); err != nil {
 			return err
@@ -67,8 +67,10 @@ func RestackOffer(ctx context.Context, offer journal.RestackOffer, forge landing
 	return revision, err
 }
 
+// recordRestackError records a restack conflict or held swap on the stack.
+// change is the change whose rebuild conflicted.
 func recordRestackError(ctx context.Context, store *journal.SQLite, offer journal.RestackOffer,
-	stackID string, paths []string, cause error) error {
+	stackID string, paths []string, change string, cause error) error {
 	var coded *loomgit.Error
 	if !errors.As(cause, &coded) {
 		return cause
@@ -82,7 +84,7 @@ func recordRestackError(ctx context.Context, store *journal.SQLite, offer journa
 	default:
 		return cause
 	}
-	if err := store.RecordStackAttention(ctx, offer, stackID, status, paths); err != nil {
+	if err := store.RecordStackAttention(ctx, offer, stackID, status, paths, []string{change}); err != nil {
 		return errors.Join(cause, err)
 	}
 	if status == "restack_conflict" {

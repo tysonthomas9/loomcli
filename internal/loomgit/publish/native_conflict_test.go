@@ -29,7 +29,8 @@ func TestLandingReconcileRecordsNativeProviderConflict(t *testing.T) {
 		t.Fatal("native provider conflict reconciled without error")
 	}
 	state, err := fixture.store.StackState(ctx, "W", "feature-1")
-	if err != nil || state.Status != "restack_conflict" || len(state.Paths) != 1 || state.Paths[0] != "B" {
+	if err != nil || state.Status != "restack_conflict" || len(state.Paths) != 1 || state.Paths[0] != "B" ||
+		len(state.ConflictChanges) != 1 || state.ConflictChanges[0] != "B" {
 		t.Fatalf("native provider conflict state = %+v, %v", state, err)
 	}
 	if got := git(t, fixture.repo, "rev-parse", "HEAD"); got != before {
@@ -77,7 +78,7 @@ func TestApproveMergeAsksAgainWhenTheRebuildConflicts(t *testing.T) {
 	if err := item.store.OfferRestack(ctx, offer); err != nil {
 		t.Fatal(err)
 	}
-	if err := item.store.RecordStackAttention(ctx, offer, "feature", "restack_conflict", []string{"c.txt"}); err != nil {
+	if err := item.store.RecordStackAttention(ctx, offer, "feature", "restack_conflict", []string{"c.txt"}, []string{"C"}); err != nil {
 		t.Fatal(err)
 	}
 	reconcileApprovals(t, item, forge)
@@ -90,5 +91,38 @@ func TestApproveMergeAsksAgainWhenTheRebuildConflicts(t *testing.T) {
 	}
 	if _, err := item.store.LoomMerge(ctx, "W", "feature"); !errors.Is(err, sql.ErrNoRows) || forge.merged != 0 {
 		t.Fatalf("conflicting rebuild merged: %v, merged = %d", err, forge.merged)
+	}
+}
+
+// A merged; C's rebuild conflicts and B's is clean. Only C, and D stacked
+// above it, ask again; B keeps its approval.
+func TestConflictAsksAgainOnlyFromTheConflictingChangeUp(t *testing.T) {
+	item, forge, heads := mergeApprovalFixture(t, "loom")
+	ctx := context.Background()
+	for index, change := range []string{"B", "C", "D"} {
+		if _, err := approveMerge(ctx, item.store, forge, "W", "L", change, heads[index+1], tyson); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := item.store.MarkLanded(ctx, "W", "A", "merge_commit"); err != nil {
+		t.Fatal(err)
+	}
+	offer := journal.RestackOffer{Workspace: "W", Change: "B", Predecessor: "A", Task: "task-B", Repo: item.repo,
+		Revision: 1, TrunkSHA: heads[0]}
+	if err := item.store.OfferRestack(ctx, offer); err != nil {
+		t.Fatal(err)
+	}
+	if err := item.store.RecordStackAttention(ctx, offer, "feature", "restack_conflict", []string{"c.txt"}, []string{"C"}); err != nil {
+		t.Fatal(err)
+	}
+	reconcileApprovals(t, item, forge)
+	if got := approval(t, item, "B"); got.Status == MergeApprovalReapproval || got.ApprovedHead != heads[1] {
+		t.Fatalf("clean B below the conflict = %+v", got)
+	}
+	for _, change := range []string{"C", "D"} {
+		got := approval(t, item, change)
+		if got.Status != MergeApprovalReapproval || got.Reason != rebuildNotCleanReason {
+			t.Fatalf("%s at or above the conflict = %+v", change, got)
+		}
 	}
 }
