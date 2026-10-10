@@ -98,7 +98,8 @@ func stackCard(ctx context.Context, store *journal.SQLite, forge prStatusForge, 
 	}
 	inMerge := merging && entry.Phase != "blocked"
 	for _, publication := range publications {
-		if publication.PRNumber == 0 || (publication.Phase != "done" && publication.Phase != "drift") {
+		// A PR being re-pushed after a restack (phase started) keeps its row.
+		if publication.PRNumber == 0 {
 			continue
 		}
 		card.Repo = publication.Slug
