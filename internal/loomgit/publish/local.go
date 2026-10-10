@@ -570,6 +570,14 @@ func trunkRevision(ctx context.Context, store *journal.SQLite, req Request) (str
 
 func deriveTrunkRevision(ctx context.Context, store *journal.SQLite, runner *gitexec.Runner,
 	req Request, source loomgit.Revision, base string) (string, error) {
+	requestID := "trunk-delivery:" + req.Workspace + ":" + req.Change + ":" + strconv.Itoa(source.Number) + ":" + base
+	// A retry (a landing restack after the first publish) reuses the recorded
+	// rebuild: replaying again makes a new commit SHA for the same request.
+	if existing, err := store.RevisionByRequest(ctx, requestID); err == nil && existing.HeadSHA != "" {
+		return existing.HeadSHA, nil
+	} else if err != nil && !errors.Is(err, journal.ErrNotFound) {
+		return "", err
+	}
 	result, err := replay.New(runner).TrialMerge(ctx, source.BaseSHA, source.HeadSHA, base)
 	if err != nil {
 		return "", err
@@ -579,7 +587,7 @@ func deriveTrunkRevision(ctx context.Context, store *journal.SQLite, runner *git
 	}
 	derived, err := changeset.RecordDerived(ctx, store, runner, changeset.DerivedInput{
 		Workspace: req.Workspace, Change: req.Change,
-		RequestID:  "trunk-delivery:" + req.Workspace + ":" + req.Change + ":" + strconv.Itoa(source.Number) + ":" + base,
+		RequestID:  requestID,
 		FromNumber: source.Number, Operation: "restack", BaseSHA: base,
 		HeadSHA: result.HeadSHA, Outcome: source.Outcome,
 	})
