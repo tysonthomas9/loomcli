@@ -159,7 +159,8 @@ export function CreateAgentModal({
   const [backgroundRole, setBackgroundRole] = useState<BackgroundRole>(
     initialSelection.backgroundRole,
   );
-  const [backend, setBackend] = useState(resolvedDefaultBackend);
+  // The user's pick; empty means the default below.
+  const [backend, setBackend] = useState("");
   const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
   const [selectedBuiltinPromptID, setSelectedBuiltinPromptID] =
     useState("pr-review");
@@ -238,20 +239,43 @@ export function CreateAgentModal({
     selectedKind === "interactive" &&
     (selectedBuiltinPromptID === "lead" ||
       selectedBuiltinPromptID === CUSTOM_PROMPT_ID);
+  // The default skips a harness the server reports unavailable, for the
+  // first available one; until the list loads, the default stands.
+  const isReady = (name: string): boolean =>
+    backends.some((b) => b.name === name && b.available);
+  const firstReady = (names: string[]): string | undefined =>
+    names.find(isReady);
+  const defaultUnavailable =
+    backends.length > 0 && !isReady(resolvedDefaultBackend);
+  const selected =
+    backend ||
+    (defaultUnavailable && firstReady(backends.map((b) => b.name))) ||
+    resolvedDefaultBackend;
   // A lead runs only on a harness this server has; until that list loads,
   // the chosen backend stands and the server explains a refusal.
   const leadOnly = isLead && leadHarnesses.length > 0;
   const harness =
-    leadOnly && !leadHarnesses.includes(backend) ? leadHarnesses[0] : backend;
+    leadOnly && !leadHarnesses.includes(selected)
+      ? (firstReady(leadHarnesses) ?? leadHarnesses[0])
+      : selected;
+  const displayName = (name: string): string =>
+    backends.find((b) => b.name === name)?.displayName ?? name;
+  const fallbackNote =
+    !backend &&
+    defaultUnavailable &&
+    harness &&
+    harness !== resolvedDefaultBackend
+      ? `${displayName(resolvedDefaultBackend)} is unavailable, so ${displayName(harness)} is selected.`
+      : null;
 
   const backendOptions = useMemo(() => {
     if (leadOnly) return leadHarnesses.map((h) => ({ value: h, label: h }));
     const opts = backends.map((b) => ({ value: b.name, label: b.displayName }));
-    if (backend && !opts.some((o) => o.value === backend)) {
-      opts.unshift({ value: backend, label: backend });
+    if (selected && !opts.some((o) => o.value === selected)) {
+      opts.unshift({ value: selected, label: selected });
     }
-    return opts.length > 0 ? opts : [{ value: backend, label: backend }];
-  }, [backend, backends, leadOnly, leadHarnesses]);
+    return opts.length > 0 ? opts : [{ value: selected, label: selected }];
+  }, [selected, backends, leadOnly, leadHarnesses]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -268,7 +292,7 @@ export function CreateAgentModal({
     setName(resolvedDefaultName);
     setSelectedKind(selection.kind);
     setBackgroundRole(selection.backgroundRole);
-    setBackend(resolvedDefaultBackend);
+    setBackend("");
     setSelectedRepos(defaultRepos);
     setSelectedBuiltinPromptID("pr-review");
     setCustomPrompt("");
@@ -313,7 +337,7 @@ export function CreateAgentModal({
     event.preventDefault();
     setError(null);
     const trimmedName = normalizeStoredAgentName(name);
-    const trimmedBackend = backend.trim();
+    const trimmedBackend = selected.trim();
     if (nameError) {
       setError(nameError);
       return;
@@ -391,7 +415,7 @@ export function CreateAgentModal({
       setName(resolvedDefaultName);
       setSelectedKind(selection.kind);
       setBackgroundRole(selection.backgroundRole);
-      setBackend(resolvedDefaultBackend);
+      setBackend("");
       setSelectedRepos(defaultRepos);
       setSelectedBuiltinPromptID("pr-review");
       setCustomPrompt("");
@@ -599,6 +623,7 @@ export function CreateAgentModal({
                   </option>
                 ))}
               </select>
+              {fallbackNote && <p className={styles.hint}>{fallbackNote}</p>}
             </div>
           </div>
 
