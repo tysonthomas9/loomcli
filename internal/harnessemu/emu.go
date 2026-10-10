@@ -109,6 +109,8 @@ type session struct {
 	Played   int              `json:"played"`            // scripted turns used
 	Running  *run             `json:"running,omitempty"` // the running turn
 	Asks     map[string]any   `json:"asks,omitempty"`    // pending per_ and frm_ asks by id, as listed
+
+	Instructions map[string]string `json:"instructions,omitempty"` // instruction entries by name (instructions.go)
 }
 
 // agent is the session's metadata agent_id, or "".
@@ -663,6 +665,7 @@ func (s *Server) h(fn func(w http.ResponseWriter, r *http.Request, ss *session, 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	s.sessionRoutes(mux)
+	s.instructionRoutes(mux)
 	mux.HandleFunc("GET /api/info", func(w http.ResponseWriter, _ *http.Request) {
 		reply(w, 200, map[string]any{"pid": os.Getpid(), "version": Version})
 	})

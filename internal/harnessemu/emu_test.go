@@ -786,3 +786,59 @@ func TestEmulatorSubagentTool(t *testing.T) {
 		}
 	}
 }
+
+// The emulator keeps OpenCode 2.0.19's per-session instruction entries
+// (PUT/DELETE /api/experimental/session/{id}/instructions/entries/{name}),
+// which the adapter's Open uses to install a preset persona: an Open with a
+// persona stores it on the session, a repeat Open without one removes it, a
+// missing session is SessionNotFoundError and a body without a string value
+// is refused.
+func TestEmulatorSessionInstructionEntries(t *testing.T) {
+	ctx := context.Background()
+	state := filepath.Join(t.TempDir(), "state.json")
+	c, url, _ := emuURL(t, state, "")
+	entries := func(id string) map[string]string {
+		t.Helper()
+		var st struct {
+			Sessions map[string]struct {
+				Instructions map[string]string `json:"instructions"`
+			} `json:"sessions"`
+		}
+		b, err := os.ReadFile(state)
+		if err != nil {
+			t.Fatalf("read state: %v", err)
+		}
+		if err := json.Unmarshal(b, &st); err != nil {
+			t.Fatalf("decode state: %v", err)
+		}
+		return st.Sessions[id].Instructions
+	}
+	dir := t.TempDir()
+	spec := loomharness.OpenSpec{Key: "p", Dir: dir, Metadata: map[string]string{"agent_id": "p"},
+		Preset: loomharness.PresetConfig{Persona: "PERSONA-LEAD"}}
+	ref, err := c.Open(ctx, spec)
+	if err != nil {
+		t.Fatalf("Open with a persona: %v", err)
+	}
+	if got := entries(ref.NativeID); got["loom-persona"] != "PERSONA-LEAD" {
+		t.Fatalf("entries after Open = %v", got)
+	}
+	spec.Preset.Persona = ""
+	if _, err := c.Open(ctx, spec); err != nil {
+		t.Fatalf("repeat Open without a persona: %v", err)
+	}
+	if got := entries(ref.NativeID); len(got) != 0 {
+		t.Fatalf("entries after the persona was cleared = %v", got)
+	}
+	entry := url + "/api/experimental/session/" + ref.NativeID + "/instructions/entries/loom-persona"
+	if code, b := send(t, "DELETE", entry, ""); code != 204 {
+		t.Fatalf("DELETE of an absent entry = %d %s", code, b)
+	}
+	if code, b := send(t, "PUT", entry, `{"value":1}`); code != 400 {
+		t.Fatalf("PUT without a string value = %d %s; want 400", code, b)
+	}
+	code, b := send(t, "PUT", url+"/api/experimental/session/ses_none/instructions/entries/loom-persona", `{"value":"x"}`)
+	if code != 404 || !strings.Contains(b, `"_tag":"SessionNotFoundError"`) {
+		t.Fatalf("PUT on a missing session = %d %s", code, b)
+	}
+}
