@@ -188,6 +188,10 @@ func TestHumanQueuedMergeLandsAndRecordsWhoMerged(t *testing.T) {
 	if merge.Layers[0].MergedBy != "Merge up to here by Tyson" || merge.Layers[1].MergedBy != "Merge up to here by Tyson" {
 		t.Fatalf("merged by = %+v", merge.Layers)
 	}
+	// A finished merge is history: the PR page's queue no longer lists it.
+	if queue, err := mergeQueue(context.Background(), item.store, "W"); err != nil || len(queue) != 0 {
+		t.Fatalf("queue after the merge landed = %+v err=%v", queue, err)
+	}
 }
 
 func TestMergeQueueListsQueuedMergeForThePRPage(t *testing.T) {
