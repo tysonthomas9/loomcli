@@ -514,3 +514,13 @@ func (s *SQLite) ApprovalFollowStatus(ctx context.Context, workspace, lead, chan
 	}
 	return status, err
 }
+
+// SpendWaitingApprovals settles every follow of one revision's approval that
+// has not applied yet (status 'spent'), in every lead, with the reason the
+// reviewer sees. A rebuild calls it: the revision will never apply.
+func (s *SQLite) SpendWaitingApprovals(ctx context.Context, workspace, change string, revision int, reason string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE approval_follow SET status='spent',paths='[]',reason=?
+		WHERE workspace=? AND change_id=? AND revision=? AND status NOT IN ('applied','superseded','spent')`,
+		reason, workspace, change, revision)
+	return err
+}

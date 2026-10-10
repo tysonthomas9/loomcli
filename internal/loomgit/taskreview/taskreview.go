@@ -115,9 +115,15 @@ func SettleTask(ctx context.Context, issues backend.IssueBackend, revisions Revi
 		open := "open"
 		err = issues.Update(ctx, task, backend.UpdateParams{Status: &open, RemoveLabels: []string{backend.CodeReviewLabel}})
 	case CloseApproved, CloseNoChanges:
-		// A closed issue refuses label changes, so the label goes first.
+		// A closed issue refuses label changes, so the label goes first. If
+		// the close then fails, the label goes back: a task in review without
+		// it reads as a plan review, and the next settle pass would skip it.
 		if err = issues.Update(ctx, task, backend.UpdateParams{RemoveLabels: []string{backend.CodeReviewLabel}}); err == nil {
-			_, err = issues.Close(ctx, task, backend.CloseParams{Reason: decision.CloseReason(), Force: true})
+			if _, err = issues.Close(ctx, task, backend.CloseParams{Reason: decision.CloseReason(), Force: true}); err != nil {
+				if restore := issues.Update(ctx, task, backend.UpdateParams{AddLabels: []string{backend.CodeReviewLabel}}); restore != nil {
+					err = errors.Join(err, fmt.Errorf("restore the %s label: %w", backend.CodeReviewLabel, restore))
+				}
+			}
 		}
 	}
 	if err != nil {

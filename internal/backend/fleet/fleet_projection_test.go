@@ -89,6 +89,9 @@ func TestBlocked_NativeFleetDBWrapper(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	parentID := "epic-1"
 	fb, ts := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if answersCodeReviewLookup(w, r) {
+			return
+		}
 		if got, want := r.URL.Path, "/api/v1/test-ws/issues/blocked"; got != want {
 			t.Errorf("path = %q, want %q", got, want)
 		}

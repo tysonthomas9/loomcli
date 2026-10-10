@@ -2,7 +2,10 @@ package taskreview
 
 import (
 	"context"
+	"errors"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/backend"
@@ -128,5 +131,79 @@ func TestSettleTaskWaitsWhileCodeAwaitsReview(t *testing.T) {
 	got, err := SettleTask(context.Background(), issues, fakeRevisions{{ChangeID: "c1", Number: 1, Verdict: "approve"}}, "W", "T")
 	if err != nil || got != Wait || len(issues.updates)+len(issues.closed) != 0 {
 		t.Fatalf("held approval: %q %v updates %+v closed %v, want the task kept in review", got, err, issues.updates, issues.closed)
+	}
+}
+
+// stickyIssues keeps one task's status and labels, refuses label changes once
+// it is closed (as FleetDB does), and fails its first closes.
+type stickyIssues struct {
+	backend.IssueBackend
+	status     string
+	labels     []string
+	failCloses int
+	failAdd    bool
+}
+
+func (s *stickyIssues) Get(context.Context, string) (*backend.IssueDetailData, error) {
+	return issueWith(s.status, s.labels...), nil
+}
+
+func (s *stickyIssues) List(_ context.Context, opts backend.ListOpts) ([]backend.IssueData, error) {
+	if s.status != opts.Status || (len(opts.Labels) > 0 && !backend.HasCodeReviewLabel(s.labels)) {
+		return nil, nil
+	}
+	return []backend.IssueData{{ID: "T1"}}, nil
+}
+
+func (s *stickyIssues) Update(_ context.Context, _ string, params backend.UpdateParams) error {
+	if s.status == "closed" {
+		return errors.New("closed issue")
+	}
+	if len(params.AddLabels) > 0 && s.failAdd {
+		return errors.New("fleet down")
+	}
+	kept := s.labels[:0:0]
+	for _, label := range s.labels {
+		if !slices.Contains(params.RemoveLabels, label) {
+			kept = append(kept, label)
+		}
+	}
+	kept = append(kept, params.AddLabels...)
+	s.labels = kept
+	return nil
+}
+
+func (s *stickyIssues) Close(context.Context, string, backend.CloseParams) (*backend.CloseResult, error) {
+	if s.failCloses > 0 {
+		s.failCloses--
+		return nil, errors.New("fleet down")
+	}
+	s.status = "closed"
+	return &backend.CloseResult{}, nil
+}
+
+// A failed close puts the code-review label back, so the task stays in code
+// review (not a plan review) and the next settle closes it.
+func TestSettleTaskRestoresCodeReviewWhenTheCloseFails(t *testing.T) {
+	ctx := context.Background()
+	applied := fakeRevisions{{ChangeID: "c1", Number: 1, Verdict: "approve", Applied: true}}
+	issues := &stickyIssues{status: "review", labels: []string{"x", backend.CodeReviewLabel}, failCloses: 1}
+	if got, err := SettleTask(ctx, issues, applied, "W", "T1"); err == nil || got != Wait {
+		t.Fatalf("failed close: %q %v, want an error", got, err)
+	}
+	if issues.status != "review" || !backend.HasCodeReviewLabel(issues.labels) {
+		t.Fatalf("after a failed close: %s %v, want review with the code-review label", issues.status, issues.labels)
+	}
+	if got, err := SettleTask(ctx, issues, applied, "W", "T1"); err != nil || got != CloseApproved || issues.status != "closed" {
+		t.Fatalf("retry: %q %v status %s, want closed", got, err, issues.status)
+	}
+	if backend.HasCodeReviewLabel(issues.labels) || !slices.Contains(issues.labels, "x") {
+		t.Fatalf("closed labels %v, want x without code-review", issues.labels)
+	}
+
+	issues = &stickyIssues{status: "review", labels: []string{backend.CodeReviewLabel}, failCloses: 1, failAdd: true}
+	_, err := SettleTask(ctx, issues, applied, "W", "T1")
+	if err == nil || !strings.Contains(err.Error(), "restore the code-review label") {
+		t.Fatalf("failed close and restore: %v, want both reported", err)
 	}
 }

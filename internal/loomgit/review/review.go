@@ -83,6 +83,9 @@ func submit(ctx context.Context, store Store, workspace, change string, number i
 	if headSHA != r.HeadSHA {
 		return loomgit.Verdict{}, loomgit.NewError(loomgit.StaleSubject, "revision head changed", nil)
 	}
+	if err := refuseStaleApproval(ctx, store, r, kind); err != nil {
+		return loomgit.Verdict{}, err
+	}
 	kind, reason, err = authorize(ctx, store, r, kind, reason, actor)
 	if err != nil {
 		return loomgit.Verdict{}, err

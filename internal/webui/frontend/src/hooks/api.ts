@@ -26,6 +26,7 @@ export {
   getRevisionDiff,
   getTaskDiff,
   getTaskRevisions,
+  rebuildTask,
   submitRevisionVerdict,
 } from "@/api/git/revisions";
 export type {

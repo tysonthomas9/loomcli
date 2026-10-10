@@ -108,3 +108,29 @@ describe("epic-runner stacked lineage payload", () => {
     });
   });
 });
+
+describe("epic-runner end state", () => {
+  const loom = { needsReview: (value) => value, completed: (value) => value };
+  const child = (id, status, labels) => ({ id, title: id + " title", status, labels });
+
+  it("says the epic waits for code review when every open task awaits it", () => {
+    const snapshot = {
+      readyCount: 0, blockedCount: 0, openChildrenCount: 2,
+      openChildren: [child("T-A", "review", ["code-review"]), child("T-B", "review", ["code-review"])],
+    };
+    const result = mod.endStateResult(loom, "E", snapshot, 0, ["T-A", "T-B"], []);
+    assert.equal(result.errorClass, "epic_no_progress");
+    assert.equal(result.summary,
+      "Epic E is waiting for code review of 2 task(s): T-A (T-A title), T-B (T-B title). Approve or Reject each to finish the epic");
+  });
+
+  it("names the open tasks that cannot start", () => {
+    const snapshot = {
+      readyCount: 0, blockedCount: 0, openChildrenCount: 2,
+      openChildren: [child("T-A", "review", ["code-review"]), child("T-C", "deferred", [])],
+    };
+    const result = mod.endStateResult(loom, "E", snapshot, 0, [], []);
+    assert.equal(result.summary,
+      "Epic E has 2 open child task(s) that cannot start: T-A (T-A title), T-C (T-C title) (1 awaiting code review)");
+  });
+});
