@@ -250,13 +250,14 @@ approval_state() { # approval_state <name>: "status|reason" of Approve and merge
 }
 
 wait_text() { # wait_text <testid> <text>: the open task shows it
-  local got=""
-  for _ in $(seq 1 30); do
+  # Poll the page as it is and reload only every 15s: a reload on every miss keeps
+  # sampling the loading state before the element mounts.
+  local got="" i
+  for i in $(seq 1 45); do
     got="$(browser eval "Array.from(document.querySelectorAll('[data-testid=\"$1\"]')).map(e => e.textContent).join(' | ')")"
     if grep -qF "$2" <<<"$got"; then return 0; fi
     sleep 1
-    browser eval "location.reload()" >/dev/null || true
-    browser wait '[data-testid="revisions-section"]' >/dev/null || true
+    if (( i % 15 == 0 )); then browser eval "location.reload()" >/dev/null || true; fi
   done
   echo "task shows $1 '$got', want '$2'" >&2
   return 1
