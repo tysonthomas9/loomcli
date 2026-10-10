@@ -57,8 +57,12 @@ func recordLoomMerge(ctx context.Context, store *journal.SQLite, request StackRe
 	if mode != "stack" || backend != "loom" {
 		return loomgit.NewError(loomgit.ModeMismatch, "Loom merge requires a recorded Loom stack", nil)
 	}
-	resumed, err := resumeLoomMerge(ctx, store, request, target)
-	if err != nil || resumed {
+	approved, isApproval := request.MergeAuthority.(approvedMerge)
+	if isApproval {
+		if started, err := approvalMergeStarted(ctx, store, request, approved); err != nil || started {
+			return err
+		}
+	} else if resumed, err := resumeLoomMerge(ctx, store, request, target); err != nil || resumed {
 		return err
 	}
 	forge, ok := request.forge.(loomMergeForge)
@@ -78,8 +82,32 @@ func recordLoomMerge(ctx context.Context, store *journal.SQLite, request StackRe
 		merge.RequestID = "lead-" + strings.TrimPrefix(merge.RequestID, "loom-")
 		merge.Authority, merge.PolicySetBy = leadMergeAuthority, policy.SetBy
 	}
+	if isApproval {
+		merge.RequestID = approved.Approval.MergeRequestID
+		merge.Authority, merge.PolicySetBy = humanApprovalAuthority, approved.Approval.ActorID
+	}
 	_, err = store.BeginLoomMerge(ctx, merge)
 	return err
+}
+
+// approvalMergeStarted reports whether this Approve and merge attempt already
+// started its Loom merge. Another active merge of the stack refuses it; a
+// finished one gives way to it.
+func approvalMergeStarted(ctx context.Context, store *journal.SQLite, request StackRequest, approved approvedMerge) (bool, error) {
+	existing, err := store.LoomMerge(ctx, request.Workspace, request.StackID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if existing.RequestID == approved.Approval.MergeRequestID {
+		return true, nil
+	}
+	if existing.Phase != "done" && existing.Phase != "blocked" {
+		return false, loomgit.NewError(loomgit.MergeBlocked, "another merge of this stack is running", nil)
+	}
+	return false, nil
 }
 
 func validateLoomMergeOrder(ctx context.Context, store *journal.SQLite, request StackRequest) error {

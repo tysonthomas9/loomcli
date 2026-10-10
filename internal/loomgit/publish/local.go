@@ -33,6 +33,9 @@ type Result struct {
 	AlreadyExists bool
 	Backend       string
 	StatusReason  string
+	// StackID is the Loom Git stack the PR is a layer of; a cross-repo lead
+	// has one per repository. Empty for a PR to trunk.
+	StackID string
 }
 
 var localPublishProvider = func() (Forge, string, string) { return nil, "", "" }
@@ -138,6 +141,7 @@ func PublishLeadChangeLocal(ctx context.Context, workspace, lead, change string)
 	}
 	for _, result := range results {
 		if result.Revision.Change == change {
+			result.StackID = stackID
 			return result, nil
 		}
 	}

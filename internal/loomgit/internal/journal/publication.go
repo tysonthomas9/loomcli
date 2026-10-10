@@ -47,7 +47,7 @@ func createNativeMergeSchema(db *sql.DB) error {
 			return err
 		}
 	}
-	return nil
+	return createMergeApprovalSchema(db)
 }
 
 func (s *SQLite) BeginNativeMerge(ctx context.Context, merge NativeMerge) error {
@@ -55,13 +55,14 @@ func (s *SQLite) BeginNativeMerge(ctx context.Context, merge NativeMerge) error 
 	if err != nil {
 		return err
 	}
-	// A finished lead-policy merge gives way to the next green prefix; any other
-	// recorded merge is never replaced.
+	// A finished lead-policy merge gives way to the next green prefix, and a
+	// finished merge to a human's Approve and merge of the next bottom PR; any
+	// other recorded merge is never replaced.
 	_, err = s.db.ExecContext(ctx, `INSERT INTO native_stack_merges
 		(workspace,stack_id,target,changes,phase,authority,set_by) VALUES (?,?,?,?, 'ready',?,?)
 		ON CONFLICT(workspace,stack_id) DO UPDATE SET target=excluded.target,changes=excluded.changes,
 		phase='ready',head_sha='',request_uuid='',reason='',authority=excluded.authority,set_by=excluded.set_by,merged_by=''
-		WHERE native_stack_merges.phase IN ('done','blocked') AND excluded.authority='lead_may_merge'`,
+		WHERE native_stack_merges.phase IN ('done','blocked') AND excluded.authority IN ('lead_may_merge','human_approval')`,
 		merge.Workspace, merge.StackID, merge.Target, string(encoded), merge.Authority, merge.SetBy)
 	if err != nil {
 		return err
@@ -797,4 +798,184 @@ func (s *SQLite) DecideMergeRequest(ctx context.Context, workspace, id, status, 
 		return ErrStale
 	}
 	return nil
+}
+
+// MergeApproval is a human's Approve and merge of a change's open PR, pinned to
+// the head the human saw (D29 (3)). Head follows a restack only when the
+// approval carries to it (D26); ApprovedHead keeps what the human approved.
+type MergeApproval struct {
+	Workspace         string `json:"workspace"`
+	Change            string `json:"change"`
+	Lead              string `json:"lead"`
+	StackID           string `json:"stack_id,omitempty"`
+	ApprovedHead      string `json:"approved_head"`
+	Head              string `json:"head"`
+	ActorKind         string `json:"actor_kind"`
+	ActorID           string `json:"actor_id"`
+	Status            string `json:"status"`
+	Reason            string `json:"reason,omitempty"`
+	Attempt           int    `json:"attempt"`
+	MergeRequestID    string `json:"merge_request_id,omitempty"`
+	DispatchHead      string `json:"dispatch_head,omitempty"`
+	ProviderRequestID string `json:"provider_request_id,omitempty"`
+	DispatchAttempts  int    `json:"dispatch_attempts,omitempty"`
+	// Attention marks a blocked approval whose merge outcome is unknown: it is
+	// never retried on its own, so nothing merges blind.
+	Attention bool  `json:"attention,omitempty"`
+	CreatedAt int64 `json:"created_at"`
+	Version   int   `json:"-"`
+}
+
+// MergeApprovalActive reports whether an approval can still merge its change.
+func MergeApprovalActive(status string) bool {
+	return status == "waiting" || status == "blocked" || status == "merging"
+}
+
+func createMergeApprovalSchema(db *sql.DB) error {
+	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS merge_approvals (
+		workspace TEXT NOT NULL, change_id TEXT NOT NULL, status TEXT NOT NULL,
+		state BLOB NOT NULL, version INTEGER NOT NULL DEFAULT 1,
+		PRIMARY KEY(workspace, change_id));
+	CREATE INDEX IF NOT EXISTS merge_approvals_open ON merge_approvals(status)`)
+	return err
+}
+
+// RecordMergeApproval stores a new approval for its change. It replaces a
+// finished one (merged, cancelled, stale, or asking again); an active approval
+// at the same head is returned as is, and one at another head is ErrStale.
+func (s *SQLite) RecordMergeApproval(ctx context.Context, approval MergeApproval) (MergeApproval, error) {
+	if approval.Workspace == "" || approval.Change == "" || approval.Head == "" || approval.ActorID == "" ||
+		!MergeApprovalActive(approval.Status) {
+		return MergeApproval{}, errors.New("merge approval is incomplete")
+	}
+	approval.ApprovedHead = approval.Head
+	data, err := json.Marshal(approval)
+	if err != nil {
+		return MergeApproval{}, err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO merge_approvals(workspace,change_id,status,state) VALUES (?,?,?,?)
+		ON CONFLICT(workspace,change_id) DO UPDATE SET status=excluded.status,state=excluded.state,
+		version=merge_approvals.version+1 WHERE merge_approvals.status NOT IN ('waiting','blocked','merging')`,
+		approval.Workspace, approval.Change, approval.Status, data)
+	if err != nil {
+		return MergeApproval{}, err
+	}
+	recorded, found, err := s.MergeApproval(ctx, approval.Workspace, approval.Change)
+	if err != nil || !found {
+		return MergeApproval{}, errors.Join(err, ErrNotFound)
+	}
+	if recorded.CreatedAt != approval.CreatedAt && recorded.Head != approval.Head {
+		return recorded, ErrStale
+	}
+	return recorded, nil
+}
+
+func (s *SQLite) MergeApproval(ctx context.Context, workspace, change string) (MergeApproval, bool, error) {
+	approval, err := scanMergeApproval(s.db.QueryRowContext(ctx, `SELECT state,version FROM merge_approvals
+		WHERE workspace=? AND change_id=?`, workspace, change))
+	if errors.Is(err, sql.ErrNoRows) {
+		return MergeApproval{}, false, nil
+	}
+	return approval, err == nil, err
+}
+
+// OpenMergeApprovals lists every approval that can still merge.
+func (s *SQLite) OpenMergeApprovals(ctx context.Context) ([]MergeApproval, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT state,version FROM merge_approvals
+		WHERE status IN ('waiting','blocked','merging') ORDER BY workspace,change_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var approvals []MergeApproval
+	for rows.Next() {
+		approval, err := scanMergeApproval(rows)
+		if err != nil {
+			return nil, err
+		}
+		approvals = append(approvals, approval)
+	}
+	return approvals, rows.Err()
+}
+
+// AdvanceMergeApproval moves an approval from before to after; it is ErrStale
+// when another writer moved it first.
+func (s *SQLite) AdvanceMergeApproval(ctx context.Context, before, after MergeApproval) error {
+	data, err := json.Marshal(after)
+	if err != nil {
+		return err
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE merge_approvals SET status=?,state=?,version=version+1
+		WHERE workspace=? AND change_id=? AND version=?`, after.Status, data, before.Workspace, before.Change, before.Version)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return ErrStale
+	}
+	return nil
+}
+
+func scanMergeApproval(row interface{ Scan(...any) error }) (MergeApproval, error) {
+	var data []byte
+	var version int
+	if err := row.Scan(&data, &version); err != nil {
+		return MergeApproval{}, err
+	}
+	var approval MergeApproval
+	if err := json.Unmarshal(data, &approval); err != nil {
+		return MergeApproval{}, err
+	}
+	approval.Version = version
+	return approval, nil
+}
+
+// PublishedStacks lists a workspace's stacked publications by stack, bottom
+// first, so a user can see each per-repo stack ID Loom recorded.
+func (s *SQLite) PublishedStacks(ctx context.Context, workspace string) ([]Publication, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT workspace,change_id,repo,branch,trunk,slug,head_sha,feature_flag,phase,pr_number,pr_url,stack_id,prior_sha,drift_sha
+		FROM change_publications WHERE workspace=? AND stack_id!='' ORDER BY stack_id, pr_number`, workspace)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var publications []Publication
+	for rows.Next() {
+		var p Publication
+		if err := rows.Scan(&p.Workspace, &p.Change, &p.Repo, &p.Branch, &p.Trunk, &p.Slug, &p.Head, &p.FeatureFlag,
+			&p.Phase, &p.PRNumber, &p.PRURL, &p.StackID, &p.Prior, &p.DriftSHA); err != nil {
+			return nil, err
+		}
+		publications = append(publications, p)
+	}
+	return publications, rows.Err()
+}
+
+// UnlandedPRsBelow lists the published, not yet landed PRs below publication
+// in its stack, bottom first. A PR to trunk (trunk mode) has none.
+func (s *SQLite) UnlandedPRsBelow(ctx context.Context, publication Publication) ([]int, error) {
+	if publication.StackID == "" {
+		return nil, nil
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT p.pr_number FROM change_publications p
+		WHERE p.workspace=? AND p.stack_id=? AND p.phase='done' AND p.pr_number>0 AND p.pr_number<?
+		AND NOT EXISTS (SELECT 1 FROM landed_changes l WHERE l.workspace=p.workspace AND l.change_id=p.change_id)
+		ORDER BY p.pr_number`, publication.Workspace, publication.StackID, publication.PRNumber)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var below []int
+	for rows.Next() {
+		var number int
+		if err := rows.Scan(&number); err != nil {
+			return nil, err
+		}
+		below = append(below, number)
+	}
+	return below, rows.Err()
 }

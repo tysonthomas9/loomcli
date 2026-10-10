@@ -22,9 +22,10 @@ import (
 var (
 	landingPass = func(ctx context.Context) error {
 		landingErr := landing.RunOnceWithOptions(ctx, landingOptions())
+		approvalErr := publish.ReconcileMergeApprovals(ctx)
 		leadErr := publish.ReconcileLeadMerges(ctx)
 		mergeErr := publish.ReconcileLoomMerges(ctx)
-		return errors.Join(landingErr, leadErr, mergeErr)
+		return errors.Join(landingErr, approvalErr, leadErr, mergeErr)
 	}
 	nativePass  = publish.ReconcileNativeAt
 	abandonPass = abandon.ReconcileLocal

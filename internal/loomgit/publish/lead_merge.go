@@ -274,5 +274,10 @@ func recordLayerMerged(ctx context.Context, store *journal.SQLite, merge journal
 		layers[merge.Index].MergedBy = "lead under setting set by " + merge.PolicySetBy
 		merge.Layers = layers
 	}
+	if merge.Authority == humanApprovalAuthority {
+		layers := append([]journal.LoomMergeLayer(nil), merge.Layers...)
+		layers[merge.Index].MergedBy = "Approve and merge by " + merge.PolicySetBy
+		merge.Layers = layers
+	}
 	return setLoomPhase(ctx, store, merge, "landing", merge.Index, "")
 }

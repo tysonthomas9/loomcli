@@ -67,6 +67,9 @@ func (m *Module) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/workspaces/{ws}/changes/{change}/revisions/{r}/verdict", func(w http.ResponseWriter, r *http.Request) {
 		handleVerdictWithPublisher(w, r, m.epicPublish)
 	})
+	mux.HandleFunc("GET /api/workspaces/{ws}/changes/{change}/merge-approval", handleMergeApproval)
+	mux.HandleFunc("POST /api/workspaces/{ws}/changes/{change}/merge-approval", handleMergeApproval)
+	mux.HandleFunc("DELETE /api/workspaces/{ws}/changes/{change}/merge-approval", handleMergeApproval)
 	mux.HandleFunc("PUT /api/workspaces/{ws}/git/following/{lead}", handleFollowing)
 	mux.HandleFunc("GET /api/workspaces/{ws}/git/settings", handleGitSettings)
 	mux.HandleFunc("PUT /api/workspaces/{ws}/git/settings", handleGitSettings)

@@ -2576,6 +2576,26 @@ type MergeActor struct {
 // MergeActorKind defines model for MergeActor.Kind.
 type MergeActorKind string
 
+// MergeApprovalResponse defines model for MergeApprovalResponse.
+type MergeApprovalResponse struct {
+	Data    MergeApprovalView `json:"data"`
+	Success bool              `json:"success"`
+}
+
+// MergeApprovalView defines model for MergeApprovalView.
+type MergeApprovalView struct {
+	Change     string  `json:"change"`
+	Head       string  `json:"head"`
+	MergeAfter *[]int  `json:"merge_after,omitempty"`
+	PrNumber   *int    `json:"pr_number,omitempty"`
+	PrUrl      *string `json:"pr_url,omitempty"`
+	Reason     *string `json:"reason,omitempty"`
+	StackId    *string `json:"stack_id,omitempty"`
+
+	// Status Empty when no Approve and merge was made; otherwise waiting, blocked, merging, merged, stale_subject, reapproval_required or cancelled.
+	Status string `json:"status"`
+}
+
 // MergeRequestView defines model for MergeRequestView.
 type MergeRequestView struct {
 	Audit       *string   `json:"audit,omitempty"`
@@ -3016,9 +3036,24 @@ type ReviewRevision struct {
 	ChangeId string `json:"change_id"`
 
 	// Date Commit date (ISO 8601) of the revision head, when the repo is readable.
-	Date       *string `json:"date,omitempty"`
-	HeadSha    string  `json:"head_sha"`
-	Incomplete bool    `json:"incomplete"`
+	Date *string `json:"date,omitempty"`
+
+	// FollowReason Reviewer-facing reason for a spent follow.
+	FollowReason *string `json:"follow_reason,omitempty"`
+
+	// FollowStatus Lead follow state of this revision's approval (approved, applied, conflict, apply_pending, superseded, spent). "spent" means the approval's apply can never run (for example the change was unapplied before the follow settled); approving again re-arms it.
+	FollowStatus *string `json:"follow_status,omitempty"`
+	HeadSha      string  `json:"head_sha"`
+	Incomplete   bool    `json:"incomplete"`
+
+	// MergeAfter Open PRs below this one in its stack, bottom first. Empty when it is the bottom PR (Approve and merge merges it now).
+	MergeAfter *[]int `json:"merge_after,omitempty"`
+
+	// MergeReason Why the approved merge has not happened, such as "merges after
+	MergeReason *string `json:"merge_reason,omitempty"`
+
+	// MergeStatus State of the change's Approve and merge, if one was made; one of waiting, blocked, merging, merged, stale_subject, reapproval_required or cancelled.
+	MergeStatus *string `json:"merge_status,omitempty"`
 
 	// NeedsWorkingArea True when the latest verdict approves this revision, it is not applied, and the verdict's target lead has no working area yet, so Apply is needed.
 	NeedsWorkingArea bool `json:"needs_working_area"`
@@ -3028,8 +3063,14 @@ type ReviewRevision struct {
 	Number    int    `json:"number"`
 	Outcome   string `json:"outcome"`
 
+	// PrHead Head SHA of the change's open PR; Approve and merge pins it.
+	PrHead *string `json:"pr_head,omitempty"`
+
 	// PrNumber Number of the change's open PR, once published.
 	PrNumber *int `json:"pr_number,omitempty"`
+
+	// PrState State of the change's PR, once published; one of open, merged or closed.
+	PrState *string `json:"pr_state,omitempty"`
 
 	// PrUrl URL of the change's open PR, once published.
 	PrUrl *string `json:"pr_url,omitempty"`
@@ -3754,6 +3795,28 @@ type AddressChangeFeedbackJSONBody struct {
 	Attempt string `json:"attempt"`
 }
 
+// CancelMergeApprovalJSONBody defines parameters for CancelMergeApproval.
+type CancelMergeApprovalJSONBody struct {
+	Actor struct {
+		Id string `json:"id"`
+
+		// Kind human, agent or lead; only a human can approve a merge.
+		Kind string `json:"kind"`
+	} `json:"actor"`
+}
+
+// ApproveMergeJSONBody defines parameters for ApproveMerge.
+type ApproveMergeJSONBody struct {
+	Actor struct {
+		Id string `json:"id"`
+
+		// Kind human, agent or lead; only a human can approve a merge.
+		Kind string `json:"kind"`
+	} `json:"actor"`
+	HeadSha string `json:"head_sha"`
+	Lead    string `json:"lead"`
+}
+
 // GetRevisionDiffParams defines parameters for GetRevisionDiff.
 type GetRevisionDiffParams struct {
 	Repo string `form:"repo" json:"repo"`
@@ -3767,11 +3830,14 @@ type SubmitRevisionVerdictJSONBody struct {
 	} `json:"actor"`
 
 	// ApproveOnly Apply the approval without opening its PR (Approve only). By default an approval opens the change's PR as soon as it applies (D29).
-	ApproveOnly *bool                                `json:"approve_only,omitempty"`
-	HeadSha     string                               `json:"head_sha"`
-	Lead        *string                              `json:"lead,omitempty"`
-	Reason      *string                              `json:"reason,omitempty"`
-	Verdict     SubmitRevisionVerdictJSONBodyVerdict `json:"verdict"`
+	ApproveOnly *bool   `json:"approve_only,omitempty"`
+	HeadSha     string  `json:"head_sha"`
+	Lead        *string `json:"lead,omitempty"`
+
+	// Merge Approve and merge for a task whose PR is already open and whose newest version needs approving again. Human only; the merge is approved at this revision's head and waits for the PR to carry it (D29).
+	Merge   *bool                                `json:"merge,omitempty"`
+	Reason  *string                              `json:"reason,omitempty"`
+	Verdict SubmitRevisionVerdictJSONBodyVerdict `json:"verdict"`
 }
 
 // SubmitRevisionVerdictJSONBodyActorKind defines parameters for SubmitRevisionVerdict.
@@ -4219,6 +4285,12 @@ type StopAgentJSONRequestBody StopAgentJSONBody
 
 // AddressChangeFeedbackJSONRequestBody defines body for AddressChangeFeedback for application/json ContentType.
 type AddressChangeFeedbackJSONRequestBody AddressChangeFeedbackJSONBody
+
+// CancelMergeApprovalJSONRequestBody defines body for CancelMergeApproval for application/json ContentType.
+type CancelMergeApprovalJSONRequestBody CancelMergeApprovalJSONBody
+
+// ApproveMergeJSONRequestBody defines body for ApproveMerge for application/json ContentType.
+type ApproveMergeJSONRequestBody ApproveMergeJSONBody
 
 // SubmitRevisionVerdictJSONRequestBody defines body for SubmitRevisionVerdict for application/json ContentType.
 type SubmitRevisionVerdictJSONRequestBody SubmitRevisionVerdictJSONBody

@@ -81,10 +81,20 @@ func beginNativeMerge(ctx context.Context, store Store, request StackRequest, ta
 		return loomgit.NewError(loomgit.Stale, "merge target is not in stack", nil)
 	}
 	merge := journal.NativeMerge{Workspace: request.Workspace, StackID: request.StackID, Target: target, Changes: request.Changes[:index+1]}
-	if policy, ok := request.MergeAuthority.(whenGreenMerge); ok {
-		merge.Authority, merge.SetBy = leadMergeAuthority, policy.SetBy
-	}
+	merge.Authority, merge.SetBy = nativeMergeAuthority(request.MergeAuthority)
 	return mergeStore.BeginNativeMerge(ctx, merge)
+}
+
+// nativeMergeAuthority names who authorized a native merge that no human
+// confirmed in the merge dialog.
+func nativeMergeAuthority(authority MergeAuthority) (string, string) {
+	switch authority := authority.(type) {
+	case whenGreenMerge:
+		return leadMergeAuthority, authority.SetBy
+	case approvedMerge:
+		return humanApprovalAuthority, authority.Approval.ActorID
+	}
+	return "", ""
 }
 
 func requireNativeVerdict(ctx context.Context, store Store, publication journal.Publication) error {
