@@ -21,12 +21,12 @@ import {
   trayRows,
   trayWaves,
   useAgentChat,
+  useHarnessHealth,
   useRoster,
   useRosterActivity,
   useRosterAgent,
 } from "@/hooks";
-import { getHarness } from "@/api/agentsv1";
-import type { HarnessInfo, WaitingMessage } from "@/api/agentsv1";
+import type { WaitingMessage } from "@/api/agentsv1";
 import type { ChatItem } from "@/hooks";
 import { AgentBadge } from "./AgentBadge";
 import { AgentTray, chatPath, HarnessIcon } from "./AgentTray";
@@ -338,8 +338,8 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
               Needs attention: {attentionText(agent.attention_reason)}
               {agent.attention_reason === "harness_unavailable" &&
                 health?.ok === false &&
-                health.warning &&
-                ` ${health.warning.replace(/^[a-z_]+: /, "")}.`}
+                health.warning?.startsWith(TOO_OLD) &&
+                ` ${health.warning.slice(TOO_OLD.length)}.`}
             </div>
           )}
 
@@ -449,30 +449,8 @@ const ATTENTION: Record<string, string> = {
 };
 const attentionText = (reason: string) => ATTENTION[reason] ?? reason;
 
-/**
- * The harness's health (why it is unavailable, or that it is newer than
- * tested), reread when the agent's Attention changes.
- */
-function useHarnessHealth(
-  ws: string,
-  harness: string | undefined,
-  attention: string | null | undefined,
-): HarnessInfo["health"] | null {
-  const key = `${ws}/${harness ?? ""}`;
-  const [got, setGot] = useState<{ key: string; h: HarnessInfo["health"] }>();
-  useEffect(() => {
-    if (!harness) return;
-    let live = true;
-    getHarness(ws, harness).then(
-      (r) => live && setGot({ key, h: r.health }),
-      () => {},
-    );
-    return () => {
-      live = false;
-    };
-  }, [ws, harness, key, attention]);
-  return got?.key === key ? got.h : null;
-}
+/** The prefix of Health's reason for a harness below its minimum version. */
+const TOO_OLD = "harness_too_old: ";
 
 /**
  * The row's spacing kind. Every work row (work, work-toggle, work-live and

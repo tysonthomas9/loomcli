@@ -50,6 +50,7 @@ export type {
 } from "./useClaimHold";
 
 export { useAgentChat, useArchiveAgent, useDeleteAgent } from "./useAgentChat";
+export { useHarnessHealth } from "./useHarnessHealth";
 export type { DeleteRefusal, UseAgentChatReturn } from "./useAgentChat";
 export { latestTurnError, ownSender, senderAgent } from "./agentChatModel";
 export type {

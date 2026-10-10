@@ -1047,6 +1047,57 @@ describe("AgentChat lifecycle (1.8b)", () => {
   });
 
   it.each([
+    ["pending", () => new Promise(() => {})],
+    ["failed", () => Promise.reject(new Error("down"))],
+  ])(
+    "shows no earlier reason while the reread for new Attention is %s",
+    async (_, reread) => {
+      api.getHarness.mockResolvedValue({
+        health: {
+          ok: false,
+          warning:
+            "harness_too_old: opencode 2.0.1 is below the minimum 2.0.19; upgrade opencode",
+        },
+      });
+      await mount(agent({ attention_reason: "harness_unavailable" }));
+      await screen.findByText(/below the minimum/);
+      api.getHarness.mockImplementation(reread);
+      api.getAgent.mockResolvedValue(
+        agent({ attention_reason: "delivery_unknown" }),
+      );
+      deliver(ev("agent.state_changed"));
+      await screen.findByText(/a message may not have been delivered/);
+      api.getAgent.mockResolvedValue(
+        agent({ attention_reason: "harness_unavailable" }),
+      );
+      deliver(ev("agent.state_changed"));
+      await waitFor(() =>
+        expect(screen.getByTestId("agent-attention-banner")).toHaveTextContent(
+          /^Needs attention: the harness is unavailable\.$/,
+        ),
+      );
+    },
+  );
+
+  it("names only a version reason, not another failure", async () => {
+    api.getHarness.mockResolvedValue({
+      health: {
+        ok: false,
+        warning:
+          "harness_unavailable: codex app-server for /other failed 3 times in a row",
+      },
+    });
+    await mount(
+      agent({ harness: "codex", attention_reason: "harness_unavailable" }),
+    );
+    await waitFor(() => expect(api.getHarness).toHaveBeenCalled());
+    await act(() => Promise.resolve());
+    expect(screen.getByTestId("agent-attention-banner")).toHaveTextContent(
+      /^Needs attention: the harness is unavailable\.$/,
+    );
+  });
+
+  it.each([
     ["opencode", "opencode 2.0.20 is newer than the last tested 2.0.19"],
     ["codex", "codex 0.158.0 is newer than the last tested 0.157.1"],
     ["claude", "claude 2.1.286 is newer than the last tested 2.1.285"],
