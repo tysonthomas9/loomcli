@@ -126,18 +126,24 @@ func FreezeCaptureAt(ctx context.Context, journalPath string, in CaptureRequest)
 		if err != nil {
 			return err
 		}
-		if in.SourceRepo != "" {
-			if err := taskcopy.ImportSnapshotUnderLease(ctx, journalPath, in.SourceRepo, in.Worktree, in.Workspace, in.Attempt, revision.Change, revision.Number); err != nil {
-				return err
-			}
-		}
-		if in.SkipRetention {
-			return nil
-		}
-		return store.RecordRetainedCopy(ctx, journal.RetainedCopy{Workspace: in.Workspace, Change: revision.Change,
-			Attempt: in.Attempt, Path: in.Worktree, SourceRepo: in.SourceRepo, Complete: complete})
+		return keepCapturedCopy(ctx, store, journalPath, in, revision, complete)
 	})
 	return revision, err
+}
+
+// keepCapturedCopy imports the source snapshot for a frozen capture and
+// records the task copy as retained unless the caller retains it itself.
+func keepCapturedCopy(ctx context.Context, store *journal.SQLite, journalPath string, in CaptureRequest, revision loomgit.Revision, complete bool) error {
+	if in.SourceRepo != "" {
+		if err := taskcopy.ImportSnapshotUnderLease(ctx, journalPath, in.SourceRepo, in.Worktree, in.Workspace, in.Attempt, revision.Change, revision.Number); err != nil {
+			return err
+		}
+	}
+	if in.SkipRetention {
+		return nil
+	}
+	return store.RecordRetainedCopy(ctx, journal.RetainedCopy{Workspace: in.Workspace, Change: revision.Change,
+		Attempt: in.Attempt, Path: in.Worktree, SourceRepo: in.SourceRepo, Complete: complete})
 }
 
 // screenTaskCopy records what the task copy's capture leaves out and reports
