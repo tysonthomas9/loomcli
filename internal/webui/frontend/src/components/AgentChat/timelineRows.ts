@@ -363,12 +363,14 @@ export function bridgeLabel(
  * A finished agent_create call, which the Started marker next to it folds
  * in: one the bridge parses, or loom code naming agent_create another way,
  * such as search({namespace:'loom', query:'agent_create'}), or loom code
- * whose saved input was cut short before it (CL4).
+ * whose saved input was cut short before it (CL4), or the call a child of
+ * started names, whatever its saved input holds (CL5).
  */
-const isCreateCall = (i: ChatItem): i is ToolEntry =>
+const isCreateCall = (i: ChatItem, started: StartedItem): i is ToolEntry =>
   i.kind === "tool" &&
   i.status === "completed" &&
-  (bridgeCalls(i).some((c) => c.tool === "agent_create") ||
+  (started.children.some((c) => !!c.call && c.call === i.itemId) ||
+    bridgeCalls(i).some((c) => c.tool === "agent_create") ||
     (isExecute(i) &&
       /["'`]loom\b|\bloom\./.test(i.tool.input ?? "") &&
       (/\bagent_create\b/.test(i.tool.input ?? "") ||
@@ -390,7 +392,7 @@ function foldStarted(items: readonly ChatItem[]): Unit[] {
       const calls: ToolEntry[] = [];
       while (out.length > 0) {
         const t = out[out.length - 1]!;
-        if (t.kind === "started-unit" || !isCreateCall(t)) break;
+        if (t.kind === "started-unit" || !isCreateCall(t, item)) break;
         calls.unshift(t);
         out.pop();
       }
@@ -404,7 +406,7 @@ function foldStarted(items: readonly ChatItem[]): Unit[] {
       } else out.push({ kind: "started-unit", item, calls });
       continue;
     }
-    if (last?.kind === "started-unit" && isCreateCall(item)) {
+    if (last?.kind === "started-unit" && isCreateCall(item, last.item)) {
       last.calls.push(item);
       continue;
     }

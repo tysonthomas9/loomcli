@@ -131,6 +131,10 @@ type Service struct {
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
 	asks  map[string]map[string]Ask // open asks by agent and ask ID, under mu
+	// calls are, by agent, its tool calls that started and have not
+	// completed in a running turn, under mu: a child its one running call
+	// creates names that call (CL5).
+	calls map[string]map[string]bool
 	// resumed holds, by harness, the sessions this process opened or
 	// resumed, under mu: Reconcile resumes each live session once, so its
 	// policy is installed here, and again after its harness restarts.
@@ -168,7 +172,7 @@ func New(cfg ServiceConfig) *Service {
 		inputKey: cfg.InputKey, catalogWait: 15 * time.Second, catalogPoll: 250 * time.Millisecond,
 		catalogWarmUp: cfg.CatalogWarmUp, listed: map[string]time.Time{}, tick: realTicker, after: time.After,
 		queue: map[string]*queued{}, queueWake: make(chan struct{}, 1),
-		locks: map[string]*sync.Mutex{}, asks: map[string]map[string]Ask{}, resumed: map[string]map[loomharness.NativeRef]bool{}}
+		locks: map[string]*sync.Mutex{}, asks: map[string]map[string]Ask{}, calls: map[string]map[string]bool{}, resumed: map[string]map[loomharness.NativeRef]bool{}}
 	if cfg.RecoverFirst {
 		s.ready = make(chan struct{})
 		s.recovered = sync.OnceFunc(func() { close(s.ready) })

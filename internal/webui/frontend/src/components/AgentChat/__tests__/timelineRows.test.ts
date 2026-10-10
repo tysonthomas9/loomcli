@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AgentEvent } from "@/api/agentsv1";
 import type { ChatItem } from "@/hooks";
+import { chatItems } from "@/hooks/agents/agentChatModel";
 import {
   STEP_MAX,
   bridgeLabel,
@@ -506,5 +507,54 @@ describe("code mode headers (CL4)", () => {
     });
     expect(stepLabel(e("tool.started"))).toBe("▸ Running code");
     expect(stepLabel(e("item.completed"))).toBe("▸ Ran code");
+  });
+});
+
+describe("the call a child.created names (CL5)", () => {
+  const ev = (seq: number, kind: string, payload: object): AgentEvent => ({
+    agent_id: "lead",
+    seq,
+    event_id: `${kind}:${seq}`,
+    kind,
+    turn_id: "t",
+    payload,
+    created_at: "",
+  });
+  // More than 16 KiB of code before the first loom reference: the saved
+  // input never names loom.
+  const cut = (itemId: string) =>
+    ev(2, "item.completed", {
+      itemId,
+      itemKind: "tool",
+      tool: { name: "execute", input: `{"code":"${"x".repeat(16 << 10)}…` },
+    });
+
+  it("folds the named call into the Started marker even when its input was cut", () => {
+    const items = chatItems(
+      [
+        ev(1, "child.created", { child: "k1", name: "kid", call: "m/tool/1" }),
+        cut("m/tool/1"),
+      ],
+      new Map(),
+    );
+    const rows = deriveTimelineRows(items, new Set());
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      kind: "started",
+      calls: [{ key: "item.completed:2" }],
+    });
+  });
+
+  it("leaves a cut call the marker does not name apart", () => {
+    const items = chatItems(
+      [
+        ev(1, "child.created", { child: "k1", name: "kid", call: "m/tool/1" }),
+        cut("m/tool/9"),
+      ],
+      new Map(),
+    );
+    const rows = deriveTimelineRows(items, new Set());
+    expect(rows[0]).toMatchObject({ kind: "started", calls: [] });
+    expect(rows).toHaveLength(2);
   });
 });

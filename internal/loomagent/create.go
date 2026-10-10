@@ -68,6 +68,9 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (AgentInfo, err
 		return AgentInfo{}, err
 	}
 	id := a.AgentID
+	if req.Parent != "" && req.Actor == (ActorRef{Kind: "agent", ID: req.Parent}) {
+		ctx = context.WithValue(ctx, byParent{}, true)
+	}
 	createCrash("inserted")
 	if a, err = s.finishCreate(ctx, id); err != nil {
 		s.createFailed(ctx, id, err)
@@ -439,6 +442,10 @@ func (s *Service) finishCreate(ctx context.Context, agentID string) (loomstore.A
 	return s.wake(ctx, a) // hand over the first message
 }
 
+// byParent marks a Create its parent agent makes, from one of its tool
+// calls; a Create reconcile finishes later has no such call (CL5).
+type byParent struct{}
+
 // commitCreated is Create's last step, one transaction under the event lane
 // (Store.CommitCreate): a creating row moves to idle; a Create Attention
 // clears; create_step becomes done; and the created events are
@@ -459,7 +466,11 @@ func (s *Service) commitCreated(ctx context.Context, a loomstore.Agent) (loomsto
 	if err != nil {
 		return before, err
 	}
-	more, err := created(a)
+	call := ""
+	if ctx.Value(byParent{}) != nil && a.ParentAgentID != nil {
+		call = s.runningCall(*a.ParentAgentID)
+	}
+	more, err := created(a, call)
 	if err != nil {
 		return before, err
 	}

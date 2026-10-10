@@ -271,6 +271,76 @@ func TestTaskCompletedSweepAfterCrash(t *testing.T) {
 	}
 }
 
+// TestChildCreatedNamesItsCall: a child the lead creates while exactly one
+// of the lead's tool calls runs names that call on its child.created (CL5),
+// whatever the call's saved input holds; with none or two running, or a
+// child someone else creates for the lead, it names none.
+func TestChildCreatedNamesItsCall(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	lead, ref := newLead(t, e, s, "lead")
+	tool := func(typ loomharness.EventType, id string) {
+		t.Helper()
+		if _, err := s.ingest(ctx, "opencode", loomharness.Event{Type: typ, Session: ref, TurnID: "T1", ItemID: id,
+			ItemKind: "tool", Tool: &loomharness.Tool{Name: "execute"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	create := func(name string, by ActorRef) string {
+		t.Helper()
+		info, err := s.Create(ctx, CreateRequest{Envelope: Envelope{RequestID: name}, Preset: "task", Name: name,
+			Parent: lead.AgentID, Repo: "/repo", Overrides: Overrides{Harness: "opencode"}, FirstMessage: "do it", Actor: by})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return info.AgentID
+	}
+	call := func(child string) any {
+		t.Helper()
+		page, err := e.st.ListEvents(ctx, loomstore.EventQuery{AgentID: lead.AgentID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, ev := range page.Events {
+			var p map[string]any
+			if ev.Kind == KindChildCreated && json.Unmarshal(ev.Payload, &p) == nil && p["child"] == child {
+				return p["call"]
+			}
+		}
+		t.Fatalf("no child.created for %s", child)
+		return nil
+	}
+	byLead := ActorRef{Kind: "agent", ID: lead.AgentID}
+	tool(loomharness.EventItemStarted, "call1")
+	if got := call(create("c1", byLead)); got != "call1" {
+		t.Fatalf("c1 call = %v, want call1", got)
+	}
+	if got := call(create("c2", ActorRef{})); got != nil {
+		t.Fatalf("c2, created by the user, call = %v", got)
+	}
+	tool(loomharness.EventItemStarted, "call2")
+	if got := call(create("c3", byLead)); got != nil {
+		t.Fatalf("c3, two calls running, call = %v", got)
+	}
+	tool(loomharness.EventItemCompleted, "call1")
+	if got := call(create("c4", byLead)); got != "call2" {
+		t.Fatalf("c4 call = %v, want call2", got)
+	}
+	tool(loomharness.EventItemCompleted, "call2")
+	if got := call(create("c5", byLead)); got != nil {
+		t.Fatalf("c5, no call running, call = %v", got)
+	}
+	tool(loomharness.EventItemStarted, "call3")
+	if _, err := s.ingest(ctx, "opencode", loomharness.Event{Type: loomharness.EventTurnCompleted, Session: ref,
+		TurnID: "T1", StopReason: "cancelled"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := call(create("c6", byLead)); got != nil {
+		t.Fatalf("c6, after the turn ended, call = %v", got)
+	}
+}
+
 // TestTaskCompletedReconcileOnce: a child's turn ends while Loom is down;
 // Reconcile finishes it and records task_completed on the lead once, with
 // child.created before it, and a repeat Reconcile adds nothing.

@@ -484,6 +484,7 @@ func (s *Service) ingest(ctx context.Context, harness string, e loomharness.Even
 	} else if err != nil {
 		return false, err
 	}
+	s.trackCall(id, e)
 	if e, err = s.withText(ctx, id, e); err != nil {
 		return false, err
 	}
@@ -504,6 +505,38 @@ func (s *Service) ingest(ctx context.Context, harness string, e loomharness.Even
 		s.events.Notify(nativeRow(id, KindToolStarted, e))
 	}
 	return true, s.HarnessEvent(ctx, id, e)
+}
+
+// trackCall notes agentID's tool call e starting, or its item completing, or
+// its turn ending, which ends all its calls.
+func (s *Service) trackCall(agentID string, e loomharness.Event) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch {
+	case e.Type == loomharness.EventItemStarted && e.ItemKind == "tool" && e.ItemID != "":
+		if s.calls[agentID] == nil {
+			s.calls[agentID] = map[string]bool{}
+		}
+		s.calls[agentID][e.ItemID] = true
+	case e.Type == loomharness.EventItemCompleted:
+		delete(s.calls[agentID], e.ItemID)
+	case e.Type == loomharness.EventTurnCompleted:
+		delete(s.calls, agentID)
+	}
+}
+
+// runningCall is agentID's one running tool call, or "" when it runs none
+// or more than one.
+func (s *Service) runningCall(agentID string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.calls[agentID]) != 1 {
+		return ""
+	}
+	for id := range s.calls[agentID] {
+		return id
+	}
+	return ""
 }
 
 // withText sets a message.delivered event's Text and Sender to the text Loom

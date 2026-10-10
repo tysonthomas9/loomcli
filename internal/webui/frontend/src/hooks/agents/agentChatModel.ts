@@ -61,7 +61,14 @@ export type ChatItem =
       at?: string;
     }
   | { key: string; kind: "reasoning"; text: string; streaming?: boolean }
-  | { key: string; kind: "tool"; tool: ToolCall; status: ToolStatus }
+  /** itemId is the harness's id for the call, once saved. */
+  | {
+      key: string;
+      kind: "tool";
+      tool: ToolCall;
+      status: ToolStatus;
+      itemId?: string;
+    }
   | { key: string; kind: "turn_end"; reason: string; error?: string }
   /** A harness switch: later turns run in a fresh native context. */
   | { key: string; kind: "harness_changed"; from: string; to: string }
@@ -81,6 +88,8 @@ export type ChatItem =
 export interface StartedChild {
   child: string;
   name: string;
+  /** The item id of the parent's tool call that created it, when known (CL5). */
+  call?: string;
 }
 
 export type Delivery = "waiting" | "delivered";
@@ -136,7 +145,13 @@ function itemFor(
       if (p.itemKind === "tool") {
         const tool = p.tool ?? {};
         const status = tool.failed ? "failed" : "completed";
-        return { key, kind: "tool", tool, status };
+        return {
+          key,
+          kind: "tool",
+          tool,
+          status,
+          ...(p.itemId ? { itemId: p.itemId } : {}),
+        };
       }
       if (p.itemKind === "reasoning")
         return { key, kind: "reasoning", text: p.text ?? "" };
@@ -162,7 +177,9 @@ function itemFor(
       return {
         key,
         kind: "started",
-        children: [{ child: c.child, name: c.name }],
+        children: [
+          { child: c.child, name: c.name, ...(c.call ? { call: c.call } : {}) },
+        ],
         at: e.created_at,
       };
     }
