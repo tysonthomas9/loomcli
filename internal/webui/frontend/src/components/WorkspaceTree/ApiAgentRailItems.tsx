@@ -4,7 +4,7 @@ import { Link, useMatch } from "react-router-dom";
 
 import type { Agent } from "@/api/agentsv1";
 import { CompactRailHost } from "@/components/CompactRail";
-import { agentColor, agentInitials, useAgentRoster } from "@/hooks";
+import { agentColor, agentInitials } from "@/hooks";
 import {
   agentDot,
   agentRoleLabel,
@@ -12,12 +12,14 @@ import {
   storedAgentApiOrder,
 } from "@/hooks/agents/agentSidebar";
 
+import { useSidebarRoster } from "./AgentRosterOwner";
 import styles from "./CollapsedAgentRail.module.css";
 
 /**
  * The Agent API agents the expanded tree's AgentList shows, in its order,
  * from the same live roster: Leads, plus a child while it is at work or its
- * chat is open (SB2). Each opens its chat, and the open one is highlighted.
+ * chat is open (SB2); one archived there stays hidden here too. Each opens
+ * its chat, and the open one is highlighted.
  * With none to show it renders `empty`; a failed list shows as an error, as
  * the expanded list's alert does, not as no agents.
  */
@@ -29,10 +31,11 @@ export function ApiAgentRailItems({
   empty?: ReactNode;
 }): JSX.Element {
   const activeId = useMatch("/ws/:ws/chat/:agentId")?.params.agentId;
-  const { roster, error } = useAgentRoster(workspaceId, activeId);
+  const { roster, error, gone } = useSidebarRoster();
   const agents = useMemo(
-    () => sidebarAgents(roster, activeId, storedAgentApiOrder(workspaceId)),
-    [roster, activeId, workspaceId],
+    () =>
+      sidebarAgents(roster, activeId, storedAgentApiOrder(workspaceId), gone),
+    [roster, activeId, workspaceId, gone],
   );
   const ws = encodeURIComponent(workspaceId);
   const alert = error ? (
@@ -69,15 +72,18 @@ function ApiAgentAvatarLink({
   to: string;
   selected: boolean;
 }): JSX.Element {
+  const dot = agentDot(a);
+  // The status is in the name too, as the dot is only seen.
+  const status = dot.charAt(0).toUpperCase() + dot.slice(1);
   return (
     <CompactRailHost
       as={Link}
       to={to}
-      label={`${a.name} — ${agentRoleLabel(a)} · ${a.harness}`}
+      label={`${a.name} — ${agentRoleLabel(a)} · ${a.harness} · ${status}`}
       aria-current={selected ? "page" : undefined}
       data-agent-id={a.agent_id}
       data-selected={selected || undefined}
-      data-dot={agentDot(a)}
+      data-dot={dot}
       data-state={a.state}
       className={styles.apiAgent}
     >

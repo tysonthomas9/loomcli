@@ -6,7 +6,11 @@
 
 import { IssueDetailPanel, ToastContainer } from "@/components";
 import { AgentChat } from "@/components/AgentChat";
-import { AgentList, WorkspaceTree } from "@/components/WorkspaceTree";
+import {
+  AgentList,
+  AgentRosterOwner,
+  WorkspaceTree,
+} from "@/components/WorkspaceTree";
 import { NavigationType, UNSAFE_LocationContext } from "react-router-dom";
 import { SplitDetailSummary } from "@/components/IssueDetailPanel";
 import { SessionNamePrompt } from "@/components/TerminalView/layout";
@@ -618,7 +622,11 @@ export function AgentChatFixture(): JSX.Element {
   const params = new URLSearchParams(window.location.search);
   const ws = params.get("ws") ?? "w1";
   const agent = params.get("agent") ?? "a1";
-  const list = <AgentList workspaceId={ws} />;
+  const list = (
+    <AgentRosterOwner workspaceId={ws}>
+      <AgentList workspaceId={ws} />
+    </AgentRosterOwner>
+  );
   return (
     <div
       style={{

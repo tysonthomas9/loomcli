@@ -7,12 +7,12 @@ import { ProviderIcon } from "@/components/AgentChat";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SortableAgentList, type SortableAgentItem } from "./SortableAgentList";
 import { SortableAgentRow } from "./SortableAgentRow";
+import { useSidebarRoster } from "./AgentRosterOwner";
 import { AgentContextMenu } from "./menus/AgentContextMenu";
 import {
   agentColor,
   agentColorIndex,
   agentInitials,
-  useAgentRoster,
   useArchiveAgent,
   useDeleteAgent,
   type DeleteRefusal,
@@ -48,7 +48,9 @@ export interface AgentListProps {
 export function AgentList({ workspaceId }: AgentListProps): JSX.Element {
   // The agent whose chat is open.
   const activeId = useMatch("/ws/:ws/chat/:agentId")?.params.agentId;
-  const { roster, error } = useAgentRoster(workspaceId, activeId);
+  // Archived or deleted here stay hidden until the stream reports it,
+  // shared with the collapsed rail.
+  const { roster, error, gone, hide } = useSidebarRoster();
   const ws = encodeURIComponent(workspaceId);
   const [bgOpen, setBgOpen] = useState(true);
   const { showToast } = useToast();
@@ -56,9 +58,6 @@ export function AgentList({ workspaceId }: AgentListProps): JSX.Element {
   const deleteAgent = useDeleteAgent(workspaceId);
   const navigate = useNavigate();
   const [order, setOrder] = useState(() => storedOrder(workspaceId));
-  // Archived or deleted here: a busy agent stays stopping until its turn
-  // ends, and a delete reaches the stream later.
-  const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
   const [menu, setMenu] = useState<{ id: string; x: number; y: number }>();
   // The agent whose Delete waits on its confirm.
   const [confirming, setConfirming] = useState<Agent>();
@@ -68,26 +67,10 @@ export function AgentList({ workspaceId }: AgentListProps): JSX.Element {
   // A new workspace starts from its own saved order, with nothing open.
   useEffect(() => {
     setOrder(storedOrder(workspaceId));
-    setGone(new Set());
     setMenu(undefined);
     setConfirming(undefined);
     setRefused(undefined);
   }, [workspaceId]);
-  // The stream takes over from gone once it reports the archive or delete,
-  // so an agent unarchived later shows again.
-  useEffect(
-    () =>
-      setGone((g) => {
-        const pending = (id: string) => {
-          const a = roster.get(id);
-          return a != null && a.state !== "archived";
-        };
-        const next = new Set([...g].filter(pending));
-        return next.size === g.size ? g : next;
-      }),
-    [roster, gone],
-  );
-
   // Children of a hidden (archived) parent rise to the top while at work.
   const { kids, fullOrder, main, background } = useMemo(
     () => sidebarRows(roster, activeId, order, gone),
@@ -108,13 +91,13 @@ export function AgentList({ workspaceId }: AgentListProps): JSX.Element {
       setMenu(undefined);
       try {
         await archiveAgent(id);
-        setGone((s) => new Set(s).add(id));
+        hide(id);
       } catch (err) {
         const why = err instanceof Error ? `: ${err.message}` : "";
         showToast(`Failed to archive agent${why}`, { type: "error" });
       }
     },
-    [archiveAgent, showToast],
+    [archiveAgent, hide, showToast],
   );
   // Delete anyway sends the refusal's fingerprint, with no second confirm.
   const remove = async (a: Agent, fingerprint?: string) => {
@@ -122,7 +105,7 @@ export function AgentList({ workspaceId }: AgentListProps): JSX.Element {
     setRefused(undefined);
     const refusal = await deleteAgent(a.agent_id, fingerprint);
     if (!refusal) {
-      setGone((s) => new Set(s).add(a.agent_id));
+      hide(a.agent_id);
       if (a.agent_id === activeId) navigate(`/ws/${ws}/home`);
     } else if (refusal.unsaved) {
       setRefused({ ...refusal, agent: a });

@@ -78,6 +78,7 @@ vi.mock("@/api/agentsv1", () => ({
 
 import { useRosterAgent } from "@/hooks";
 import { AgentList } from "../AgentList";
+import { AgentRosterOwner } from "../AgentRosterOwner";
 
 let created = 0;
 function agent(id: string, over: Partial<Agent> = {}): Agent {
@@ -139,7 +140,9 @@ function renderList(at = "/ws/ws1/chat/lead") {
     <KeyboardShortcutProvider>
       <MemoryRouter initialEntries={[at]}>
         <Nav />
-        <AgentList workspaceId="ws1" />
+        <AgentRosterOwner workspaceId="ws1">
+          <AgentList workspaceId="ws1" />
+        </AgentRosterOwner>
       </MemoryRouter>
     </KeyboardShortcutProvider>,
   );
@@ -203,7 +206,9 @@ describe("AgentList", () => {
     }
     render(
       <MemoryRouter initialEntries={["/ws/ws1/chat/lead"]}>
-        <AgentList workspaceId="ws1" />
+        <AgentRosterOwner workspaceId="ws1">
+          <AgentList workspaceId="ws1" />
+        </AgentRosterOwner>
         <Card />
       </MemoryRouter>,
     );
@@ -498,7 +503,9 @@ describe("AgentList", () => {
     ];
     const { unmount } = render(
       <MemoryRouter initialEntries={["/ws/ws1/agents"]}>
-        <AgentList workspaceId="ws1" />
+        <AgentRosterOwner workspaceId="ws1">
+          <AgentList workspaceId="ws1" />
+        </AgentRosterOwner>
       </MemoryRouter>,
     );
     await waitFor(() => expect(names()).toEqual(["lead", "kid", "lead2"]));
@@ -787,7 +794,9 @@ describe("AgentList", () => {
     const tree = (ws: string) => (
       <KeyboardShortcutProvider>
         <MemoryRouter initialEntries={["/ws/ws1/agents"]}>
-          <AgentList workspaceId={ws} />
+          <AgentRosterOwner workspaceId={ws}>
+            <AgentList workspaceId={ws} />
+          </AgentRosterOwner>
         </MemoryRouter>
       </KeyboardShortcutProvider>
     );

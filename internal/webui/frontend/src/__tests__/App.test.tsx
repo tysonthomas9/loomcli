@@ -914,6 +914,11 @@ function mockHelloWorldWorkspaceContext({
   } as ReturnType<typeof useWorkspaceContext>);
 }
 
+// The sidebar's Agent API roster owner needs a real router and the Agent API.
+vi.mock("@/components/WorkspaceTree/AgentRosterOwner", () => ({
+  AgentRosterOwner: ({ children }: { children: React.ReactNode }) => children,
+}));
+
 // AgentSection's module import triggers a vitest-4 mock-allocation blowup on
 // import; stub it to a lightweight shim that still renders the store-provided
 // agents as clickable buttons (agent-navigation tests depend on this).

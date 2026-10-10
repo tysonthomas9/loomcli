@@ -17,8 +17,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 import { WorkspaceTree } from "../WorkspaceTree";
 
-const { mockAddWorkspaceRepos } = vi.hoisted(() => ({
+const { mockAddWorkspaceRepos, rosterOwners } = vi.hoisted(() => ({
   mockAddWorkspaceRepos: vi.fn(),
+  // Each mounted roster owner's workspace, in mount order.
+  rosterOwners: [] as string[],
 }));
 
 // Default mock return values
@@ -169,6 +171,23 @@ vi.mock("@/hooks/workspace", async () => {
 // stub it to a lightweight shim that still renders the add-agent entrypoint.
 // The collapsed rail's Agent API agents need a router and the Agent API.
 vi.mock("../ApiAgentRailItems", () => ({ ApiAgentRailItems: () => null }));
+vi.mock("../AgentRosterOwner", async () => {
+  const { useEffect } = await import("react");
+  return {
+    AgentRosterOwner: ({
+      workspaceId,
+      children,
+    }: {
+      workspaceId: string;
+      children: React.ReactNode;
+    }) => {
+      useEffect(() => {
+        rosterOwners.push(workspaceId);
+      }, [workspaceId]);
+      return <>{children}</>;
+    },
+  };
+});
 vi.mock("../AgentSection", () => ({
   AgentSection: ({ onAddClick }: { onAddClick?: () => void }) =>
     onAddClick ? (
@@ -185,6 +204,7 @@ describe("WorkspaceTree", () => {
     reposOverride = {};
     agentOverride = {};
     mockAddWorkspaceRepos.mockReset();
+    rosterOwners.length = 0;
   });
 
   describe("repo list rendering", () => {
@@ -377,6 +397,17 @@ describe("WorkspaceTree", () => {
       fireEvent.click(collapseButton);
 
       expect(screen.queryByText("alpha")).not.toBeInTheDocument();
+    });
+
+    it("keeps its one Agent API roster owner across collapse and expand", () => {
+      render(<WorkspaceTree defaultCollapsed={false} />);
+      const toggle = (name: RegExp) =>
+        fireEvent.click(screen.getByRole("button", { name }));
+
+      toggle(/collapse workspace tree/i);
+      toggle(/expand workspace tree/i);
+
+      expect(rosterOwners).toEqual([TEST_WS_ID]);
     });
   });
 

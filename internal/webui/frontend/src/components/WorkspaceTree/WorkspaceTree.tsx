@@ -3,7 +3,8 @@
  * Simplified layout (Aether V3): WorkspaceSelectorBar → AgentSection →
  * RunningSection → ReposSection (with the Add Repo entry at its bottom).
  * Collapsing the tree swaps in the
- * vertical CollapsedAgentRail (wireframe pin 24).
+ * vertical CollapsedAgentRail (wireframe pin 24); both read the one Agent API
+ * roster the tree owns, so the swap keeps it.
  */
 
 import { useState, useCallback, useEffect, type CSSProperties } from "react";
@@ -23,6 +24,7 @@ import { AddRepoModal } from "@/components/AddRepoModal";
 import { CompactRailHost } from "@/components/CompactRail";
 
 import { WorkspaceSelectorBar } from "./WorkspaceSelectorBar";
+import { AgentRosterOwner } from "./AgentRosterOwner";
 import { AgentSection } from "./AgentSection";
 import { TerminalSection } from "./TerminalSection";
 import { RunningSection } from "./RunningSection";
@@ -116,7 +118,15 @@ function ChevronRightIcon(): JSX.Element {
   );
 }
 
-export function WorkspaceTree({
+export function WorkspaceTree(props: WorkspaceTreeProps): JSX.Element {
+  return (
+    <AgentRosterOwner workspaceId={useWorkspaceContext().workspaceId}>
+      <Tree {...props} />
+    </AgentRosterOwner>
+  );
+}
+
+function Tree({
   className,
   defaultCollapsed = false,
   onWorkspaceSwitch,

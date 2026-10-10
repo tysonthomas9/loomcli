@@ -106,8 +106,9 @@ export function sidebarAgents(
   roster: Roster,
   openId: string | undefined,
   order: readonly string[],
+  gone: ReadonlySet<string> = new Set(),
 ): Agent[] {
-  const { kids, main, background } = sidebarRows(roster, openId, order);
+  const { kids, main, background } = sidebarRows(roster, openId, order, gone);
   const out: Agent[] = [];
   const walk = (a: Agent) => {
     out.push(a);
