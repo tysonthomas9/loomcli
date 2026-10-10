@@ -297,11 +297,12 @@ func (s *Supervisor) captureAndFreezeExit(ap *AgentProcess, agentName, taskID, t
 			return agentcapture.Result{}, false, nil
 		}
 	}
-	result, retained := s.captureExitWorktree(ap, agentName, taskID, taskTitle, attempt)
+	result, retained, captured := s.captureExitWorktree(ap, agentName, taskID, taskTitle, attempt)
 	// D18: a capture that worked but left paths out (e.g. an untracked
 	// secret-pattern file) still freezes, as an incomplete revision; the
-	// worktree stays retained. A failed capture freezes nothing.
-	incomplete := retained && result.Ref != "" && !result.Complete
+	// worktree stays retained. Its tree may equal HEAD, so it can have no
+	// capture ref. A failed capture freezes nothing.
+	incomplete := captured && !result.Complete
 	if pendingFreeze == nil || (retained && !incomplete) {
 		return result, retained, pendingFreeze
 	}
@@ -416,8 +417,8 @@ func (s *Supervisor) reconcilePendingFreeze(ap *AgentProcess) error {
 		return err
 	}
 	if cp.CaptureRef == "" {
-		result, retained := s.captureExitWorktree(ap, cp.AgentName, cp.TaskID, "", cp.FreezeID)
-		cp.CaptureIncomplete = retained && result.Ref != "" && !result.Complete
+		result, retained, captured := s.captureExitWorktree(ap, cp.AgentName, cp.TaskID, "", cp.FreezeID)
+		cp.CaptureIncomplete = captured && !result.Complete
 		if retained && !cp.CaptureIncomplete {
 			return fmt.Errorf("pending revision capture failed")
 		}
@@ -452,7 +453,10 @@ func (s *Supervisor) saveCaptureCheckpoint(ap *AgentProcess, lockDir string, cp 
 	return true
 }
 
-func (s *Supervisor) captureExitWorktree(ap *AgentProcess, agentName, taskID, taskTitle, attempt string) (agentcapture.Result, bool) {
+// captureExitWorktree captures the task copy. retained is true when the copy
+// must be kept (the capture failed or left paths out); captured is false only
+// when the capture itself failed.
+func (s *Supervisor) captureExitWorktree(ap *AgentProcess, agentName, taskID, taskTitle, attempt string) (result agentcapture.Result, retained, captured bool) {
 	workspace := s.WorkspaceID
 	if workspace == "" {
 		workspace = agentName
@@ -470,7 +474,8 @@ func (s *Supervisor) captureExitWorktree(ap *AgentProcess, agentName, taskID, ta
 		attempt = uuid.NewString()
 	}
 	result, captureErr := captureFn(ctx, ap.WorktreePath, workspace, attempt, taskID, taskTitle)
-	retained := captureErr != nil || !result.Complete
+	captured = captureErr == nil
+	retained = !captured || !result.Complete
 	if retained {
 		ap.Mu.Lock()
 		ap.CaptureRetained = true
@@ -480,7 +485,7 @@ func (s *Supervisor) captureExitWorktree(ap *AgentProcess, agentName, taskID, ta
 		}
 		slog.Error("agent capture needs attention; worktree retained", "worktree", agentName, "task_id", taskID, "err", captureErr)
 	}
-	return result, retained
+	return result, retained, captured
 }
 
 func (s *Supervisor) taskIDForLifecycle(ap *AgentProcess, lockInfo *cli.LockInfo) string {

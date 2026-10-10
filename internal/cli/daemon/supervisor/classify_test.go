@@ -566,3 +566,106 @@ func assertSecretLeftOut(t *testing.T, dir, head string) {
 		t.Fatalf("worktree lost server.pem: %q, %v", data, err)
 	}
 }
+
+// D18 when the agent committed its work and only an untracked secret file is
+// left: the capture tree equals HEAD, so the capture writes no ref, yet it is
+// a valid incomplete capture. Both the exit and the restart path freeze HEAD
+// as an incomplete revision and keep the copy.
+func TestCommittedWorkWithOnlyUntrackedSecretFreezesIncompleteRevision(t *testing.T) {
+	for _, path := range []string{"exit", "restart"} {
+		t.Run(path, func(t *testing.T) {
+			dir := captureRepo(t)
+			t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+			base := gitForCaptureTest(t, dir, "rev-parse", "HEAD")
+			if err := os.WriteFile(filepath.Join(dir, "main.txt"), []byte("completed work\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			gitForCaptureTest(t, dir, "add", "main.txt")
+			gitForCaptureTest(t, dir, "-c", "user.name=Agent", "-c", "user.email=agent@example.invalid", "commit", "-q", "-m", "agent output")
+			head := gitForCaptureTest(t, dir, "rev-parse", "HEAD")
+			if err := os.WriteFile(filepath.Join(dir, "server.pem"), []byte("non-secret test marker\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			s := newTestSupervisor()
+			s.WorkspaceID = "WS"
+			ap := &AgentProcess{Entry: config.AgentEntry{Worktree: "agent"}, WorktreePath: dir}
+			if path == "exit" {
+				writeLockFile(t, dir, &cli.LockInfo{AgentName: "agent", TaskID: "task-1"})
+				ap.BeforeRef, ap.AgentSessionID, ap.AssignedTaskID = base, "session-1", "task-1"
+				s.handleAgentCheckpoint(ap, 0)
+				if !ap.CaptureRetained {
+					t.Fatal("incomplete capture must keep the worktree retained")
+				}
+			} else {
+				if err := config.SaveCheckpoint(cli.ResolveLockDir(dir), &config.Checkpoint{AgentName: "agent", TaskID: "task-1",
+					FreezeBase: base, FreezeID: "session-1", FreezeRepo: "repo", FreezeState: "completed"}); err != nil {
+					t.Fatal(err)
+				}
+				if err := s.reconcilePendingFreeze(ap); err != nil {
+					t.Fatalf("reconcile: %v", err)
+				}
+			}
+			revisions := taskRevisionResponse(t)
+			if len(revisions) != 1 || !revisions[0].Incomplete || revisions[0].NoChanges {
+				t.Fatalf("revisions = %+v, want one incomplete revision", revisions)
+			}
+			if tree := gitForCaptureTest(t, dir, "rev-parse", revisions[0].HeadSHA+"^{tree}"); tree != gitForCaptureTest(t, dir, "rev-parse", head+"^{tree}") {
+				t.Fatalf("revision tree %s, want HEAD tree", tree)
+			}
+			assertSecretLeftOut(t, dir, revisions[0].HeadSHA)
+			cp, err := config.LoadCheckpoint(cli.ResolveLockDir(dir))
+			if err != nil || cp == nil || cp.FreezeID != "" {
+				t.Fatalf("checkpoint = %+v, %v; want no pending freeze", cp, err)
+			}
+		})
+	}
+}
+
+// A capture that fails is not an incomplete capture: with a revision pending,
+// neither the exit nor the restart path freezes anything, and the pending
+// freeze stays for a later retry.
+func TestFailedCaptureWithPendingFreezeFreezesNothing(t *testing.T) {
+	for _, path := range []string{"exit", "restart"} {
+		t.Run(path, func(t *testing.T) {
+			dir := captureRepo(t)
+			t.Setenv("LOOM_CONFIG_DIR", t.TempDir())
+			base := gitForCaptureTest(t, dir, "rev-parse", "HEAD")
+			if err := os.WriteFile(filepath.Join(dir, "server.pem"), []byte("non-secret test marker\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			s := newTestSupervisor()
+			s.WorkspaceID = "WS"
+			s.captureWorktree = func(context.Context, string, string, string, string, string) (agentcapture.Result, error) {
+				return agentcapture.Result{}, errors.New("capture failed")
+			}
+			ap := &AgentProcess{Entry: config.AgentEntry{Worktree: "agent"}, WorktreePath: dir}
+			if path == "exit" {
+				writeLockFile(t, dir, &cli.LockInfo{AgentName: "agent", TaskID: "task-1"})
+				ap.BeforeRef, ap.AgentSessionID, ap.AssignedTaskID = base, "session-1", "task-1"
+				s.handleAgentCheckpoint(ap, 0)
+				if !ap.CaptureRetained {
+					t.Fatal("capture failure must keep the worktree retained")
+				}
+			} else {
+				if err := config.SaveCheckpoint(cli.ResolveLockDir(dir), &config.Checkpoint{AgentName: "agent", TaskID: "task-1",
+					FreezeBase: base, FreezeID: "session-1", FreezeRepo: "repo", FreezeState: "completed"}); err != nil {
+					t.Fatal(err)
+				}
+				if err := s.reconcilePendingFreeze(ap); err == nil {
+					t.Fatal("reconcile froze a failed capture")
+				}
+			}
+			mux := http.NewServeMux()
+			gitweb.NewModule(nil, nil).Register(mux)
+			response := httptest.NewRecorder()
+			mux.ServeHTTP(response, httptest.NewRequest("GET", "/api/workspaces/WS/issues/task-1/revisions", nil))
+			if response.Code != http.StatusNotFound {
+				t.Fatalf("revisions API = %d %s, want no change for a failed capture", response.Code, response.Body.String())
+			}
+			cp, err := config.LoadCheckpoint(cli.ResolveLockDir(dir))
+			if err != nil || cp == nil || cp.FreezeID == "" {
+				t.Fatalf("checkpoint = %+v, %v; want the freeze still pending", cp, err)
+			}
+		})
+	}
+}
