@@ -100,6 +100,7 @@ func TestArchiveCancelledInterruptFailRetried(t *testing.T) {
 	}})
 	clock := useTestClock(s)
 	runDispatcher(t, s)
+	settled(t, s) // its start-up sweep is done: only Archive's retry can finish the archive
 	a, ref := newLead(t, e, s, "alpha")
 	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "t1"}}})
 	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
@@ -160,7 +161,8 @@ func TestSettleFinishesStoppingCancelled(t *testing.T) {
 
 // TestStopCrashBeforeInterruptPendingSwitch: a harness switch and then an
 // Archive(cancelled) both crash before their interrupt. Recovery stops the
-// turn on the old session, where it runs, before any switch opens a new one.
+// turn on the old session, where it runs, and fails the switch, so no
+// session is opened for the archived agent.
 func TestStopCrashBeforeInterruptPendingSwitch(t *testing.T) {
 	ctx := context.Background()
 	e := newSwitchEnv(t, StateActive)
@@ -183,13 +185,17 @@ func TestStopCrashBeforeInterruptPendingSwitch(t *testing.T) {
 		t.Fatal("Archive did not crash before its interrupt")
 	}
 	e.crash = false
-	if err := e.s.reconcileAgent(ctx, "a1"); err != nil {
-		t.Fatal(err)
+	for range 2 { // a repeat, as the archive's own wake runs, opens nothing
+		if err := e.s.reconcileAgent(ctx, "a1"); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if st, err := e.fa.Session(e.old).Status(ctx); err != nil || st.Running {
 		t.Fatalf("the old session's turn still runs (%v, %v)", st, err)
 	}
-	if row := e.s.get(t, "a1"); row.State != StateArchived {
-		t.Fatalf("after recovery: %s; want archived", row.State)
+	_, perr := e.s.store.PendingSwitch(ctx, "a1")
+	if row := e.s.get(t, "a1"); row.State != StateArchived || row.Harness != "fa" || len(e.owned(t)) != 1 || !errors.Is(perr, loomstore.ErrNotFound) {
+		t.Fatalf("after recovery: %s on %s, owned %v, pending switch %v; want archived on fa, no session opened, no switch",
+			row.State, row.Harness, e.owned(t), perr)
 	}
 }
