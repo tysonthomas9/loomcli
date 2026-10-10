@@ -51,7 +51,7 @@ const Version = "2.0.19"
 // ReportedVersion is what `--version` reports: the version a test wrote to
 // emu-version in dir (the emulator's state directory), else Version.
 func ReportedVersion(dir string) string {
-	b, _ := os.ReadFile(filepath.Join(dir, "emu-version"))
+	b, _ := os.ReadFile(filepath.Join(dir, "emu-version")) //nolint:gosec // G304: the test-owned version file.
 	return cmp.Or(strings.TrimSpace(string(b)), Version)
 }
 
