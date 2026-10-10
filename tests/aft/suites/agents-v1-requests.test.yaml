@@ -102,9 +102,10 @@ tests:
       - wait:
           fn: >-
             (document.querySelector('[data-testid=turn-error]')?.textContent || '').includes('AGV1-G2-AUTH Invalid API key') &&
+            Array.from(document.querySelectorAll('[data-testid=turn-end-error]')).some((n) => (n.textContent || '').includes('AGV1-G2-AUTH')) &&
             (document.querySelector('section[aria-label="Agent chat"] header')?.textContent || '').includes('idle')
         budget: 90000
-        intent: "Wait until the auth reason shows in the error banner and the lead is idle"
+        intent: "Wait until the auth reason shows in the error banner and the turn's note, and the lead is idle"
       - fill: { label: Message, value: "third try" }
       - press: Enter
       - wait:
@@ -122,7 +123,12 @@ tests:
       - run: |
           set -e
           id="$(cat "$AFT_WORK_DIR/agv1G2Id")"
-          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-REQ/v1/agents/$id/events?limit=500" > "$AFT_WORK_DIR/agv1-g2-events.json"
+          # The reply can show before its turn end is saved: wait for three.
+          for _ in $(seq 1 30); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-REQ/v1/agents/$id/events?limit=500" > "$AFT_WORK_DIR/agv1-g2-events.json"
+            [ "$(grep -o '"kind":"agent.turn_completed"' "$AFT_WORK_DIR/agv1-g2-events.json" | wc -l)" -ge 3 ] && break
+            sleep 1
+          done
           python3 - "$AFT_WORK_DIR/agv1-g2-events.json" <<'PY'
           import json, sys
           ends = [e["payload"] for e in json.load(open(sys.argv[1]))["events"] if e["kind"] == "agent.turn_completed"]
@@ -203,6 +209,11 @@ tests:
             (document.querySelector('section[aria-label="Agent chat"]')?.textContent || '').includes('Needs attention: the harness is unavailable.')
         budget: 60000
         intent: "Wait until the chat shows Attention harness unavailable"
+      - click: { role: button, name: Clear, exact: true }
+      - wait:
+          fn: >-
+            !(document.querySelector('section[aria-label="Agent chat"]')?.textContent || '').includes('while too old')
+        intent: "Clear the waiting message, so the reply after the upgrade answers only the next message"
       - run: |
           set -e
           : > "$(dirname "$AFT_OPENCODE_SERVICE")/emu-version"
