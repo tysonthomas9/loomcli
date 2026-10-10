@@ -62,11 +62,20 @@ func (s *Service) Archive(ctx context.Context, req ArchiveRequest) error {
 }
 
 // archiveCancelled stops a, saving the reason with the move to stopping,
-// gives a single task the cancelled outcome and archives it. Each step is
+// fails a pending harness switch, gives a single task the cancelled outcome
+// and archives it. Each step is
 // safe to repeat, so settle finishes one a crash left stopping.
 func (s *Service) archiveCancelled(ctx context.Context, a loomstore.Agent) error {
 	a, err := s.stop(ctx, a, &archiveCols{reason: sp(ArchiveCancelled)})
 	if err != nil {
+		return err
+	}
+	if r, err := s.store.PendingSwitch(ctx, a.AgentID); err == nil { // it stays on its old session
+		cause := errors.New("archived as cancelled")
+		if err := s.switchFailed(ctx, a, UpdateRequest{Envelope: Envelope{RequestID: r.RequestID}, Harness: r.ToHarness}, cause); err != cause {
+			return err
+		}
+	} else if !errors.Is(err, loomstore.ErrNotFound) {
 		return err
 	}
 	if a.Mode == "single_task" {
