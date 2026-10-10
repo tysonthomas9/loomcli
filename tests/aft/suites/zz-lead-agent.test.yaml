@@ -939,18 +939,31 @@ tests:
             - from: "data.id"
               as: "leadEpicId"
         intent: "An orchestration client seeds the epic this lead will own"
+      - open: /ws/E2E-WS-LEAD/agents/atlas-${RUN_ID:-local}
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('span'))
+              .some((s) => (s.textContent || '').trim() === 'No epic assigned')
+        intent: "An operator has the unassigned lead open, so its status read is fresh in the monitor cache"
       - api:
           method: "PATCH"
           path: "/api/workspaces/E2E-WS-LEAD/agents/atlas-${RUN_ID:-local}"
           body:
             parent: "${var:leadEpicId}"
           status: 200
-        intent: "An orchestration client assigns the epic to the lead agent"
-      - open: /ws/E2E-WS-LEAD/agents/atlas-${RUN_ID:-local}
-      - wait:
-          fn: >-
-            document.body.textContent.includes('Assigned epic')
-        intent: "Wait until the lead header reports its assigned epic"
+        intent: "An orchestration client assigns the epic to the lead while the operator watches"
+      - run: |
+          set -e
+          # B7: the assignment's SSE refresh must bypass the 10s monitor cache;
+          # the next regular poll is 30s away, so 8s only passes via that refresh.
+          for i in $(seq 1 16); do
+            out="$(agent-browser --session "$AFT_SESSION" eval "document.body.textContent.includes('Assigned epic')" 2>/dev/null || true)"
+            case "$out" in *true*) exit 0 ;; esac
+            sleep 0.5
+          done
+          echo "lead header still lacks 'Assigned epic' 8s after the assignment"
+          exit 1
+        intent: "The open lead header shows the assigned epic within 8s, without waiting for the 30s poll"
       - run: |
           set -e
           name="atlas-${RUN_ID:-local}"
