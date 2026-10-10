@@ -65,7 +65,7 @@
 
 /* A selected Agent API row is highlighted across its full width, archive
    button and drag grip included, not only behind its link (SB7). */
-.agentRow:has(> [aria-current="page"]) {
+.agentRow:has(> a[aria-current="page"]) {
   background: color-mix(
     in srgb,
     var(--color-accent, #c96442) 12%,
