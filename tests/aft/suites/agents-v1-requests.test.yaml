@@ -201,14 +201,11 @@ tests:
         intent: "Check that Create on OpenCode 2.0.1 is refused as harness_unavailable naming the installed and minimum versions"
       - fill: { label: Message, value: "while too old" }
       - press: Enter
-      # The chat shows only the Attention label; the version reason is
-      # checked at the API above. VER1 surfaces it in the chat and then
-      # tightens this wait to require "2.0.19" too.
       - wait:
           fn: >-
-            (document.querySelector('section[aria-label="Agent chat"]')?.textContent || '').includes('Needs attention: the harness is unavailable.')
+            (document.querySelector('[data-testid=agent-attention-banner]')?.textContent || '').includes('Needs attention: the harness is unavailable. opencode 2.0.1 is below the minimum 2.0.19; upgrade opencode.')
         budget: 60000
-        intent: "Wait until the chat shows Attention harness unavailable"
+        intent: "Wait until the chat's Attention names OpenCode 2.0.1, the 2.0.19 minimum and the upgrade"
       - click: { role: button, name: Clear, exact: true }
       - wait:
           fn: >-
