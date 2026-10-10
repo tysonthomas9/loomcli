@@ -664,6 +664,19 @@ func (s *Server) h(fn func(w http.ResponseWriter, r *http.Request, ss *session, 
 	}
 }
 
+// failableCreate answers 503 instead of calling create while the
+// FailSessionCreate flag file beside the scenario file exists.
+func (s *Server) failableCreate(create http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, err := os.Stat(s.scenarios + FailSessionCreate); s.scenarios != "" && err == nil {
+			reply(w, http.StatusServiceUnavailable, map[string]any{"name": "UnknownError",
+				"data": map[string]any{"message": "emulator: session create refused by " + FailSessionCreate}})
+			return
+		}
+		create(w, r)
+	}
+}
+
 // Handler serves the OpenCode HTTP surface behind basic auth.
 //
 //nolint:funlen // One route per handler; splitting hides the surface it serves.
@@ -710,12 +723,7 @@ func (s *Server) Handler() http.Handler {
 		}
 		reply(w, 200, map[string]any{"data": out})
 	})
-	mux.HandleFunc("POST /api/session", func(w http.ResponseWriter, r *http.Request) {
-		if _, err := os.Stat(s.scenarios + FailSessionCreate); s.scenarios != "" && err == nil {
-			reply(w, http.StatusServiceUnavailable, map[string]any{"name": "UnknownError",
-				"data": map[string]any{"message": "emulator: session create refused by " + FailSessionCreate}})
-			return
-		}
+	mux.HandleFunc("POST /api/session", s.failableCreate(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		s.mu.Lock()
@@ -735,7 +743,7 @@ func (s *Server) Handler() http.Handler {
 		s.st.Sessions[id] = &session{Info: body}
 		s.emit(id, "session.created", map[string]any{})
 		reply(w, 200, map[string]any{"data": body})
-	})
+	}))
 	mux.HandleFunc("GET /api/session/active", func(w http.ResponseWriter, _ *http.Request) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
