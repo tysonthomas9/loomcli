@@ -1,0 +1,131 @@
+# P2.25 / S4: verdict commands record whoever ran them (D42), and approving by task pins
+# the reviewed code. Hand-written (not generated); uses the PX.7 matrix driver.
+# Fake-forge tier: make test-aft AFT_ARGS="--suite loomgit-verdict-actor --no-agent --screenshots".
+suite: loomgit-verdict-actor
+classification: { area: git, feature: verdict-actor, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+teardown: >-
+  for c in a1 st2; do bash "$AFT_TESTS_DIR/scripts/loomgit-matrix.sh" teardown "$c" || true; done
+tests:
+  - name: "A1 Approvals are recorded as whoever ran the command"
+    intent: "loom approve run by the lead is a lead verdict (refused while Lead may approve is off, a policy verdict once on), by a task agent on its own task is refused, and from a plain shell is a human approval"
+    steps:
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" setup a1"
+        intent: "Fixture: one repo with native stacks on the fake forge, one Loom workspace and its lead"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" settings a1 stack off off"
+        intent: "Human sets Delivery mode stack, Lead may approve off, Lead may merge off in Settings > Git; the server and a reload agree"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" task a1 a -"
+        intent: "API client creates task a in its own epic and starts its run; it writes its own file"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" wait-rev a1 a 1 4"
+        intent: "Task a runs until it records a revision and waits in review (1/4)"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" wait-rev a1 a 2 4"
+        intent: "Task a runs until it records a revision and waits in review (2/4)"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" wait-rev a1 a 3 4"
+        intent: "Task a runs until it records a revision and waits in review (3/4)"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" wait-rev a1 a 4 4"
+        intent: "Task a runs until it records a revision and waits in review (4/4)"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" cli-verdict a1 lead approve a refused"
+        intent: "The lead runs loom approve on task a with Lead may approve off; Loom refuses with 'lead approval policy is off', records no verdict and a stays in review"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" cli-verdict a1 own-agent approve a refused"
+        intent: "Task a's own agent runs loom approve on its task; Loom refuses it, records no verdict and a stays in review"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" open-task a1 a"
+        intent: "Human opens task a"
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: "Human opens the Changes tab of task a"
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The Changes panel is mounted
+      - wait:
+          text: matrix-a1-a.txt
+        intent: The task's file is in the diff
+      - wait:
+          fn: "document.querySelector('[data-testid=revisions-section]')?.textContent.includes('Awaiting review')"
+        intent: "Checkpoint a1-still-in-review: after both refusals task a is still awaiting review"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" cli-verdict a1 human approve a ok"
+        intent: "Human runs loom approve on task a from a plain shell; Loom says it approves as human and records a human approval"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" pr a1 a main"
+        intent: "PR of a opens on the forge based on main, and the task shows it"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" ui a1 a open"
+        intent: "Task a shows its PR open"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" settings a1 stack on off"
+        intent: "Human turns Lead may approve on in Settings > Git; the server and a reload agree"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" task a1 b -"
+        intent: "API client creates task b in its own epic and starts its run; it writes its own file"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" wait-rev a1 b 1 4"
+        intent: "Task b runs until it records a revision and waits in review (1/4)"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" wait-rev a1 b 2 4"
+        intent: "Task b runs until it records a revision and waits in review (2/4)"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" wait-rev a1 b 3 4"
+        intent: "Task b runs until it records a revision and waits in review (3/4)"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" wait-rev a1 b 4 4"
+        intent: "Task b runs until it records a revision and waits in review (4/4)"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" cli-verdict a1 lead approve b ok"
+        intent: "The lead runs loom approve on task b with Lead may approve on; Loom says it approves as lead and records a policy verdict, not a human one"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" pr a1 b main"
+        intent: "PR of b opens on the forge based on main, and the task shows it"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" ui a1 b open"
+        intent: "Task b shows its PR open"
+  - name: "ST2 Approve by task refuses a stale attempt"
+    intent: "A human looks at task a's code with loom approve --dry-run; a new attempt arrives; approving with --head pinned to the shown head is refused as stale and nothing is approved or published; the new attempt approves once looked at"
+    steps:
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" setup st2"
+        intent: "Fixture: one repo with native stacks on the fake forge, one Loom workspace and its lead"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" settings st2 stack off off"
+        intent: "Human sets Delivery mode stack, Lead may approve off, Lead may merge off in Settings > Git; the server and a reload agree"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" task st2 a -"
+        intent: "API client creates task a in its own epic and starts its run; it writes its own file"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" wait-rev st2 a 1 4"
+        intent: "Task a runs until it records a revision and waits in review (1/4)"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" wait-rev st2 a 2 4"
+        intent: "Task a runs until it records a revision and waits in review (2/4)"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" wait-rev st2 a 3 4"
+        intent: "Task a runs until it records a revision and waits in review (3/4)"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" wait-rev st2 a 4 4"
+        intent: "Task a runs until it records a revision and waits in review (4/4)"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" cli-show st2 a"
+        intent: "Human runs loom approve on task a with --dry-run; Loom prints the code it would approve and records nothing"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" cli-verdict st2 human reject a ok"
+        intent: "Human runs loom reject on task a from a plain shell; Loom records a human rejection"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" reject st2 a"
+        intent: "Task a is open again, with a reject verdict and no PR"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" rerun st2 a"
+        intent: "The epic runner runs task a again"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" wait-new-rev st2 a 1 4"
+        intent: "Task a runs again until its new attempt waits in review (1/4)"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" wait-new-rev st2 a 2 4"
+        intent: "Task a runs again until its new attempt waits in review (2/4)"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" wait-new-rev st2 a 3 4"
+        intent: "Task a runs again until its new attempt waits in review (3/4)"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" wait-new-rev st2 a 4 4"
+        intent: "Task a runs again until its new attempt waits in review (4/4)"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" cli-verdict st2 human approve a refused pinned"
+        intent: "Human approves task a pinned to the head they saw before the new attempt; Loom refuses it as stale and records no verdict"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" no-pr st2 a 5"
+        intent: "No PR opens"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" open-task st2 a"
+        intent: "Human opens task a"
+      - click:
+          role: tab
+          name: Changes
+          exact: true
+        intent: "Human opens the Changes tab of task a"
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The Changes panel is mounted
+      - wait:
+          text: matrix-st2-a.txt
+        intent: The task's file is in the diff
+      - wait:
+          fn: "document.querySelector('[data-testid=revisions-section]')?.textContent.includes('Awaiting review')"
+        intent: "Checkpoint st2-new-attempt-awaiting-review: the new attempt is still awaiting review after the stale approval"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" cli-show st2 a"
+        intent: "Human looks at the new attempt with loom approve --dry-run"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" cli-verdict st2 human approve a ok pinned"
+        intent: "Human approves task a pinned to the head just shown; Loom records a human approval"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" pr st2 a main"
+        intent: "PR of a opens on the forge based on main, and the task shows it"
+      - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" ui st2 a open"
+        intent: "Task a shows its PR open"

@@ -262,6 +262,23 @@ lead_refused() { # the real lead ran the command and Loom's refusal is in its tr
   cp "$work/lead-terminal.txt" "$work/lead-refusal-$(date +%s).txt"
 }
 
+# cli_loom <human|lead|own-agent> <loom args...>: run the loom CLI as that actor. Every
+# agent marker is cleared first, so human is a plain shell; lead carries the lead
+# session's markers and own-agent the markers of <slot>'s own task run.
+cli_loom() {
+  local who="$1"
+  shift
+  local -a actor=()
+  case "$who" in
+    human) ;;
+    lead) actor=(LOOM_AGENT_NAME=lead LOOM_AGENT_TERMINAL_ID=aft-lead) ;;
+    own-agent) actor=(LOOM_TASK_RUN_ID="aft-run-$slot" LOOM_TASK_ID="$(task_id "$slot")" LOOM_TASK_RUNNER=local-task-runner) ;;
+    *) fail "unknown actor $who" ;;
+  esac
+  env -u LOOM_AGENT_NAME -u LOOM_AGENT_TERMINAL_ID -u LOOM_ORCHESTRATOR_SESSION_ID -u LOOM_TASK_RUN_ID \
+    -u LOOM_TASK_ID -u LOOM_DRIVER_RUN_ID -u LOOM_ASSIGNED_TASK_ID -u LOOM_TASK_RUN_WORKER_PROFILE_ID \
+    ${actor[@]+"${actor[@]}"} LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" "$@" --workspace "$workspace"
+}
 verdict_by_lead() { revisions "$1"; json "$work/rev-$1.json" 'assert v.get("verdict")=="policy", v'; }
 
 # --- phases --------------------------------------------------------------------
@@ -968,6 +985,93 @@ ui)
     [[ "$attempt" == 1 ]] && { browser eval "location.reload()" > /dev/null; browser wait '[data-testid="revisions-section"]' > /dev/null; }
   done
   say "task $slot page: '$seen' / '$status' (kept after reload)"
+  ;;
+
+cli-show)
+  # cli-show <case> <slot>: a human runs `loom approve <task> --dry-run`; Loom prints
+  # the code it would approve and records nothing (S4). The shown head is saved.
+  [[ "$forge" == fake ]] || fail "cli-show runs on the fake tier"
+  slot="$1"
+  revisions "$slot"
+  verdict_before="$(json "$work/rev-$slot.json" 'print(v.get("verdict") or "-")')"
+  cli_loom human approve "$(task_id "$slot")" --dry-run > "$work/cli-show-$slot.out" 2>&1 || fail "dry run failed: $(head -c 400 "$work/cli-show-$slot.out")"
+  grep -qF "Would approve as human" "$work/cli-show-$slot.out" || fail "dry run did not say what it would approve: $(cat "$work/cli-show-$slot.out")"
+  awk '/ revision [0-9]+ .* at /{print $NF}' "$work/cli-show-$slot.out" > "$work/shown-head-$slot"
+  [[ "$(wc -l < "$work/shown-head-$slot")" -eq 1 ]] || fail "dry run showed no single head: $(cat "$work/cli-show-$slot.out")"
+  head_now="$(json "$work/rev-$slot.json" 'print(v["head_sha"])')"
+  [[ "$head_now" == "$(cat "$work/shown-head-$slot")"* ]] || fail "dry run showed $(cat "$work/shown-head-$slot"), the revision is at $head_now"
+  revisions "$slot"
+  [[ "$(json "$work/rev-$slot.json" 'print(v.get("verdict") or "-")')" == "$verdict_before" ]] || fail "the dry run recorded a verdict: $(cat "$work/rev-$slot.json")"
+  say "loom approve --dry-run on $slot shows head $(cat "$work/shown-head-$slot") and records nothing"
+  ;;
+
+cli-verdict)
+  # cli-verdict <case> <who> <approve|reject> <slot> <ok|refused> [pinned]: <who> runs
+  # `loom <verb> <task>` itself and Loom records whoever ran it (D42): human is a plain
+  # shell, lead the lead's session, own-agent the task agent of <slot>'s own run.
+  # pinned adds --head with the head cli-show saw (S4).
+  [[ "$forge" == fake ]] || fail "cli-verdict runs on the fake tier"
+  who="$1" verb="$2" slot="$3" want="$4" pin="${5:-}"
+  args=("$verb" "$(task_id "$slot")")
+  [[ "$verb" == reject ]] && args+=(--reason "aft: $who rejects")
+  [[ "$pin" == pinned ]] && args+=(--head "$(cat "$work/shown-head-$slot")")
+  revisions "$slot"
+  before="$(json "$work/rev-$slot.json" 'print(v["number"], v.get("verdict") or "-")')"
+  out="$work/cli-$verb-$who-$slot.out"
+  set +e
+  cli_loom "$who" "${args[@]}" > "$out" 2>&1
+  code=$?
+  set -e
+  say "$who: loom ${args[*]}: exit $code: $(head -c 500 "$out")"
+  if [[ "$want" == refused ]]; then
+    case "$who:$pin" in
+      *:pinned) refusal='stale:' ;;
+      lead:*) refusal='lead approval policy is off' ;;
+      own-agent:*) refusal="a task agent cannot $verb its own task" ;;
+      *) fail "no refusal expected for $who" ;;
+    esac
+    [[ "$code" != 0 ]] || fail "$who's loom $verb succeeded: $(head -c 400 "$out")"
+    grep -qF "$refusal" "$out" || fail "$who's loom $verb was not refused by Loom (want \"$refusal\"): $(head -c 400 "$out")"
+    for _ in $(seq 1 5); do
+      revisions "$slot"
+      [[ "$(json "$work/rev-$slot.json" 'print(v["number"], v.get("verdict") or "-")')" == "$before" ]] || fail "a refused $verb recorded a verdict: $(cat "$work/rev-$slot.json")"
+      curl -fsS "$api/issues/$(task_id "$slot")" > "$work/issue-$slot.json"
+      json "$work/issue-$slot.json" 'assert v["data"]["status"]=="review", v' || fail "task $slot left review after a refused $verb"
+      sleep 2
+    done
+  else
+    [[ "$code" == 0 ]] || fail "$who's loom $verb failed: $(head -c 400 "$out")"
+    kind="$who"
+    [[ "$who" == own-agent ]] && kind=agent
+    grep -qE "^(Approving|Rejecting) as $kind " "$out" || fail "loom $verb did not record $who as $kind: $(head -c 300 "$out")"
+    want_verdict="$verb"
+    [[ "$verb:$who" == approve:lead ]] && want_verdict=policy
+    recorded() { revisions "$1"; json "$work/rev-$1.json" 'assert v.get("verdict")==sys.argv[2], v' "$2"; }
+    wait_until 30 "a $want_verdict verdict on $slot" recorded "$slot" "$want_verdict"
+  fi
+  say "$who's loom $verb on $slot: $want"
+  ;;
+
+wait-new-rev)
+  # wait-new-rev <case> <slot> <try> <tries>: after a rerun, a newer revision than the
+  # rejected one is in review (bounded like wait-rev).
+  slot="$1" try="$2" tries="$3"
+  rejected="$(cat "$work/rejected-$slot.number")"
+  newer() {
+    revisions "$1"
+    json "$work/rev-$1.json" 'assert v.get("number",0) > int(sys.argv[2]) and v.get("head_sha"), v' "$2" > /dev/null 2>&1 || return 1
+    curl -fsS "$api/issues/$(task_id "$1")" > "$work/issue-$1.json"
+    json "$work/issue-$1.json" 'd=v["data"]; assert d["status"]=="review" and "code-review" in (d.get("labels") or []), d' > /dev/null 2>&1
+  }
+  for _ in $(seq 1 50); do newer "$slot" "$rejected" && break; sleep 2; done
+  if ! newer "$slot" "$rejected"; then
+    ((try < tries)) && { say "task $slot rerun still running (try $try/$tries)"; exit 0; }
+    fail "task $slot recorded no revision after $rejected: $(cat "$work/rev-$slot.json")"
+  fi
+  if [[ -f "$work/shown-head-$slot" ]]; then
+    [[ "$(json "$work/rev-$slot.json" 'print(v["head_sha"])')" != "$(cat "$work/shown-head-$slot")"* ]] || fail "the new attempt has the same head as the shown one"
+  fi
+  say "task $slot in review again: revision $(json "$work/rev-$slot.json" 'print(v["number"],v["head_sha"])')"
   ;;
 
 teardown)

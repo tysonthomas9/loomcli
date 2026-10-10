@@ -37,7 +37,8 @@
     "AFT-CF2": "0dd2ec08-e8b5-4955-b152-41130246002c",
     "AFT-CF3": "8182768a-1441-447f-b41f-938876194e80",
     "AFT-CF4": "a10dc943-b4dd-4ad3-81e2-a0904ea26faf",
-    "AFT-PR1": "c06c44d3-4c94-4223-9bf4-ab9bdffd5994"
+    "AFT-PR1": "c06c44d3-4c94-4223-9bf4-ab9bdffd5994",
+    "AFT-ST2": "5254a2a5-806d-4cae-aa40-c1983481539f"
   },
   "suites": {
     "loomgit-matrix-walk": {
@@ -1026,6 +1027,27 @@
           "AFT-L1"
         ],
         "note": "mid-session delivery is covered by real-github-matrix-variants L1"
+      }
+    },
+    "loomgit-verdict-actor": {
+      "A1 Approvals are recorded as whoever ran the command": {
+        "requirements": [
+          "D42",
+          "D12",
+          "P2.25"
+        ],
+        "tracker": [
+          "AFT-A1"
+        ]
+      },
+      "ST2 Approve by task refuses a stale attempt": {
+        "requirements": [
+          "S4",
+          "P2.25"
+        ],
+        "tracker": [
+          "AFT-ST2"
+        ]
       }
     }
   }
