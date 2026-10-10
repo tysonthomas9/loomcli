@@ -1000,6 +1000,13 @@ describe("AgentChat lifecycle (1.8b)", () => {
     );
   });
 
+  it("labels create_retrying in plain words", async () => {
+    await mount(agent({ attention_reason: "create_retrying" }));
+    expect(screen.getByTestId("agent-attention-banner")).toHaveTextContent(
+      "Needs attention: retrying start…",
+    );
+  });
+
   it("shows history expired in place of the composer once history is purged, with no Unarchive", async () => {
     await mount(
       agent({ state: "archived", archived_at: "t", history_purged_at: "t" }),

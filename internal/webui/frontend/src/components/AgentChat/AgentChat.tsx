@@ -405,6 +405,7 @@ const ATTENTION: Record<string, string> = {
   history_too_large: "the history is too large to load in full.",
   session_missing: "the native session is missing.",
   create_incomplete: "creating the agent did not finish.",
+  create_retrying: "retrying start…",
   delete_incomplete: "deleting the agent did not finish.",
 };
 const attentionText = (reason: string) => ATTENTION[reason] ?? reason;
