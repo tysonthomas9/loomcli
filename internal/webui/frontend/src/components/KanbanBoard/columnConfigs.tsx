@@ -38,11 +38,24 @@ function isDeferredIssue(issue: Issue): boolean {
   return issue.is_deferred === true || issue.status === "deferred";
 }
 
-function isBlockedIssue(issue: Issue, blockedInfo?: BlockedInfo): boolean {
+/**
+ * Started work keeps its column even with an open blocker: a task may start on
+ * its blocker's code while that code awaits review (P1.26), and its card still
+ * shows the blocked badge.
+ */
+function hasStarted(issue: Issue): boolean {
   return (
-    issue.is_blocked === true ||
-    issue.status === "blocked" ||
-    (blockedInfo?.blockedByCount ?? 0) > 0
+    issue.status === "in_progress" ||
+    issue.status === "review" ||
+    issue.status === "closed"
+  );
+}
+
+function isBlockedIssue(issue: Issue, blockedInfo?: BlockedInfo): boolean {
+  if (issue.status === "blocked") return true;
+  return (
+    !hasStarted(issue) &&
+    (issue.is_blocked === true || (blockedInfo?.blockedByCount ?? 0) > 0)
   );
 }
 

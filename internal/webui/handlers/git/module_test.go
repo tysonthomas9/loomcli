@@ -35,6 +35,8 @@ func TestGitModule_RegisterRoutes(t *testing.T) {
 		{"GET", "/api/workspaces/test-ws/agents/agent1/diff/commits"},
 		{"GET", "/api/workspaces/test-ws/agents/agent1/diff/files"},
 		{"GET", "/api/workspaces/test-ws/agents/agent1/diff/file"},
+		// Rebuild a task built on a rejected or replaced revision
+		{"POST", "/api/workspaces/test-ws/issues/issue1/rebuild"},
 	}
 
 	for _, rt := range routes {

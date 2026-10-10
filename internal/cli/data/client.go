@@ -31,7 +31,17 @@ var (
 
 	providerMu                sync.Mutex
 	localIssueBackendProvider func(context.Context) backend.IssueBackend
+	daemonAgentWrapper        func(backend.IssueBackend) backend.IssueBackend
 )
+
+// SetDaemonAgentWrapper wires how the HTTP issue backend is wrapped for a
+// daemon-managed agent, so mutations of its own task go through the daemon
+// (cli.DaemonAgentIssueBackend). cli/data cannot import internal/cli.
+func SetDaemonAgentWrapper(wrap func(backend.IssueBackend) backend.IssueBackend) {
+	providerMu.Lock()
+	defer providerMu.Unlock()
+	daemonAgentWrapper = wrap
+}
 
 // SetLocalIssueBackendProvider wires the non-HTTP backend used by issue
 // commands when no --server/LOOM_SERVER_URL is configured.
@@ -103,7 +113,17 @@ func getIssueBackend(ctx context.Context) (backend.IssueBackend, error) {
 	if err != nil {
 		return nil, err
 	}
-	return api.New(api.Config{BaseURL: url, WorkspaceID: wsID, HTTPClient: cli})
+	ib, err := api.New(api.Config{BaseURL: url, WorkspaceID: wsID, HTTPClient: cli})
+	if err != nil {
+		return nil, err
+	}
+	providerMu.Lock()
+	wrap := daemonAgentWrapper
+	providerMu.Unlock()
+	if wrap != nil {
+		return wrap(ib), nil
+	}
+	return ib, nil
 }
 
 // resetClient clears the singleton state so a fresh client can be

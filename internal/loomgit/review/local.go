@@ -15,7 +15,11 @@ import (
 type Local struct{ store *journal.SQLite }
 
 func OpenLocal() (*Local, error) {
-	path := filepath.Join(config.GetConfigDir(), "loomgit", "store.db")
+	return OpenLocalAt(filepath.Join(config.GetConfigDir(), "loomgit", "store.db"))
+}
+
+// OpenLocalAt opens the journal at path; it must exist.
+func OpenLocalAt(path string) (*Local, error) {
 	if _, err := os.Stat(path); err != nil {
 		return nil, err
 	}
@@ -27,6 +31,16 @@ func OpenLocal() (*Local, error) {
 }
 
 func (l *Local) Close() error { return l.store.Close() }
+
+// TaskForChange names the task a change belongs to ("" when none).
+func (l *Local) TaskForChange(ctx context.Context, workspace, change string) (string, error) {
+	return l.store.TaskForChange(ctx, workspace, change)
+}
+
+// TaskWorkspaces lists the workspaces whose tasks have changes.
+func (l *Local) TaskWorkspaces(ctx context.Context) ([]string, error) {
+	return l.store.TaskWorkspaces(ctx)
+}
 
 func (l *Local) Submit(ctx context.Context, workspace, change string, number int, headSHA, kind, reason string, actor Actor) (loomgit.Verdict, error) {
 	return Submit(ctx, l.store, workspace, change, number, headSHA, kind, reason, actor)
@@ -110,6 +124,15 @@ type TaskRevision struct {
 	FeedbackStatus         string `json:"feedback_status,omitempty"`
 	FeedbackReason         string `json:"feedback_reason,omitempty"`
 	FeedbackMergeCancelled bool   `json:"feedback_merge_cancelled,omitempty"`
+	// DependsOn is the task this revision's code was built on, before that
+	// task's code was reviewed. LineageState is "stale" when that task's
+	// revision was rejected or replaced, or "dependency_abandoned"; it is
+	// empty when the base is current. RebuildOn is the predecessor revision a
+	// rebuild would build on, 0 if none yet.
+	DependsOn     string `json:"depends_on,omitempty"`
+	LineageState  string `json:"lineage_state,omitempty"`
+	LineageReason string `json:"lineage_reason,omitempty"`
+	RebuildOn     int    `json:"rebuild_on,omitempty"`
 }
 
 func (l *Local) TaskRevisions(ctx context.Context, workspace, task string) ([]TaskRevision, error) {
@@ -156,6 +179,9 @@ func (l *Local) TaskRevisionsForLead(ctx context.Context, workspace, task, lead 
 			return nil, err
 		}
 		if err := l.addFeedbackState(ctx, workspace, &i, statusSource(r)); err != nil {
+			return nil, err
+		}
+		if err := l.addDependencyState(ctx, workspace, lead, r.Kind, &i); err != nil {
 			return nil, err
 		}
 		out = append(out, i)

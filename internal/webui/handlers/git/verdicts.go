@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomgit/apply"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/publish"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/taskreview"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/handler"
 )
@@ -24,7 +26,15 @@ func writeReviewError(w http.ResponseWriter, err error) {
 	} else if review.IsNotFound(err) {
 		code, status = "not_found", http.StatusNotFound
 	}
-	handler.WriteJSON(w, status, map[string]any{"success": false, "error": code})
+	body := map[string]any{"success": false, "error": code}
+	if coded != nil {
+		// The reviewer sees why, e.g. which predecessor revision to rebuild on.
+		body["message"] = coded.Error()
+		if coded.Message != "" {
+			body["message"] = coded.Message
+		}
+	}
+	handler.WriteJSON(w, status, body)
 }
 
 type verdictRequest struct {
@@ -96,12 +106,27 @@ func handleVerdictWithPublisher(w http.ResponseWriter, req *http.Request, publis
 		followVerdict(w, req, store, v, body.Lead, publisher)
 		return
 	}
+	settleVerdictTask(req.Context(), v)
 	handler.WriteJSON(w, http.StatusOK, map[string]any{"success": true, "data": v, "status": "recorded"})
+}
+
+// settleTask moves the verdict's task out of code review when the verdict
+// decides it (D29); tests replace it.
+var settleTask = func(ctx context.Context, workspace, change string) (taskreview.Decision, error) {
+	return taskreview.SettleChange(ctx, "", workspace, change)
+}
+
+// settleVerdictTask settles the task right after its verdict so the task
+// shows its outcome at once. The reconcile loop retries a failure.
+func settleVerdictTask(ctx context.Context, verdict loomgit.Verdict) {
+	if _, err := settleTask(ctx, verdict.Workspace, verdict.Change); err != nil {
+		slog.WarnContext(ctx, "task review settle after verdict failed", "workspace", verdict.Workspace, "change", verdict.Change, "err", err)
+	}
 }
 
 func followVerdict(w http.ResponseWriter, req *http.Request, store *review.Local, verdict loomgit.Verdict,
 	lead string, publisher func(context.Context, string, string) error) {
-	status := "approved_waiting_for_working_area"
+	status, reason := "approved_waiting_for_working_area", ""
 	available, areaErr := hasWorkingArea(req.Context(), store, verdict.Workspace, lead)
 	if areaErr != nil {
 		writeReviewError(w, areaErr)
@@ -121,7 +146,6 @@ func followVerdict(w http.ResponseWriter, req *http.Request, store *review.Local
 			})
 			return
 		}
-		var reason string
 		var err error
 		if status, reason, err = followStatus(req.Context(), store, verdict, lead, followed); err != nil {
 			writeReviewError(w, err)
@@ -140,13 +164,17 @@ func followVerdict(w http.ResponseWriter, req *http.Request, store *review.Local
 			}
 		}
 	}
-	writeApprovalResponse(w, req, verdict, lead, status, available)
+	writeApprovalResponse(w, req, verdict, lead, status, reason, available)
 }
 
 // writeApprovalResponse opens the PR an Approve and create PR verdict asked
 // for, once its working area exists, and reports the outcome with the status.
-func writeApprovalResponse(w http.ResponseWriter, req *http.Request, verdict loomgit.Verdict, lead, status string, available bool) {
+func writeApprovalResponse(w http.ResponseWriter, req *http.Request, verdict loomgit.Verdict, lead, status, reason string, available bool) {
 	response := map[string]any{"success": true, "data": verdict, "status": status}
+	if reason != "" {
+		response["reason"] = reason
+	}
+	defer settleVerdictTask(req.Context(), verdict)
 	if verdict.Publish && available {
 		outcome, err := publishVerdict(req.Context(), verdict, lead)
 		if err != nil {
@@ -206,7 +234,12 @@ func followStatus(ctx context.Context, store *review.Local, verdict loomgit.Verd
 	if len(followed.Pending) > 0 {
 		paused, err := store.FollowingPaused(ctx, verdict.Workspace, lead)
 		if err != nil || !paused {
-			return "approved_waiting_for_dependency", "", err
+			if err != nil {
+				return "", "", err
+			}
+			// Approving B before A waits for A, and says so.
+			reason, err := store.DependencyWaitReason(ctx, verdict.Workspace, verdict.Change)
+			return "approved_waiting_for_dependency", reason, err
 		}
 		return "approved_paused", "", nil
 	}

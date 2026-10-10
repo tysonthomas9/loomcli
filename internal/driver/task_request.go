@@ -74,6 +74,7 @@ type TaskRunWorkerOptions struct {
 	HeartbeatInterval  time.Duration
 	DeferCompletion    bool
 	CloseTaskOnSuccess bool
+	ReviewMarker       TaskReviewMarker
 	MaxAttempts        int
 	// Now is a clock seam for tests; nil uses time.Now.
 	Now func() time.Time
@@ -331,6 +332,7 @@ func ClaimAndExecuteTaskRunWithResult(ctx context.Context, s store.Store, opts T
 		HeartbeatInterval:  opts.HeartbeatInterval,
 		DeferCompletion:    opts.DeferCompletion,
 		CloseTaskOnSuccess: opts.CloseTaskOnSuccess,
+		ReviewMarker:       opts.ReviewMarker,
 		MaxAttempts:        opts.MaxAttempts,
 		HeartbeatSource:    "task_run_worker",
 		Now:                opts.Now,
@@ -636,6 +638,7 @@ type executeClaimedTaskRunOptions struct {
 	HeartbeatInterval  time.Duration
 	DeferCompletion    bool
 	CloseTaskOnSuccess bool
+	ReviewMarker       TaskReviewMarker
 	MaxAttempts        int
 	UpdateDriverStep   bool
 	ParentNodeID       string
@@ -930,6 +933,10 @@ func completeAndCloseClaimedTaskRun(ctx context.Context, s store.Store, claimed 
 
 func completeClaimedTaskRun(ctx context.Context, s store.Store, claimed *domain.TaskRun, opts executeClaimedTaskRunOptions, refs claimedTaskRunRefs, execResult TaskExecResult, completion taskExecCompletion, metadata map[string]string) (*domain.TaskRun, error) {
 	artifactIDs := normalizeArtifactIDs(execResult.ArtifactIDs)
+	closeTask, err := closeTaskOnSuccess(ctx, s.TaskRuns(), claimed, opts.ReviewMarker, metadata)
+	if err != nil {
+		return nil, err
+	}
 	final, err := s.TaskRuns().Complete(ctx, refs.WorkspaceKey, claimed.TaskRunID, store.TaskRunComplete{
 		CompletionID:        "worker-complete-" + claimed.TaskRunID,
 		NodeID:              claimed.NodeID,
@@ -950,7 +957,7 @@ func completeClaimedTaskRun(ctx context.Context, s store.Store, claimed *domain.
 		RuntimeMetadata:     metadata,
 		ErrorClass:          completion.ErrorClass,
 		ErrorMessage:        completion.ErrorMessage,
-		CloseTask:           true,
+		CloseTask:           closeTask,
 		CloseReason:         "completed by task worker",
 	})
 	if err != nil {

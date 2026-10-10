@@ -60,6 +60,25 @@ export async function submitRevisionVerdict(
   return (data as { status?: string } | undefined)?.status;
 }
 
+/**
+ * Rebuild a task whose code was built on a revision of the task it depends on
+ * that was rejected or replaced: its newest revision is rejected and the task
+ * reopens, built on that task's newest revision. Never automatic.
+ */
+export async function rebuildTask(
+  workspaceId: string,
+  taskId: string,
+): Promise<void> {
+  const { error, response } = await api.POST(
+    "/api/workspaces/{ws}/issues/{id}/rebuild",
+    {
+      params: { path: { ws: workspaceId, id: taskId } },
+      body: { actor: { kind: "human", id: "local-user" } },
+    },
+  );
+  if (error) throw apiErrorFromResponse(error, response);
+}
+
 export async function applyRevision(
   workspaceId: string,
   revision: ReviewRevision,

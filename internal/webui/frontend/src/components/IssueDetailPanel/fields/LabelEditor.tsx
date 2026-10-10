@@ -11,6 +11,7 @@ import {
   type KeyboardEvent,
 } from "react";
 
+import { CODE_REVIEW_LABEL } from "@/utils/issue";
 import styles from "./LabelEditor.module.css";
 
 export interface LabelEditorProps {
@@ -68,6 +69,12 @@ export function LabelEditor({
 
     if (!trimmed) {
       setError("Label cannot be empty");
+      return;
+    }
+
+    // Loom alone sets the code-review label (D29); the API refuses it.
+    if (trimmed.toLowerCase() === CODE_REVIEW_LABEL) {
+      setError("Loom sets code-review when a task's code awaits review");
       return;
     }
 
@@ -204,7 +211,7 @@ export function LabelEditor({
           {optimisticLabels.map((label) => (
             <span key={label} className={styles.label}>
               {label}
-              {!disabled && (
+              {!disabled && label !== CODE_REVIEW_LABEL && (
                 <button
                   type="button"
                   className={styles.removeButton}

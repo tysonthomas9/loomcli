@@ -7,7 +7,7 @@
  * placeholder so the review surface explains itself instead of being blank.
  */
 
-import { isPRUrl } from "@/utils/issue";
+import { isAwaitingCodeReview, isPRUrl } from "@/utils/issue";
 
 import styles from "./PRSection.module.css";
 
@@ -16,6 +16,7 @@ export interface PRSectionProps {
   issue: {
     status?: string | undefined;
     external_ref?: string | null | undefined;
+    labels?: string[] | null | undefined;
   };
 }
 
@@ -27,7 +28,9 @@ function prNumberFrom(ref: string | null | undefined): string | null {
 
 export function PRSection({ issue }: PRSectionProps): JSX.Element | null {
   const hasPR = isPRUrl(issue.external_ref);
-  const isReview = issue.status === "review";
+  // A task whose code awaits review in Loom gets its PR from Approve; the
+  // "agent hasn't pushed a branch" placeholder does not apply to it.
+  const isReview = issue.status === "review" && !isAwaitingCodeReview(issue);
 
   // Only render where the design does: a PR card whenever a PR exists, and
   // the "no PR yet" placeholder only on review-stage issues.

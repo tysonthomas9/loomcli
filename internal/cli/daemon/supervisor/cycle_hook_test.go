@@ -225,18 +225,22 @@ func TestAdvanceReviewCycle_ShipLeavesTheTaskClaimable(t *testing.T) {
 }
 
 // closed and blocked are decisions somebody made: closed is terminal, blocked is
-// how a stage escalates to a human. The loop must not drag a task out of either.
+// how a stage escalates to a human. The loop must not drag a task out of either,
+// nor out of code review (D29): only Approve or Reject moves that task on.
 //
 // The backend here refuses label mutation on a terminal issue the way fleet-db
 // does (ValidateModifiable → "issue is closed"), so the test fails unless the
 // status is checked BEFORE any write. A permissive mock would let a
 // check-after-write implementation pass while the real backend demoted the run.
 func TestAdvanceReviewCycle_DoesNotOverrideADeliberateStop(t *testing.T) {
-	for _, status := range []string{"closed", "blocked"} {
+	for _, status := range []string{"closed", "blocked", "code-review"} {
 		t.Run(status, func(t *testing.T) {
 			touched := false
 			m := clitest.NewMockIssueBackend()
 			m.GetFn = func(_ context.Context, id string) (*backend.IssueDetailData, error) {
+				if status == "code-review" {
+					return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id, Status: "review", Labels: []string{"criticized", backend.CodeReviewLabel}}}, nil
+				}
 				return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id, Status: status, Labels: []string{"criticized"}}}, nil
 			}
 			terminal := status == "closed"

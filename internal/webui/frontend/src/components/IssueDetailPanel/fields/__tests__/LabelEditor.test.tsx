@@ -573,4 +573,34 @@ describe("LabelEditor", () => {
       expect(screen.getByText("new")).toBeInTheDocument();
     });
   });
+
+  describe("code-review label (D29)", () => {
+    it("shows code-review without a remove button", () => {
+      render(
+        <LabelEditor {...defaultProps({ labels: ["bug", "code-review"] })} />,
+      );
+
+      expect(screen.getByText("code-review")).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("remove-label-code-review"),
+      ).not.toBeInTheDocument();
+      expect(screen.getByTestId("remove-label-bug")).toBeInTheDocument();
+    });
+
+    it("does not add code-review by hand", () => {
+      const onAddLabel = vi.fn().mockResolvedValue(undefined);
+      render(<LabelEditor {...defaultProps({ onAddLabel })} />);
+
+      fireEvent.click(screen.getByTestId("add-label-button"));
+      fireEvent.change(screen.getByTestId("label-input"), {
+        target: { value: " Code-Review " },
+      });
+      fireEvent.keyDown(screen.getByTestId("label-input"), { key: "Enter" });
+
+      expect(onAddLabel).not.toHaveBeenCalled();
+      expect(screen.getByTestId("label-error")).toHaveTextContent(
+        "Loom sets code-review",
+      );
+    });
+  });
 });

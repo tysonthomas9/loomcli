@@ -678,7 +678,11 @@ function App() {
       latestIssue.owner !== issueDetails.owner ||
       latestIssue.updated_at !== issueDetails.updated_at
     ) {
-      updateIssueDetails(latestIssue);
+      // Labels stay as fetched: a label event names no label, so the list copy
+      // keeps a removed label (e.g. code-review after a verdict) until refetch,
+      // and the detail refetch that event triggers is the source of truth.
+      const { labels: _staleListLabels, ...listFields } = latestIssue;
+      updateIssueDetails(listFields);
     }
   }, [issueDetails, issuesMap, updateIssueDetails]);
 

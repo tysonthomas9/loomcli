@@ -328,4 +328,40 @@ describe("IssueHeader", () => {
       expect(header.className).not.toMatch(/_sticky_/);
     });
   });
+
+  describe("code review (D29)", () => {
+    it("shows a task in code review's status without the dropdown", () => {
+      render(
+        <IssueHeader
+          issue={{ ...mockIssue, status: "review", labels: ["code-review"] }}
+          onClose={() => {}}
+          onStatusChange={vi.fn()}
+        />,
+      );
+
+      expect(
+        screen.queryByRole("combobox", { name: "Change issue status" }),
+      ).not.toBeInTheDocument();
+      const badge = screen.getByTestId("issue-status-badge");
+      expect(badge).toHaveAttribute("data-status", "review");
+      expect(badge).toHaveAttribute(
+        "title",
+        "Approve or Reject the revision to move this task on",
+      );
+    });
+
+    it("keeps the dropdown for a plan review", () => {
+      render(
+        <IssueHeader
+          issue={{ ...mockIssue, status: "review" }}
+          onClose={() => {}}
+          onStatusChange={vi.fn()}
+        />,
+      );
+
+      expect(
+        screen.getByRole("combobox", { name: "Change issue status" }),
+      ).toBeInTheDocument();
+    });
+  });
 });

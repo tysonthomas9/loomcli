@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -73,6 +74,9 @@ func newHarnessWithConfig(t *testing.T, localSettingsDir, runner string) *testHa
 	module := NewModule(Config{
 		Store:            st,
 		LocalSettingsDir: localSettingsDir,
+		// A private journal: completion reads it to keep a task with code
+		// in review (P1.26), and must never touch the user's Loom journal.
+		CaptureJournalPath: filepath.Join(t.TempDir(), "loomgit", "store.db"),
 		IssueBackends: func(_, actor string) (backend.IssueBackend, error) {
 			h.backend.actor = actor
 			return h.backend, nil

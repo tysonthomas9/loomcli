@@ -232,6 +232,8 @@ func runServe(cmd *cobra.Command, args []string) {
 		log.Printf("warning: reconcile workspace creations: %v", err)
 	}
 	startLoomGitReconciler(ctx, storeHandle.Store)
+	// Task copies behind code review are built on the blocker's revision (P1.26).
+	driverexecutor.UseCodeReviewBases(cli.CodeReviewBase)
 	startDriverExecutorIfEnabled(ctx, storeHandle.Store)
 	startStaleTaskSweeper(ctx, storeHandle.Store)
 	startOutboxDispatcher(ctx, storeHandle.Store)
@@ -328,6 +330,7 @@ func startDriverExecutorIfEnabled(ctx context.Context, st store.Store) {
 		MaxAttempts:      taskRunMaxAttempts,
 		APIBaseURL:       driverAPIBaseURL(),
 		LocalSettingsDir: bootstrap.LoomDir(),
+		ReviewMarker:     cli.MarkTaskInCodeReview,
 	}
 	go func() {
 		ticker := time.NewTicker(2 * time.Second)

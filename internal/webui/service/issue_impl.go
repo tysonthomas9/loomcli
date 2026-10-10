@@ -200,6 +200,10 @@ func (s *issueServiceImpl) CreateIssue(ctx context.Context, params CreateIssuePa
 		return nil, svcErr
 	}
 
+	if backend.HasCodeReviewLabel(params.Labels) {
+		return nil, ErrValidation(codeReviewLabelRefusal)
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
@@ -253,9 +257,17 @@ func (s *issueServiceImpl) PatchIssue(ctx context.Context, params PatchIssuePara
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
-	if patchHasLabelMutation(params) {
+	if patchHasLabelMutation(params) || params.SetLabels != nil {
 		s.labelMutationMu.Lock()
 		defer s.labelMutationMu.Unlock()
+		if err := refuseCodeReviewLabelEdit(ctx, be, params); err != nil {
+			return err
+		}
+	}
+	if params.Status != nil && *params.Status != "review" {
+		if err := refuseCodeReviewStatusChange(ctx, be, params.IssueID); err != nil {
+			return err
+		}
 	}
 
 	if err := be.Update(ctx, params.IssueID, patchParamsToBackendUpdate(&params)); err != nil {
@@ -266,6 +278,51 @@ func (s *issueServiceImpl) PatchIssue(ctx context.Context, params PatchIssuePara
 		}
 		slog.Error("backend error in PatchIssue", "issue_id", params.IssueID, "err", err)
 		return translateBackendError(err)
+	}
+	return nil
+}
+
+const codeReviewLabelRefusal = "the code-review label belongs to Loom: only Approve or Reject of the task's revision changes it"
+
+// refuseCodeReviewLabelEdit keeps the code-review label out of reach of the
+// issue API (D29, P1.26): Loom sets it when a finished attempt leaves code
+// awaiting review and clears it on Approve or Reject, through the issue
+// backend, never through this API. No caller may add, remove or replace it.
+func refuseCodeReviewLabelEdit(ctx context.Context, be backend.IssueBackend, params PatchIssueParams) error {
+	if backend.HasCodeReviewLabel(params.AddLabels) || backend.HasCodeReviewLabel(params.RemoveLabels) {
+		return ErrConflict(codeReviewLabelRefusal)
+	}
+	if params.SetLabels == nil {
+		return nil
+	}
+	issue, err := be.Get(ctx, params.IssueID)
+	if err != nil {
+		return translateBackendError(err)
+	}
+	var current []string
+	if issue != nil {
+		current = issue.Labels
+	}
+	if backend.TouchesCodeReviewLabel(backend.UpdateParams{SetLabels: params.SetLabels}, current) {
+		return ErrConflict(codeReviewLabelRefusal)
+	}
+	return nil
+}
+
+const codeReviewStatusRefusal = "this task's code awaits review: Approve or Reject its revision to move it on"
+
+// refuseCodeReviewStatusChange keeps a task in code review where it is: only
+// Approve (closed) or Reject (open) of its revision moves it, and each also
+// clears the label. A hand-made close or reopen would skip the review and
+// leave a stale code-review label, so the API refuses it from every caller,
+// as the daemon already does for agents.
+func refuseCodeReviewStatusChange(ctx context.Context, be backend.IssueBackend, id string) error {
+	issue, err := be.Get(ctx, id)
+	if err != nil {
+		return translateBackendError(err)
+	}
+	if issue != nil && backend.HasCodeReviewLabel(issue.Labels) {
+		return ErrConflict(codeReviewStatusRefusal)
 	}
 	return nil
 }
@@ -292,6 +349,9 @@ func (s *issueServiceImpl) CloseIssue(ctx context.Context, params CloseIssuePara
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
+	if err := refuseCodeReviewStatusChange(ctx, be, params.IssueID); err != nil {
+		return nil, err
+	}
 	result, err := be.Close(ctx, params.IssueID, backend.CloseParams{
 		Actor:       params.Actor,
 		Reason:      params.Reason,
@@ -593,6 +653,9 @@ func (s *issueServiceImpl) ReopenIssue(ctx context.Context, params ReopenIssuePa
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
+	if err := refuseCodeReviewStatusChange(ctx, be, params.IssueID); err != nil {
+		return err
+	}
 	if err := be.Reopen(ctx, params.IssueID, backend.ReopenParams{Actor: params.Actor, Reason: params.Reason}); err != nil {
 		slog.Error("backend error in ReopenIssue", "issue_id", params.IssueID, "err", err)
 		return translateBackendError(err)

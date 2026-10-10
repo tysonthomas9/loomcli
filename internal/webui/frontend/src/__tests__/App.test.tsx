@@ -2321,6 +2321,44 @@ describe("App", () => {
       });
     });
 
+    it("keeps fetched labels when a live status update syncs the open issue", async () => {
+      const updateIssueDetails = vi.fn();
+      const listIssue = createMockIssue({
+        id: "issue-1",
+        title: "Rejected task",
+        status: "open",
+        labels: ["code-review"],
+        updated_at: "2024-01-01T00:01:00Z",
+      });
+      mockStoreState = createMockUseIssuesReturn({ issues: [listIssue] });
+      vi.mocked(useIssueDetail).mockReturnValue(
+        createMockUseIssueDetailReturn({
+          issueDetails: {
+            id: "issue-1",
+            title: "Rejected task",
+            priority: 2,
+            status: "review",
+            issue_type: "task",
+            labels: [],
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
+          },
+          updateIssueDetails,
+        }),
+      );
+
+      render(<App />);
+
+      await waitFor(() => {
+        expect(updateIssueDetails).toHaveBeenCalledWith(
+          expect.objectContaining({ status: "open" }),
+        );
+      });
+      expect(updateIssueDetails.mock.calls[0]?.[0]).not.toHaveProperty(
+        "labels",
+      );
+    });
+
     it("refetches an open issue after an SSE detail invalidation", async () => {
       const fetchIssue = vi.fn();
       const issue = createMockIssue({ id: "issue-1" });

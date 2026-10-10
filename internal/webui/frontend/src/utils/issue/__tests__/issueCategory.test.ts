@@ -14,6 +14,8 @@ import {
   getOpenStatus,
   isPRUrl,
   getReviewType,
+  isAwaitingCodeReview,
+  CODE_REVIEW_LABEL,
 } from "../issueCategory";
 
 // --- hasNeedsRevision ---
@@ -333,5 +335,46 @@ describe("getReviewType", () => {
 describe("constants", () => {
   it("NEEDS_REVISION_LABEL matches expected value", () => {
     expect(NEEDS_REVISION_LABEL).toBe("needs-revision");
+  });
+});
+
+// --- Loom code review (D29 / P1.26) ---
+
+describe("isAwaitingCodeReview", () => {
+  it("is true only for a task in review with the code-review label", () => {
+    expect(
+      isAwaitingCodeReview({ status: "review", labels: [CODE_REVIEW_LABEL] }),
+    ).toBe(true);
+    expect(isAwaitingCodeReview({ status: "review", labels: [] })).toBe(false);
+    expect(isAwaitingCodeReview({ status: "review", labels: null })).toBe(
+      false,
+    );
+    expect(
+      isAwaitingCodeReview({ status: "open", labels: [CODE_REVIEW_LABEL] }),
+    ).toBe(false);
+  });
+
+  it("gives a task whose code awaits review no plan or PR header review", () => {
+    expect(
+      getReviewType({
+        title: "Task",
+        status: "review",
+        labels: ["x", CODE_REVIEW_LABEL],
+      }),
+    ).toBeNull();
+    expect(
+      getReviewType({
+        title: "Task",
+        status: "review",
+        labels: [CODE_REVIEW_LABEL],
+        external_ref: "https://github.com/o/r/pull/1",
+      }),
+    ).toBeNull();
+  });
+
+  it("keeps plan review for a task in review without the label", () => {
+    expect(
+      getReviewType({ title: "Task", status: "review", labels: ["x"] }),
+    ).toBe("plan");
   });
 });

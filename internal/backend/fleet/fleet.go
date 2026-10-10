@@ -429,13 +429,13 @@ func (b *FleetBackend) Ready(ctx context.Context, opts backend.ReadyOpts) ([]bac
 		return nil, err
 	}
 	if !hasData(resp) {
-		return []backend.IssueData{}, nil
+		return b.withTasksBehindReview(ctx, []backend.IssueData{}, opts), nil
 	}
 	issues, err := unmarshalListOrWrapper[*readyIssueWithParent](resp.Data, "Ready")
 	if err != nil {
 		return nil, err
 	}
-	return filterReadyIssues(readyIssuesToData(issues), opts), nil
+	return b.withTasksBehindReview(ctx, filterReadyIssues(readyIssuesToData(issues), opts), opts), nil
 }
 
 // Stats builds lifecycle counts from fleet-db's status count endpoint and

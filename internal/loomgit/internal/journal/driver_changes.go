@@ -47,3 +47,21 @@ func (s *SQLite) TaskForChange(ctx context.Context, workspace, change string) (s
 	}
 	return task, err
 }
+
+// TaskWorkspaces lists the workspaces that have task changes.
+func (s *SQLite) TaskWorkspaces(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT workspace FROM driver_changes ORDER BY workspace`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var workspace string
+		if err := rows.Scan(&workspace); err != nil {
+			return nil, err
+		}
+		out = append(out, workspace)
+	}
+	return out, rows.Err()
+}

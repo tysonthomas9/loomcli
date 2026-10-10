@@ -103,7 +103,20 @@ func TestSpawnAndWaitFreezesCompletedRevision(t *testing.T) {
 	s.ControlStore = &controlPlaneStoreOverrides{Store: baseStore, leases: &releaseOrderLeaseStore{
 		AgentLeaseStore: baseStore.AgentLeases(), onRelease: func() { leaseReleases++; assertRevision() },
 	}}
-	s.IssueBackend = &releaseOrderIssueBackend{MockIssueBackend: clitest.NewMockIssueBackend(), onRelease: func() { claimReleases++; assertRevision() }}
+	issues := clitest.NewMockIssueBackend()
+	// The agent closed its task past the daemon before the run froze its
+	// work: once frozen with code, the task goes back to review (P1.26).
+	reviewed := 0
+	issues.GetFn = func(_ context.Context, id string) (*backend.IssueDetailData, error) {
+		return &backend.IssueDetailData{IssueData: backend.IssueData{ID: id, Status: "closed"}}, nil
+	}
+	issues.UpdateFn = func(_ context.Context, _ string, p backend.UpdateParams) error {
+		if p.Status != nil && *p.Status == "review" && backend.HasCodeReviewLabel(p.AddLabels) {
+			reviewed++
+		}
+		return nil
+	}
+	s.IssueBackend = &releaseOrderIssueBackend{MockIssueBackend: issues, onRelease: func() { claimReleases++; assertRevision() }}
 	ap := &AgentProcess{Entry: config.AgentEntry{Worktree: "agent", Role: "task", Backend: "codex"},
 		WorktreePath: dir, BeforeRef: base, AgentSessionID: "session-1", AssignedTaskID: "task-1",
 		AgentLeaseID: "lease-1", AgentLeaseToken: "token-1"}
@@ -112,6 +125,9 @@ func TestSpawnAndWaitFreezesCompletedRevision(t *testing.T) {
 	if leaseReleases != 1 || claimReleases != 1 {
 		t.Fatalf("release calls = lease %d, claim %d; want one each", leaseReleases, claimReleases)
 	}
+	if reviewed != 1 {
+		t.Fatalf("closed task put back in code review %d times after the freeze, want 1", reviewed)
+	}
 	ap.BeforeRef = base
 	ap.AgentSessionID = "session-1"
 	ap.AssignedTaskID = "task-1"
@@ -119,6 +135,9 @@ func TestSpawnAndWaitFreezesCompletedRevision(t *testing.T) {
 	s.Concurrency.Acquire("task")
 	s.spawnAndWait(ap)
 	assertRevision()
+	if reviewed != 2 {
+		t.Fatalf("an already-frozen attempt must also put its closed task back in code review (got %d)", reviewed)
+	}
 	if ap.CaptureRetained {
 		t.Fatal("repeated exit unexpectedly retained the worktree")
 	}

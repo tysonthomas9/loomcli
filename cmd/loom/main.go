@@ -47,6 +47,7 @@ func init() {
 	data.SetLocalIssueBackendProvider(func(_ context.Context) backend.IssueBackend {
 		return cli.DefaultIssueBackend()
 	})
+	data.SetDaemonAgentWrapper(cli.DaemonAgentIssueBackend)
 	for _, c := range data.Commands() {
 		cli.RegisterCommand(c)
 	}

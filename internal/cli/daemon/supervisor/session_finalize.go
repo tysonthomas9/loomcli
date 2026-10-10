@@ -330,7 +330,10 @@ func (s *Supervisor) advanceReviewCycle(ctx context.Context, taskID string, cycl
 	// deliberate gesture; in loom a planning stage lands there as its ordinary
 	// completion, so honoring it would stall every loop at round one. Use
 	// `blocked` to stop a loop for a human.
-	if issue.Status == "closed" || issue.Status == "blocked" {
+	//
+	// A task whose code awaits review (status review with the code-review
+	// label, D29) is a stop too: only Approve or Reject moves it on.
+	if issue.Status == "closed" || issue.Status == "blocked" || backend.HasCodeReviewLabel(issue.Labels) {
 		slog.InfoContext(ctx, "review cycle stopped: task is not available to advance",
 			"task", taskID, "status", issue.Status)
 		return nil

@@ -9,6 +9,13 @@
 
 export const NEEDS_REVISION_LABEL = "needs-revision";
 
+/**
+ * Loom puts this label on a task in status review whose code awaits review
+ * (D29). Its Revisions panel owns Approve/Reject, so it is not a plan review.
+ * SYNC: Must match backend.CodeReviewLabel.
+ */
+export const CODE_REVIEW_LABEL = "code-review";
+
 // --- Types ---
 
 export type OpenStatus = "needs_plan" | "ready";
@@ -29,6 +36,18 @@ interface ReviewCheckable {
   status?: string;
   notes?: string;
   external_ref?: string | null;
+  labels?: string[] | null;
+}
+
+/** Whether a task in review is waiting for its code review (D29). */
+export function isAwaitingCodeReview(issue: {
+  status?: string | undefined;
+  labels?: string[] | null | undefined;
+}): boolean {
+  return (
+    issue.status === "review" &&
+    (issue.labels?.includes(CODE_REVIEW_LABEL) ?? false)
+  );
 }
 
 // --- Simple predicates ---
@@ -119,6 +138,12 @@ export function getReviewType(issue: ReviewCheckable): ReviewType | null {
   const isReviewStatus = issue.status === "review";
   const isBlockedWithNotes = issue.status === "blocked" && !!issue.notes;
   const hasExternalPR = isPRUrl(issue.external_ref);
+
+  // Code awaiting review in Loom: the Revisions panel owns its verdict, so
+  // the header offers no plan or PR review actions.
+  if (isAwaitingCodeReview(issue)) {
+    return null;
+  }
 
   // Code review: status=review AND external_ref is a PR URL
   if (isReviewStatus && hasExternalPR) {
