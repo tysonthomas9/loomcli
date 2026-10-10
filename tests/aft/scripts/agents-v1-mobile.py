@@ -163,7 +163,7 @@ PILL = r"""(() => { const r = document.querySelector('[data-aft-row="%s"]');
   const c = p?.querySelector('button[aria-label="Copy your message"]');
   const rect = (e) => { const q = e.getBoundingClientRect(); return { left: q.left, top: q.top, right: q.right, bottom: q.bottom, width: q.width, height: q.height }; };
   return { row: rect(r), bubble: rect(b), pill: p && rect(p), copy: c && rect(c),
-    shown: !!p && getComputedStyle(p).opacity === '1' }; })()"""
+    shown: !!p && getComputedStyle(p).opacity === '1', vh: innerHeight }; })()"""
 
 SHORT, LONG = "ok", "A longer message that wraps"
 
@@ -180,13 +180,16 @@ def pill():
         heights = {}
         for row in ("short", "long"):
             sel = f'[data-aft-row="{row}"]'
-            browser("scrollintoview", sel)
-            browser("hover", sel)
+            # The chat may still be settling after the column change (it keeps
+            # to the bottom), so scroll and hover again until the row is on
+            # screen with its pill shown.
             for _ in range(20):
-                m = evaluate(PILL % row)
-                if m["shown"]:
-                    break
+                browser("scrollintoview", sel)
+                browser("hover", sel)
                 time.sleep(0.15)
+                m = evaluate(PILL % row)
+                if m["shown"] and m["bubble"]["top"] >= 0 and m["bubble"]["bottom"] <= m["vh"]:
+                    break
             label = f"{row} row at {width}px"
             check(m["pill"] and m["copy"] and m["shown"], f"{label}: hover pill not shown", m)
             p, b, r, c = m["pill"], m["bubble"], m["row"], m["copy"]

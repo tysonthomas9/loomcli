@@ -33,7 +33,7 @@ setup: |
   printf '{"preset":"lead","name":"%s","repo":"%s","base_ref":"main","overrides":{"harness":"opencode"}}' \
     "$1" "$AFT_WORK_DIR/agv1-mob-repo" |
     curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-AGV1-MOB/v1/agents" \
-      -H "Content-Type: application/json" -H "Idempotency-Key: $1" -d @- |
+      -H "Content-Type: application/json" -H "Idempotency-Key: $1-${RUN_ID:-local}" -d @- |
     python3 -c 'import json,sys; print(json.load(sys.stdin)["agent_id"])' > "$AFT_WORK_DIR/$2"
   SH
   chmod +x "$AFT_WORK_DIR/mob-lead"
@@ -53,12 +53,14 @@ tests:
     steps:
       - run: |
           set -e
-          "$AFT_WORK_DIR/mob-lead" "agv1-mob-layout-${RUN_ID:-local}" mobLayoutId
+          # A short name, as a phone user's agent would have: a long one is cut
+          # with an ellipsis by design.
+          "$AFT_WORK_DIR/mob-lead" "mob-layout" mobLayoutId
           agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-MOB/chat/$(cat "$AFT_WORK_DIR/mobLayoutId")"
         intent: "Create an OpenCode lead and open its chat"
       - wait:
           fn: >-
-            document.querySelector('section[aria-label="Agent chat"] header h2')?.textContent === 'agv1-mob-layout-${RUN_ID:-local}' &&
+            document.querySelector('section[aria-label="Agent chat"] header h2')?.textContent === 'mob-layout' &&
             !!document.querySelector('textarea[aria-label=Message]') &&
             document.querySelectorAll('nav[aria-label="Primary"] [aria-label="Workspace selector"] button[aria-label^="Switch to "]').length >= 4
         intent: "Wait until the chat shows the lead's name, the composer and all four workspaces"
