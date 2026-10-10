@@ -84,9 +84,11 @@ func (s *Store) PRWatch(ctx context.Context, k PRWatchKey) (PRWatch, error) {
 WHERE agent_id = ? AND owner = ? AND repo = ? AND number = ?`, k.AgentID, k.Owner, k.Repo, k.Number))
 }
 
-// PRWatches lists workspace's PR watches in key order.
+// PRWatches lists workspace's PR watches in key order, but none of a
+// deleted agent.
 func (s *Store) PRWatches(ctx context.Context, workspace string) ([]PRWatch, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+prWatchCols+` FROM pr_watches WHERE workspace_id = ?
+	rows, err := s.db.QueryContext(ctx, `SELECT `+prWatchCols+` FROM pr_watches w WHERE workspace_id = ?
+  AND NOT EXISTS (SELECT 1 FROM agents a WHERE a.agent_id = w.agent_id AND a.deleted_at IS NOT NULL)
 ORDER BY agent_id, owner, repo, number`, workspace)
 	if err != nil {
 		return nil, err

@@ -36,7 +36,7 @@ type Comment struct {
 	Author string
 }
 
-// Snapshot is a PR as one complete observation saw it. Cursor is what a
+// Snapshot is a PR as one complete observation, by one viewer, saw it. Cursor is what a
 // watch reports after telling an agent about it.
 type Snapshot struct {
 	Viewer    string
@@ -45,13 +45,14 @@ type Snapshot struct {
 	Mergeable string // GitHub's mergeable_state
 	Head      string
 	Checks    []map[string]any // the head's check runs
+	Status    string           // the head's combined commit status
 	Comments  []Comment
 	Cursor    loomstore.PRWatchCursor
 }
 
 // Observe reads PR number on owner/repo through host: the viewer, the PR,
-// every page of its head's check runs, and every page of its comments,
-// review comments and reviews. Any failed read (a rate limit included)
+// every page of its head's check runs, its head's commit status, and every
+// page of its comments, review comments and reviews. Any failed read (a rate limit included)
 // fails it whole, so no partial snapshot can advance a cursor.
 func Observe(ctx context.Context, host Host, ws, owner, repo string, number int) (Snapshot, error) {
 	viewer, err := host.Viewer(ctx, ws, owner, repo)
@@ -72,18 +73,10 @@ func Observe(ctx context.Context, host Host, ws, owner, repo string, number int)
 	if s.Head == "" {
 		return Snapshot{}, fmt.Errorf("GitHub answered PR %s/%s#%d with no head SHA", owner, repo, number)
 	}
-	runs, err := readAll(ctx, host, ws, owner, repo, "check_runs", map[string]any{"ref": s.Head})
+	checks, err := readChecks(ctx, host, ws, owner, repo, &s)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	checks := make([]string, 0, len(runs))
-	for _, r := range runs {
-		run, _ := r.(map[string]any)
-		s.Checks = append(s.Checks, run)
-		checks = append(checks, fmt.Sprint(id(run), ":", run["status"], ":", run["conclusion"]))
-	}
-	sort.Strings(checks)
-	sum := sha256.Sum256([]byte(fmt.Sprint(checks)))
 	cursor := map[string]int64{"issue": 0, "review": 0, "reviewComment": 0}
 	for kind, op := range map[string]string{"issue": "issue_comments", "review": "pr_reviews", "reviewComment": "pr_review_comments"} {
 		items, err := readAll(ctx, host, ws, owner, repo, op, map[string]any{"number": number})
@@ -98,9 +91,43 @@ func Observe(ctx context.Context, host Host, ws, owner, repo string, number int)
 			cursor[kind] = max(cursor[kind], id(c))
 		}
 	}
+	// Every read resolves the host credential afresh: a viewer change
+	// meanwhile may mix two users' reads, so the observation fails whole.
+	if after, err := host.Viewer(ctx, ws, owner, repo); err != nil || after != viewer {
+		return Snapshot{}, fmt.Errorf("the host GitHub viewer changed during the PR watch read (%s, then %s): %w", viewer, after, err)
+	}
 	comments, _ := json.Marshal(cursor) // map keys marshal sorted
-	s.Cursor = loomstore.PRWatchCursor{Head: s.Head, Checks: hex.EncodeToString(sum[:16]), Comments: string(comments)}
+	s.Cursor = loomstore.PRWatchCursor{Head: s.Head, Checks: checks, Comments: string(comments)}
 	return s, nil
+}
+
+// readChecks fills s.Checks and s.Status from every page of the head's
+// check runs and its commit status, and returns their digest.
+func readChecks(ctx context.Context, host Host, ws, owner, repo string, s *Snapshot) (string, error) {
+	runs, err := readAll(ctx, host, ws, owner, repo, "check_runs", map[string]any{"ref": s.Head})
+	if err != nil {
+		return "", err
+	}
+	checks := make([]string, 0, len(runs))
+	for _, r := range runs {
+		run, _ := r.(map[string]any)
+		s.Checks = append(s.Checks, run)
+		checks = append(checks, fmt.Sprint(id(run), ":", run["status"], ":", run["conclusion"]))
+	}
+	sort.Strings(checks)
+	body, err := host.Read(ctx, ws, owner, repo, "commit_status", map[string]any{"ref": s.Head})
+	if err != nil {
+		return "", err
+	}
+	status, _ := body["item"].(map[string]any)
+	s.Status, _ = status["state"].(string)
+	statuses, _ := status["statuses"].([]any)
+	for _, st := range statuses {
+		c, _ := st.(map[string]any)
+		checks = append(checks, fmt.Sprint("status:", c["context"], ":", c["state"]))
+	}
+	sum := sha256.Sum256([]byte(fmt.Sprint(checks)))
+	return hex.EncodeToString(sum[:16]), nil
 }
 
 // readAll reads every page of a github_read list op.

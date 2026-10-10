@@ -20,8 +20,10 @@ type fakeHost struct {
 	viewer string
 	pr     map[string]any
 	pages  map[string][][]any
+	status map[string]any // commit_status's item
 	fail   map[string]error
 	calls  []string
+	onRead func(op string)
 }
 
 func (f *fakeHost) Viewer(context.Context, string, string, string) (string, error) {
@@ -38,11 +40,17 @@ func (f *fakeHost) Read(_ context.Context, ws, owner, repo, op string, args map[
 	page, _ := args["page"].(int)
 	key := op + "#" + strconv.Itoa(page)
 	f.calls = append(f.calls, key)
+	if f.onRead != nil {
+		f.onRead(op)
+	}
 	if err := f.fail[key]; err != nil {
 		return nil, err
 	}
 	if op == "pr_view" {
 		return map[string]any{"op": op, "item": f.pr}, nil
+	}
+	if op == "commit_status" {
+		return map[string]any{"op": op, "item": f.status}, nil
 	}
 	pages := f.pages[op]
 	body := map[string]any{"op": op, "items": []any{}}
@@ -268,5 +276,59 @@ func TestPRWatchRefusesClosedPR(t *testing.T) {
 	h.pr["state"] = "closed"
 	if _, _, err := Register(context.Background(), s, h, "ws", "a1", "/clones/hello", 8); !errors.Is(err, domain.ErrInvalid) {
 		t.Fatalf("Register on a closed PR = %v; want ErrInvalid", err)
+	}
+}
+
+// A deleted agent's watches are not listed, so no sweep reads for it.
+func TestPRWatchDeletedAgentNotListed(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t, filepath.Join(t.TempDir(), "agents.db"))
+	defer s.Close()
+	when := "2026-10-01T00:00:00Z"
+	gone := loomstore.Agent{AgentID: "a1", WorkspaceID: "ws", Name: "a1", ProfileKey: "a1", Preset: "lead", PresetVersion: "1",
+		Mode: "persistent", InteractionMode: "interactive", RoleKind: "interactive", SpecJSON: "{}", SpecVersion: 1,
+		OwnerKind: "user", OwnerID: "local", CreatedByKind: "user", CreatedByID: "local", CreateRequestID: "req-a1",
+		Repo: "/clones/hello", Harness: "fake", State: "archived", ArchivedAt: &when, DeletedAt: &when}
+	if err := s.InsertAgent(ctx, gone); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Register(ctx, s, newHost(), "ws", "a1", "/clones/hello", 8); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Register(ctx, s, newHost(), "ws", "a2", "/clones/hello", 8); err != nil {
+		t.Fatal(err)
+	}
+	if all, err := s.PRWatches(ctx, "ws"); err != nil || len(all) != 1 || all[0].AgentID != "a2" {
+		t.Fatalf("PRWatches = %+v, %v; want only a2's", all, err)
+	}
+}
+
+// The checks cursor covers commit statuses too: a status-only CI result
+// moves it.
+func TestPRWatchCommitStatusInChecksCursor(t *testing.T) {
+	h := newHost()
+	h.status = map[string]any{"state": "pending", "statuses": []any{map[string]any{"context": "ci", "state": "pending"}}}
+	before, err := Observe(context.Background(), h, "ws", "octocat", "hello", 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.status = map[string]any{"state": "success", "statuses": []any{map[string]any{"context": "ci", "state": "success"}}}
+	after, err := Observe(context.Background(), h, "ws", "octocat", "hello", 8)
+	if err != nil || after.Cursor.Checks == before.Cursor.Checks || after.Status != "success" {
+		t.Fatalf("checks cursor %q -> %q (status %q), %v; want it to move with the commit status", before.Cursor.Checks, after.Cursor.Checks, after.Status, err)
+	}
+}
+
+// A viewer change during an observation fails it, so cursors read under
+// one credential are never saved under another viewer.
+func TestPRWatchViewerChangesMidObservation(t *testing.T) {
+	h := newHost()
+	h.onRead = func(op string) {
+		if op == "pr_reviews" {
+			h.viewer = "bob"
+		}
+	}
+	if snap, err := Observe(context.Background(), h, "ws", "octocat", "hello", 8); err == nil {
+		t.Fatalf("Observe = %+v; want a viewer-changed failure", snap)
 	}
 }
