@@ -476,6 +476,34 @@ test("switcher at 557px: the chevrons scroll one item at a time", async ({
     await page.screenshot({ path: `${process.env.MB1C_SHOTS}/mb1c-557.png` });
 });
 
+// MB1c: one switch point, the slot fitting two 44px buttons and an item.
+// A phone (390) is below it: passive hints, swipe scrolls. The narrowest
+// desktop window (500, Chrome's minimum) is above it: buttons.
+for (const { width, buttons } of [
+  { width: 390, buttons: false },
+  { width: 500, buttons: true },
+]) {
+  test(`switcher at ${width}px: chevrons are ${buttons ? "" : "not "}buttons`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await open(page);
+    const rail = page.locator('nav[aria-label="Primary"]');
+    const hint = rail.locator("[data-more-hint]").first();
+    await expect(hint).toBeVisible();
+    const chevrons = rail.getByRole("button", { name: /^Scroll workspaces / });
+    if (!buttons) {
+      await expect(chevrons).toHaveCount(0);
+      await expect(hint).toHaveCSS("pointer-events", "none");
+      return;
+    }
+    await expect(chevrons.first()).toBeVisible();
+    const box = (await chevrons.first().boundingBox())!;
+    expect(box.width).toBeGreaterThanOrEqual(44);
+    expect(box.height).toBeGreaterThanOrEqual(44);
+  });
+}
+
 // MOB2: on a phone the sidebar is hidden, so the bottom rail's Agents button
 // opens the same agent list as a drawer (MOB2_SHOTS=<dir> saves screenshots).
 const other = { ...agent, agent_id: "a2", name: "docs-writer" };
