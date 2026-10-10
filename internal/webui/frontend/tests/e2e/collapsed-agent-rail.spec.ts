@@ -112,6 +112,8 @@ async function open(page: Page, agents: Fixture[] = AGENTS) {
       readyState = 1;
       constructor(public url: string) {
         super();
+        const w = window as unknown as { __sse?: EventTarget[] };
+        (w.__sse ??= []).push(this);
         setTimeout(() => this.onopen?.(new Event("open")));
       }
       close() {
@@ -244,4 +246,55 @@ test("a finished child of an archived Lead leaves the rail, the tree and the hom
     ).toHaveText(/^2 agents/);
     await page.screenshot({ path: `${SHOTS}/orph1-390.png`, fullPage: true });
   }
+});
+
+test("a Lead deleted outside the UI leaves the open tree with its finished child (DEL2)", async ({
+  page,
+}) => {
+  await open(
+    page,
+    AGENTS.filter((a) => a.agent_id !== "k1"),
+  );
+  await page.getByRole("button", { name: "Expand workspace tree" }).click();
+  await expect(page.getByTestId("agent-list-name")).toHaveText([
+    "lead1",
+    "lead2",
+  ]);
+  await page.waitForFunction(() =>
+    (
+      window as unknown as { __sse: { url: string; readyState: number }[] }
+    ).__sse.some((s) => s.readyState === 1 && s.url.includes("/v1/events")),
+  );
+  // From here no List answers, so only the stream can drop the row.
+  await page.route(
+    (u) => u.pathname.endsWith("/v1/agents"),
+    () => {},
+  );
+
+  // Another tab deletes lead1. The server purges its history first, so its
+  // agent.deleted is live only (seq 0).
+  await page.evaluate(() => {
+    const data = JSON.stringify({
+      agent_id: "a1",
+      seq: 0,
+      event_id: "a1:deleted:agent.deleted",
+      kind: "agent.deleted",
+      turn_id: "",
+      payload: {},
+      created_at: "2026-10-04T00:01:00Z",
+    });
+    const w = window as unknown as {
+      __sse: (EventTarget & { url: string; readyState: number })[];
+    };
+    for (const s of w.__sse)
+      if (
+        s.readyState !== 2 &&
+        new URL(s.url).searchParams.get("agents")?.split(",").includes("a1")
+      )
+        s.dispatchEvent(new MessageEvent("event", { data }));
+  });
+  // Its finished child (done-kid) stays hidden with it.
+  await expect(page.getByTestId("agent-list-name")).toHaveText(["lead2"], {
+    timeout: 3000,
+  });
 });

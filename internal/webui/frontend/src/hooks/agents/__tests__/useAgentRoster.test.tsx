@@ -97,6 +97,37 @@ function commit(id: string, kind: string, payload: object = {}) {
     if (es.registered && !es.closed && es.wants(e)) act(() => es.deliver(e));
 }
 
+// Deletes an agent as the server does: its history is purged first, so its
+// agent.deleted is live only (seq 0) and goes to every open subscriber that
+// follows it, whatever its kinds (DEL2).
+function tombstone(id: string) {
+  agents.delete(id);
+  log.delete(id);
+  const e: AgentEvent = {
+    agent_id: id,
+    seq: 0,
+    event_id: `${id}:deleted:agent.deleted`,
+    kind: "agent.deleted",
+    turn_id: "",
+    payload: {},
+    created_at: "",
+  };
+  for (const es of FakeEventSource.all)
+    if (es.registered && !es.closed && es.agents.includes(id))
+      act(() => es.deliver(e));
+}
+
+// A live-only feed.gap notice: the roster re-lists everything.
+const feedGap: AgentEvent = {
+  agent_id: "",
+  seq: 0,
+  event_id: "",
+  kind: "feed.gap",
+  turn_id: "",
+  payload: {},
+  created_at: "",
+};
+
 const json = (body: unknown) =>
   new Response(JSON.stringify(body), {
     status: 200,
@@ -308,5 +339,45 @@ describe("useAgentRoster", () => {
     );
     await waitFor(() => expect(result.current.error).not.toBeNull());
     expect([...result.current.roster.keys()]).toEqual([]);
+  });
+
+  it("drops a Lead deleted elsewhere as soon as its live-only agent.deleted arrives", async () => {
+    agents.set("lead", agent("lead", { preset: "lead" }));
+    agents.set("kid", agent("kid", { parent_agent_id: "lead" }));
+    commit("lead", "agent.state_changed", { from: "creating", to: "idle" });
+    commit("kid", "agent.state_changed", { from: "creating", to: "finished" });
+    const { result } = renderHook(() => useAgentRoster("ws1"));
+    await waitFor(() => expect(openStream()?.agents).toEqual(["kid", "lead"]));
+    act(() => openStream()!.register());
+    await waitFor(() => expect(result.current.roster.has("lead")).toBe(true));
+
+    tombstone("lead");
+    await waitFor(() =>
+      expect([...result.current.roster.keys()]).toEqual(["kid"]),
+    );
+  });
+
+  it("does not let a List read before the delete bring the Lead back", async () => {
+    agents.set("lead", agent("lead", { preset: "lead" }));
+    agents.set("other", agent("other", { preset: "lead" }));
+    commit("lead", "agent.state_changed", { from: "creating", to: "idle" });
+    const { result } = renderHook(() => useAgentRoster("ws1"));
+    await waitFor(() =>
+      expect(openStream()?.agents).toEqual(["lead", "other"]),
+    );
+    const stream = openStream()!;
+    act(() => stream.register());
+    await waitFor(() => expect(result.current.roster.size).toBe(2));
+
+    // A full List reads the lead, then the delete lands before it answers.
+    const release = holdFullLists();
+    const before = lists.length;
+    act(() => stream.deliver({ ...feedGap }));
+    await waitFor(() => expect(lists.length).toBeGreaterThan(before));
+    tombstone("lead");
+    await act(async () => release());
+    await waitFor(() =>
+      expect([...result.current.roster.keys()]).toEqual(["other"]),
+    );
   });
 });

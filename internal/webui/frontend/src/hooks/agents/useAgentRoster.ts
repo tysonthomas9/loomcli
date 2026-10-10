@@ -236,8 +236,15 @@ export function useAgentRoster(
           list({ parent }, upsert).catch((err) => setError(message(err)));
       },
       onNotice: (n) => {
-        if (n.kind === "tool.started" && !stale())
+        if (stale()) return;
+        if (n.kind === "tool.started")
           setActivity((m) => applyActivity(m, [n]));
+        // A delete purges the history first, so its agent.deleted is live
+        // only (seq 0); a List in flight must not bring the row back (DEL2).
+        if (n.kind === "agent.deleted") {
+          inflight.current.forEach((seen) => seen.push(n));
+          setRoster((r) => applyEvents(r, [n]));
+        }
       },
       // Steps missed while away are not caught up: "Working…" until the next.
       onResync: () => {
