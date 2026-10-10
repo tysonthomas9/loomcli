@@ -46,7 +46,7 @@ func CORS(config CORSConfig) Middleware {
 					if allowedMap[normalizedOrigin] {
 						w.Header().Set("Access-Control-Allow-Origin", origin)
 						w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS")
-						w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+						w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Idempotency-Key")
 						w.Header().Set("Access-Control-Allow-Credentials", "true")
 						w.Header().Set("Access-Control-Max-Age", "86400")
 						w.WriteHeader(http.StatusNoContent)
@@ -75,7 +75,7 @@ func CORS(config CORSConfig) Middleware {
 				if allowedMap[normalizedOrigin] {
 					w.Header().Set("Access-Control-Allow-Origin", origin)
 					w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS")
-					w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+					w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Idempotency-Key")
 					w.Header().Set("Access-Control-Allow-Credentials", "true")
 					w.Header().Set("Access-Control-Max-Age", "86400")
 				}

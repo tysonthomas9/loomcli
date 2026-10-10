@@ -1,0 +1,26 @@
+/* The page layout, header, messages and composer are in ChatPage.module.css
+   (ported from T3 Code). */
+
+/* Untrusted text: kept as text, and any unbroken run wraps. */
+.text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.showAll {
+  display: block;
+  margin-top: 4px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.showAll:hover {
+  color: var(--color-text-primary);
+}

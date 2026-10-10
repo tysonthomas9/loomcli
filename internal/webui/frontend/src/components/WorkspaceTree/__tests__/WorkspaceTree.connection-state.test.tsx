@@ -180,6 +180,8 @@ vi.mock("@/hooks/workspace", async () => {
 
 // AgentSection's module import triggers a vitest-4 mock-allocation blowup;
 // stub it here (this suite tests connection state, not the agent list).
+// The collapsed rail's Agent API agents need a router and the Agent API.
+vi.mock("../ApiAgentRailItems", () => ({ ApiAgentRailItems: () => null }));
 vi.mock("../AgentSection", () => ({ AgentSection: () => null }));
 
 describe("WorkspaceTree connection state", () => {

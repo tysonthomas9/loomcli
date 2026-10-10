@@ -131,4 +131,109 @@ CREATE TABLE native_purge_pending (         -- an owned native session a failed 
   PRIMARY KEY (harness, native_root, native_id),
   FOREIGN KEY (harness, native_root, native_id) REFERENCES agent_native_sessions(harness, native_root, native_id)
 );
+`, `
+ALTER TABLE agent_send_receipts ADD COLUMN body TEXT;       -- the Send's message text; NULL on a legacy row or a Send with no message
+ALTER TABLE agent_send_receipts ADD COLUMN native_key TEXT; -- the input key the message was handed over with
+CREATE INDEX agent_send_receipts_native_key ON agent_send_receipts(agent_id, native_key);
+`, `
+CREATE INDEX agent_events_kind ON agent_events(agent_id, kind); -- task_completed notices and the last message, without a history scan
+`, `
+ALTER TABLE agents ADD COLUMN attempt_after_seq INTEGER NOT NULL DEFAULT 0; -- the last event seq before the current attempt began; set with the reopen
+-- An existing agent past its first attempt (0) starts its attempt at its last
+-- saved reopen (agent.state_changed finished -> active), but only when every
+-- reopen saved one (as many as its attempt); otherwise, as after a crash
+-- before Send published a reopen, at its last event, so an earlier attempt's
+-- reply never counts as this one's.
+UPDATE agents SET attempt_after_seq = CASE
+  WHEN (SELECT COUNT(*) FROM agent_events e WHERE e.agent_id = agents.agent_id AND e.kind = 'agent.state_changed'
+          AND json_extract(e.redacted_payload, '$.from') = 'finished'
+          AND json_extract(e.redacted_payload, '$.to') = 'active') = agents.attempt
+  THEN (SELECT MAX(seq) FROM agent_events e WHERE e.agent_id = agents.agent_id AND e.kind = 'agent.state_changed'
+          AND json_extract(e.redacted_payload, '$.from') = 'finished'
+          AND json_extract(e.redacted_payload, '$.to') = 'active')
+  ELSE (SELECT COALESCE(MAX(seq), 0) FROM agent_events e WHERE e.agent_id = agents.agent_id) END
+WHERE attempt > 0;
+`, `
+ALTER TABLE agents ADD COLUMN history_purge_failed_at TEXT; -- set while a due R29 purge has failed (incomplete expiry); cleared when the purge succeeds or the deadline ends
+`, `
+CREATE TABLE custom_models (                -- model ids a workspace adds to a harness's catalog (MCS3)
+  workspace_id TEXT NOT NULL,
+  harness      TEXT NOT NULL,
+  model        TEXT NOT NULL,
+  pos          INTEGER NOT NULL,            -- the order they were set in
+  PRIMARY KEY (workspace_id, harness, model)
+);
+`, `
+-- DF1: the Notify records at the end of a slot's body, as JSON {"keys": [...],
+-- "at": <byte offset of the first>}, so a reader names them without parsing
+-- text; the handed receipt keeps the slot's at hand-over. NULL when none.
+ALTER TABLE agent_slots ADD COLUMN notices TEXT;
+ALTER TABLE agent_send_receipts ADD COLUMN notices TEXT;
+`, `
+ALTER TABLE agents ADD COLUMN revision INTEGER NOT NULL DEFAULT 0; -- OR2: bumped by one with every state change; its events are named <agent>:<revision>:<kind>
+`, `
+-- OR3c: a child attempt's task_completed owed to its parent, saved with the
+-- state change that ends the attempt and deleted with the record's append.
+CREATE TABLE agent_completion_markers (
+  child_agent_id  TEXT NOT NULL,
+  attempt         INTEGER NOT NULL,
+  parent_agent_id TEXT NOT NULL,
+  outcome         TEXT NOT NULL,
+  branch          TEXT NOT NULL,
+  summary         TEXT,            -- NULL on a marker the upgrade saved: read it from the child
+  result          TEXT,
+  created_at      TEXT NOT NULL,
+  PRIMARY KEY (child_agent_id, attempt)
+);
+CREATE INDEX agent_completion_markers_parent ON agent_completion_markers(parent_agent_id);
+-- An attempt that ended before the upgrade with its record still unsaved.
+INSERT INTO agent_completion_markers (child_agent_id, attempt, parent_agent_id, outcome, branch, created_at)
+SELECT a.agent_id, a.attempt, a.parent_agent_id, a.outcome, COALESCE(a.branch, ''), a.updated_at FROM agents a
+WHERE a.parent_agent_id IS NOT NULL AND a.mode = 'single_task' AND a.outcome IS NOT NULL AND a.deleted_at IS NULL
+  AND a.state IN ('finished', 'archived') AND NOT EXISTS (SELECT 1 FROM agent_events e
+    WHERE e.agent_id = a.parent_agent_id AND e.event_id = 'task_completed:' || a.agent_id || ':' || a.attempt);
+`, `
+-- OR4a: create_incomplete now means a Create no retry can finish; before,
+-- any failed Create showed it. A row below done (5) that shows it retries.
+UPDATE agents SET attention_reason = 'create_retrying'
+WHERE attention_reason = 'create_incomplete' AND create_step < 5 AND deleted_at IS NULL;
+`, `
+-- OR5a: one claim per ask, saved before its Reply. The first Respond to save
+-- it binds its request and payload; state is claimed until the outcome is
+-- known: replied, or unknown (no evidence either way; never replied again).
+-- An ask is its ID on its turn: codex reuses an ID on a later connection.
+-- A released claim (its Reply never sent) stays, so its request stays bound
+-- to its turn's ask; only one claim on an ask is not released.
+CREATE TABLE IF NOT EXISTS agent_ask_claims (
+  agent_id     TEXT NOT NULL REFERENCES agents(agent_id),
+  ask_id       TEXT NOT NULL,
+  turn_id      TEXT NOT NULL,
+  request_id   TEXT NOT NULL,
+  payload_hash TEXT NOT NULL,
+  state        TEXT NOT NULL,
+  created_at   TEXT NOT NULL,
+  PRIMARY KEY (agent_id, ask_id, turn_id, request_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS agent_ask_claims_one ON agent_ask_claims(agent_id, ask_id, turn_id) WHERE state != 'released';
+`, `
+-- OR5d: each Update and harness switch request an agent applied, so a retry
+-- of any of them returns its saved result. A switch saves its row as
+-- switching, with its request and Open key, before it stops the turn; its
+-- commit saves it done. An agent has at most one switch pending.
+CREATE TABLE IF NOT EXISTS agent_update_requests (
+  agent_id            TEXT NOT NULL REFERENCES agents(agent_id),
+  request_id          TEXT NOT NULL,
+  kind                TEXT NOT NULL,
+  payload_hash        TEXT NOT NULL,
+  status              TEXT NOT NULL,
+  payload             TEXT NOT NULL,
+  from_harness        TEXT NOT NULL,
+  to_harness          TEXT NOT NULL,
+  open_key            TEXT NOT NULL,
+  target_spec_version INTEGER NOT NULL,
+  result              TEXT NOT NULL,
+  created_at          TEXT NOT NULL,
+  PRIMARY KEY (agent_id, request_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS agent_update_requests_switching ON agent_update_requests(agent_id) WHERE status = 'switching';
 `}

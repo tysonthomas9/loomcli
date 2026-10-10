@@ -63,8 +63,18 @@
   transition: background-color 0.15s ease;
 }
 
-.agentRow[data-dragging] {
+.agentRow[data-dragging],
+.sortableItem[data-dragging] {
   z-index: 1;
+}
+
+/* An Agent API row with its children, dragged as one unit. */
+.sortableItem {
+  position: relative;
+}
+
+.sortableItem[data-dragging] .dragHandle {
+  opacity: 1;
 }
 
 .agentCardInRow {

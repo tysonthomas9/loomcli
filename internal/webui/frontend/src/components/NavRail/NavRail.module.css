@@ -81,6 +81,15 @@
   flex-shrink: 0;
 }
 
+/* Only the mobile bottom rail lays this out (see below). */
+.switcherFrame {
+  display: contents;
+}
+
+.moreHint {
+  display: none;
+}
+
 .workspaceSwitcher {
   display: flex;
   flex-direction: column;
@@ -297,6 +306,7 @@
 @media (width <= 768px) {
   .navRail {
     flex-direction: row;
+    gap: 0;
     width: 100%;
     min-width: unset;
     height: var(--nav-bottom-height);
@@ -312,12 +322,94 @@
   }
 
   .navButton {
+    flex-shrink: 0;
     width: var(--touch-target-min);
     height: var(--touch-target-min);
   }
 
-  .spacer {
+  .spacer,
+  .wsDivider {
     display: none;
+  }
+
+  /* One row: the avatars and Add take what the buttons leave and scroll
+     sideways, so every workspace stays reachable. The window is a whole
+     number of 30px items (41px pitch with the 11px gap, plus 4px padding a
+     side for the active ring) and snaps to them, so no avatar shows cut; the
+     frame keeps 12px a side for a chevron when more is off-screen that way. */
+  .switcherFrame {
+    position: relative;
+    display: flex;
+    flex: 1 1 0;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    container-type: inline-size;
+  }
+
+  .workspaceSwitcher {
+    flex: 0 0 auto;
+    flex-direction: row;
+    gap: 11px;
+    /* Never wider than the slot: on the smallest phones it is under one
+       item with its padding, and the snap still shows that item whole. */
+    width: min(100cqw, max(38px, calc(round(down, 100cqw - 21px, 41px) - 3px)));
+    min-width: 0;
+    padding: 4px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    scroll-snap-type: x mandatory;
+    /* The snap area must stay at least one item wide (30px) even in a 36px
+       slot, or the browser stops snapping inside it. */
+    scroll-padding-inline: 4px 2px;
+  }
+
+  .workspaceSwitcher .wsAvatar,
+  .workspaceSwitcher .wsAdd {
+    scroll-snap-align: start;
+  }
+
+  .moreHint {
+    position: absolute;
+    top: 50%;
+    display: block;
+    width: 12px;
+    transform: translateY(-50%);
+    color: var(--color-text-secondary);
+    font-size: 18px;
+    line-height: 1;
+    text-align: center;
+    pointer-events: none;
+  }
+
+  .moreHint[data-more-hint="left"] {
+    left: 0;
+  }
+
+  .moreHint[data-more-hint="right"] {
+    right: 0;
+  }
+
+  /* No room beside a one-item window (smallest phones): the chevrons sit just
+     outside it, in the blank edge of the neighbouring buttons. */
+  @container (width < 62px) {
+    .moreHint[data-more-hint="left"] {
+      left: -12px;
+    }
+
+    .moreHint[data-more-hint="right"] {
+      right: -12px;
+    }
+  }
+
+  .workspaceList {
+    flex-direction: row;
+    flex-shrink: 0;
+    width: auto;
+    max-height: none;
+    padding: 0;
+    overflow: visible;
   }
 
   .tooltip {

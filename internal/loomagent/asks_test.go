@@ -1,11 +1,13 @@
 package loomagent
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -44,6 +46,7 @@ type tweaked struct {
 	page1, extra      []loomharness.Event
 	page2             func() (loomharness.MessagePage, error)
 	block             chan struct{} // a history read waits until it closes
+	reading           chan struct{} // a history read sends on it as it starts
 	replyErr          error         // every Reply fails with it
 	onReply           func()        // runs as a Reply starts
 	replies           *[]loomharness.Reply
@@ -61,6 +64,9 @@ type tweakedSession struct {
 func (p tweakedSession) Messages(ctx context.Context, after string, limit int) (loomharness.MessagePage, error) {
 	if p.w.reads != nil {
 		p.w.reads.Add(1)
+	}
+	if p.w.reading != nil {
+		p.w.reading <- struct{}{}
 	}
 	if p.w.block != nil {
 		<-p.w.block
@@ -112,14 +118,14 @@ func TestGetOpenAsksIntegration(t *testing.T) {
 	e := newCreateEnv(t)
 	fh := e.h.Harness.(*fake.Harness)
 	s1 := e.service(ServiceConfig{})
-	stop1 := startFeed(s1, e)
+	stop1 := runFeed(t, s1, "opencode")
 	alpha, _ := newLead(t, e, s1, "alpha")
 	beta, _ := newLead(t, e, s1, "beta")
 	fh.Script(alpha.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "a1"}, {Ask: "q1", Question: true}}})
 	fh.Script(beta.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "b1"}}})
 	mustSendMsg(t, s1, sendReq(alpha.AgentID, "u1", "go", user))
 	mustSendMsg(t, s1, sendReq(beta.AgentID, "u1", "go", user))
-	eventually(t, "the approvals open and alpha waits on approval", func() bool {
+	drained(t, s1, "the approvals open and alpha waits on approval", func() bool {
 		a := s1.get(t, alpha.AgentID)
 		return slices.Equal(askIDs(t, s1, alpha.AgentID), []string{"a1:approval"}) &&
 			slices.Equal(askIDs(t, s1, beta.AgentID), []string{"b1:approval"}) &&
@@ -129,8 +135,8 @@ func TestGetOpenAsksIntegration(t *testing.T) {
 	if err := s1.Respond(ctx, RespondRequest{AgentID: alpha.AgentID, AskID: "a1", Decision: "allow_once"}); err != nil {
 		t.Fatal(err)
 	}
-	wantCode(t, s1.Respond(ctx, RespondRequest{AgentID: alpha.AgentID, AskID: "a1", Decision: "allow_once"}), CodeAskNotFound)
-	eventually(t, "the question opens and alpha waits on input", func() bool {
+	wantCode(t, s1.Respond(ctx, RespondRequest{Envelope: Envelope{RequestID: "r2"}, AgentID: alpha.AgentID, AskID: "a1", Decision: "allow_once"}), CodeAlreadyAnswered)
+	drained(t, s1, "the question opens and alpha waits on input", func() bool {
 		a := s1.get(t, alpha.AgentID)
 		return slices.Equal(askIDs(t, s1, alpha.AgentID), []string{"q1:question"}) && a.State == StateWaiting && deref(a.WaitingOn) == "input"
 	})
@@ -138,9 +144,9 @@ func TestGetOpenAsksIntegration(t *testing.T) {
 	stop1() // serve restarts; meanwhile beta's approval stopped being pending
 	s2 := e.service(ServiceConfig{})
 	s2.harnesses["opencode"] = tweaked{Harness: e.h, gone: "b1"}
-	stop2 := startFeed(s2, e)
+	stop2 := runFeed(t, s2, "opencode")
 	defer stop2()
-	eventually(t, "the ask table rebuilt", func() bool {
+	drained(t, s2, "the ask table rebuilt", func() bool {
 		return slices.Equal(askIDs(t, s2, alpha.AgentID), []string{"q1:question"}) && len(askIDs(t, s2, beta.AgentID)) == 0 &&
 			s2.get(t, beta.AgentID).State == StateActive
 	})
@@ -151,7 +157,7 @@ func TestGetOpenAsksIntegration(t *testing.T) {
 	if err := s2.Respond(ctx, RespondRequest{AgentID: alpha.AgentID, AskID: "q1", Answer: "yes"}); err != nil {
 		t.Fatal(err)
 	}
-	eventually(t, "alpha's turn ends", func() bool { return s2.get(t, alpha.AgentID).State == StateIdle })
+	drained(t, s2, "alpha's turn ends", func() bool { return s2.get(t, alpha.AgentID).State == StateIdle })
 	if got := askIDs(t, s2, alpha.AgentID); len(got) != 0 {
 		t.Fatalf("open asks after the answer = %v", got)
 	}
@@ -193,7 +199,7 @@ func TestSubscribeFiltersAgentsKindsDeltasAndGap(t *testing.T) {
 	e := newCreateEnv(t)
 	fh := e.h.Harness.(*fake.Harness)
 	s := e.service(ServiceConfig{})
-	stop := startFeed(s, e)
+	stop := runFeed(t, s, "opencode")
 	defer stop()
 	alpha, _ := newLead(t, e, s, "alpha")
 	beta, _ := newLead(t, e, s, "beta")
@@ -284,20 +290,16 @@ func TestListEventsAndSubscribeExpiredHistory(t *testing.T) {
 // raises Attention harness_unavailable on its own agents only, keeps another
 // Attention as it is, and clears it once the feed is back.
 func TestHarnessAttentionOnlyAffectedAgents(t *testing.T) {
-	retry := feedRetry
-	feedRetry = 10 * time.Millisecond
-	t.Cleanup(func() { feedRetry = retry })
 	fa, fb := fake.New(), fake.New()
 	a1, a2, a3 := svcAgent("a1", "persistent", StateIdle), svcAgent("a2", "persistent", StateIdle), svcAgent("a3", "persistent", StateIdle)
 	a1.Harness, a2.Harness, a3.Harness = "fa", "fb", "fa"
 	a3.AttentionReason = sp(AttentionDeliveryUnknown)
 	s := newService(t, ServiceConfig{Harnesses: map[string]loomharness.Harness{"fa": fa, "fb": fb}}, a1, a2, a3)
+	clk := useTestClock(s)
 	fa.Crash()
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() { defer close(done); s.RunFeed(ctx, "fa") }()
-	defer func() { cancel(); <-done }()
-	eventually(t, "a1 shows harness_unavailable", func() bool {
+	ctx := context.Background()
+	runFeed(t, s, "fa")
+	drained(t, s, "a1 shows harness_unavailable", func() bool {
 		return deref(s.get(t, "a1").AttentionReason) == AttentionHarnessUnavailable
 	})
 	if r := s.get(t, "a2").AttentionReason; r != nil {
@@ -309,7 +311,8 @@ func TestHarnessAttentionOnlyAffectedAgents(t *testing.T) {
 	if err := fa.Restart(ctx); err != nil {
 		t.Fatal(err)
 	}
-	eventually(t, "a1's Attention cleared", func() bool { return s.get(t, "a1").AttentionReason == nil })
+	clk.fire() // the backoff ends: the feed reopens
+	drained(t, s, "a1's Attention cleared", func() bool { return s.get(t, "a1").AttentionReason == nil })
 	if r := deref(s.get(t, "a3").AttentionReason); r != AttentionDeliveryUnknown {
 		t.Fatalf("a3's Attention = %s after recovery; want delivery_unknown kept", r)
 	}
@@ -323,18 +326,23 @@ func TestFailedBackfillKeepsOpenAsks(t *testing.T) {
 	e := newCreateEnv(t)
 	fh := e.h.Harness.(*fake.Harness)
 	s := e.service(ServiceConfig{})
-	stop := startFeed(s, e)
+	clk := useTestClock(s)
+	stop := runFeed(t, s, "opencode")
 	a, _ := newLead(t, e, s, "alpha")
 	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "a1"}}})
 	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
-	eventually(t, "a1 opens", func() bool {
+	drained(t, s, "a1 opens", func() bool {
 		return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) && s.get(t, a.AgentID).State == StateWaiting
 	})
 	stop()
 	var reads atomic.Int32
 	s.harnesses["opencode"] = tweaked{Harness: e.h, msgErr: errors.New("history read failed"), reads: &reads}
-	stop = startFeed(s, e)
-	eventually(t, "two failed backfills", func() bool { return reads.Load() >= 2 })
+	stop = runFeed(t, s, "opencode")
+	settled(t, s) // the first backfill failed; the feed backs off
+	if clk.fire() != 1 {
+		t.Fatal("the feed did not back off after the failed backfill")
+	}
+	drained(t, s, "two failed backfills", func() bool { return reads.Load() >= 2 })
 	stop()
 	if got := askIDs(t, s, a.AgentID); !slices.Equal(got, []string{"a1:approval"}) {
 		t.Fatalf("open asks after a failed backfill = %v", got)
@@ -359,11 +367,11 @@ func TestRespondAlwaysNotNarrowed(t *testing.T) {
 	e := newCreateEnv(t)
 	fh := e.h.Harness.(*fake.Harness)
 	s := e.service(ServiceConfig{})
-	stop := startFeed(s, e)
+	stop := runFeed(t, s, "opencode")
 	a, _ := newLead(t, e, s, "alpha")
 	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "a1"}}})
 	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
-	eventually(t, "a1 opens", func() bool {
+	drained(t, s, "a1 opens", func() bool {
 		return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) && s.get(t, a.AgentID).State == StateWaiting
 	})
 	stop()
@@ -393,11 +401,11 @@ func TestProbePartialBackfillKeepsOpenAsk(t *testing.T) {
 		e := newCreateEnv(t)
 		fh := e.h.Harness.(*fake.Harness)
 		s := e.service(ServiceConfig{})
-		stop := startFeed(s, e)
+		stop := runFeed(t, s, "opencode")
 		a, ref := newLead(t, e, s, "alpha")
 		fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "a1"}}})
 		mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
-		eventually(t, "a1 opens", func() bool {
+		drained(t, s, "a1 opens", func() bool {
 			return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) && s.get(t, a.AgentID).State == StateWaiting
 		})
 		stop()
@@ -479,11 +487,11 @@ func TestReplayedTurnEndLosesItsAsk(t *testing.T) {
 		e := newCreateEnv(t)
 		fh := e.h.Harness.(*fake.Harness)
 		s := e.service(ServiceConfig{})
-		stop := startFeed(s, e)
+		stop := runFeed(t, s, "opencode")
 		a, ref := newLead(t, e, s, "alpha")
 		fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "a1"}}})
 		mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
-		eventually(t, "a1 opens", func() bool {
+		drained(t, s, "a1 opens", func() bool {
 			return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) && s.get(t, a.AgentID).State == StateWaiting
 		})
 		stop()
@@ -493,8 +501,8 @@ func TestReplayedTurnEndLosesItsAsk(t *testing.T) {
 			extra = append([]loomharness.Event{{Type: loomharness.EventAskResolved, Session: ref, TurnID: turn, AskID: "a1"}}, extra...)
 		}
 		s.harnesses["opencode"] = tweaked{Harness: e.h, extra: extra}
-		stop = startFeed(s, e)
-		eventually(t, "the turn ends and a1 closes", func() bool {
+		stop = runFeed(t, s, "opencode")
+		drained(t, s, "the turn ends and a1 closes", func() bool {
 			return s.get(t, a.AgentID).State == StateIdle && len(askIDs(t, s, a.AgentID)) == 0
 		})
 		stop()
@@ -536,6 +544,36 @@ func TestReplayAppliesMissedEvents(t *testing.T) {
 	}
 }
 
+// TestReplayEndsTurnStartedAfterItsRead: a backfill whose agent row was read
+// before a Send prompted (it showed no running turn) but whose history read
+// came after the whole turn ran still ends that turn: the fold's running
+// turn is the agent's under the lock, not the stale row's. Else, with the
+// feed subscribed after the turn's events, nothing would end it and the
+// agent would stay active.
+func TestReplayEndsTurnStartedAfterItsRead(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	s := e.service(ServiceConfig{})
+	a, _ := newLead(t, e, s, "alpha")
+	stale := s.get(t, a.AgentID) // the backfill's ListAgents row: no running turn
+	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Delta: "done"}}})
+	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
+	if ag := s.get(t, a.AgentID); ag.RunningTurnID == nil || ag.State != StateActive {
+		t.Fatalf("after the Send: turn %v state %s; want a running turn, active", ag.RunningTurnID, ag.State)
+	}
+	if err := s.replay(ctx, "opencode", stale); err != nil {
+		t.Fatal(err)
+	}
+	ag := s.get(t, a.AgentID)
+	if ag.RunningTurnID != nil || ag.State != StateIdle {
+		t.Fatalf("turn %v state %s; want the turn ended, idle", deref(ag.RunningTurnID), ag.State)
+	}
+	if n := len(kinds(rows(t, s, a.AgentID, 0), EventIdle)); n != 1 {
+		t.Fatalf("agent.idle rows = %d; want 1", n)
+	}
+}
+
 // TestReplayRetryConverges: after a replay fails (page 2 does not read, or
 // its write fails) or crashes between its commit and its apply, a retry in
 // the same process or after a restart ends exactly as an uninterrupted
@@ -551,11 +589,11 @@ func TestReplayRetryConverges(t *testing.T) {
 		e := newCreateEnv(t)
 		fh := e.h.Harness.(*fake.Harness)
 		s := e.service(ServiceConfig{})
-		stop := startFeed(s, e)
+		stop := runFeed(t, s, "opencode")
 		a, ref := newLead(t, e, s, "alpha")
 		fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "a1"}}})
 		mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
-		eventually(t, "a1 opens", func() bool {
+		drained(t, s, "a1 opens", func() bool {
 			return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) && s.get(t, a.AgentID).State == StateWaiting
 		})
 		stop()
@@ -634,12 +672,11 @@ func TestReplayReadHoldsNoLock(t *testing.T) {
 	s := e.service(ServiceConfig{})
 	alpha, _ := newLead(t, e, s, "alpha")
 	beta, _ := newLead(t, e, s, "beta")
-	var reads atomic.Int32
-	block := make(chan struct{})
-	s.harnesses["opencode"] = tweaked{Harness: e.h, reads: &reads, block: block}
+	block, reading := make(chan struct{}), make(chan struct{}, 1)
+	s.harnesses["opencode"] = tweaked{Harness: e.h, reading: reading, block: block}
 	done := make(chan error, 1)
 	go func() { done <- s.replay(ctx, "opencode", s.get(t, alpha.AgentID)) }()
-	eventually(t, "alpha's history read starts", func() bool { return reads.Load() == 1 })
+	<-reading // alpha's history read has started
 	sub, err := s.Subscribe(ctx, SubscribeRequest{AgentIDs: []string{beta.AgentID}})
 	if err != nil {
 		t.Fatal(err)
@@ -678,12 +715,12 @@ func TestReplayOverCapFailsClosed(t *testing.T) {
 	e := newCreateEnv(t)
 	fh := e.h.Harness.(*fake.Harness)
 	s := e.service(ServiceConfig{})
-	stop := startFeed(s, e)
+	stop := runFeed(t, s, "opencode")
 	a, ref := newLead(t, e, s, "alpha")
 	b, _ := newLead(t, e, s, "beta")
 	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "a1"}}})
 	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
-	eventually(t, "a1 opens", func() bool {
+	drained(t, s, "a1 opens", func() bool {
 		return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) && s.get(t, a.AgentID).State == StateWaiting
 	})
 	stop()
@@ -708,7 +745,7 @@ func TestReplayOverCapFailsClosed(t *testing.T) {
 		t.Fatalf("an over-cap replay saved %d rows", n-before)
 	}
 	quiet(t, sub)
-	if err := s.backfill(ctx, "opencode"); err != nil {
+	if _, err := s.backfill(ctx, "opencode"); err != nil {
 		t.Fatalf("backfill = %v; want the over-cap agent skipped", err)
 	}
 	if r := deref(s.get(t, a.AgentID).AttentionReason); r != AttentionHistoryTooLarge {
@@ -721,7 +758,7 @@ func TestReplayOverCapFailsClosed(t *testing.T) {
 		t.Fatalf("open asks after an over-cap replay = %v", got)
 	}
 	replayCap = capped
-	if err := s.backfill(ctx, "opencode"); err != nil {
+	if _, err := s.backfill(ctx, "opencode"); err != nil {
 		t.Fatal(err)
 	}
 	if ag := s.get(t, a.AgentID); ag.AttentionReason != nil || len(askIDs(t, s, a.AgentID)) != 0 {
@@ -759,11 +796,11 @@ func TestRespondQuarantinedLosesAsk(t *testing.T) {
 		e := newCreateEnv(t)
 		fh := e.h.Harness.(*fake.Harness)
 		s := e.service(ServiceConfig{})
-		stop := startFeed(s, e)
+		stop := runFeed(t, s, "opencode")
 		a, _ := newLead(t, e, s, "alpha")
 		fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "a1"}}})
 		mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
-		eventually(t, "a1 opens", func() bool {
+		drained(t, s, "a1 opens", func() bool {
 			return slices.Equal(askIDs(t, s, a.AgentID), []string{"a1:approval"}) && s.get(t, a.AgentID).State == StateWaiting
 		})
 		stop()
@@ -797,5 +834,143 @@ func TestRespondQuarantinedLosesAsk(t *testing.T) {
 			t.Fatal(err)
 		}
 		check("after a replay")
+	}
+}
+
+// TestToolCallsSavedWithToolAndStartsLiveForDeltas: a tool call's
+// item.completed is saved with its tool data, its input and output cut to
+// maxToolText; its start is a live tool.started notice only a Subscribe
+// that asked for deltas gets.
+func TestToolCallsSavedWithToolAndStartsLiveForDeltas(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	s := e.service(ServiceConfig{})
+	stop := runFeed(t, s, "opencode")
+	defer stop()
+	a, _ := newLead(t, e, s, "alpha")
+	req := SubscribeRequest{AgentIDs: []string{a.AgentID}, Cursors: map[string]int64{a.AgentID: 0},
+		Kinds: []string{"item.completed"}, Deltas: true}
+	withDeltas, err := s.Subscribe(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Deltas = false
+	noDeltas, err := s.Subscribe(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A warm-up tool call. Once its saved completion arrives, the feed is
+	// up and each subscription has ended its replay and reads only live
+	// rows, so the next tool's start (live-only) and its saved completion
+	// arrive in the order they happened. Before that, a subscription still
+	// replaying can get a saved completion ahead of its start, and a feed
+	// still starting can miss the start and backfill the completion with a
+	// feed.gap; the chat model drops a start that comes after its item
+	// (agentChatModel). The warm-up's own start, if any, is skipped below.
+	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Tool: &loomharness.Tool{Name: "warm"}}}})
+	mustSendMsg(t, s, sendReq(a.AgentID, "u0", "warm up", user))
+	recvKinds(t, withDeltas, "item.completed")
+	recvKinds(t, noDeltas, "item.completed")
+	drained(t, s, "the warm-up turn ends", func() bool { return s.get(t, a.AgentID).State == StateIdle })
+
+	long := strings.Repeat("x", maxToolText+10)
+	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Tool: &loomharness.Tool{Name: "bash", Input: `{"command":"ls"}`, Output: long, Failed: true}}}})
+	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
+
+	rows := recvSkipGaps(t, withDeltas, 2)
+	if rows[0].Kind != KindToolStarted || rows[1].Kind != "item.completed" {
+		t.Fatalf("with deltas: %s, %s", rows[0].Kind, rows[1].Kind)
+	}
+	var started, done struct {
+		ItemKind string            `json:"itemKind"`
+		Tool     *loomharness.Tool `json:"tool"`
+	}
+	if json.Unmarshal(rows[0].Payload, &started) != nil || started.ItemKind != "tool" || started.Tool == nil ||
+		*started.Tool != (loomharness.Tool{Name: "bash", Input: `{"command":"ls"}`}) {
+		t.Fatalf("tool.started payload %s", rows[0].Payload)
+	}
+	if json.Unmarshal(rows[1].Payload, &done) != nil || done.Tool == nil || !done.Tool.Failed ||
+		done.Tool.Output != long[:maxToolText]+"…" || done.Tool.Name != "bash" {
+		t.Fatalf("item.completed tool %+v", done.Tool)
+	}
+	if r := recvSkipGaps(t, noDeltas, 1); r[0].Kind != "item.completed" {
+		t.Fatalf("without deltas: %s", r[0].Kind)
+	}
+}
+
+// TestAskQuestionsAnswersAndTurnError: a question ask's questions and an
+// approval's subject show in Get; Respond passes Answers to the harness by
+// question id; a failed turn's error is saved on agent.turn_completed.
+func TestAskQuestionsAnswersAndTurnError(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	s := e.service(ServiceConfig{})
+	var replies []loomharness.Reply
+	s.harnesses["opencode"] = tweaked{Harness: e.h, replies: &replies}
+	stop := runFeed(t, s, "opencode")
+	defer stop()
+	a, _ := newLead(t, e, s, "alpha")
+	qs := []loomharness.Question{{ID: "q0", Header: "Color", Question: "Which color?", Options: []loomharness.Choice{{Label: "Red"}}}, {ID: "q1", Question: "Name?"}}
+	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "a1", About: "rm -rf build"}, {Ask: "q1", Question: true, About: "Which color?", Questions: qs}, {Fail: "model not found"}}})
+	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
+	open := func() []Ask {
+		info, err := s.Get(ctx, a.AgentID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return info.OpenAsks
+	}
+	drained(t, s, "a1 opens", func() bool { return len(open()) == 1 })
+	if got := open()[0]; got.About != "rm -rf build" {
+		t.Fatalf("approval = %+v", got)
+	}
+	if err := s.Respond(ctx, RespondRequest{AgentID: a.AgentID, AskID: "a1", Decision: "allow_once"}); err != nil {
+		t.Fatal(err)
+	}
+	drained(t, s, "q1 opens", func() bool { return len(open()) == 1 && open()[0].ID == "q1" })
+	if got := open()[0]; got.About != "Which color?" || !reflect.DeepEqual(got.Questions, qs) {
+		t.Fatalf("question = %+v", got)
+	}
+	answers := map[string][]string{"q0": {"Red"}, "q1": {"Loom"}}
+	if err := s.Respond(ctx, RespondRequest{AgentID: a.AgentID, AskID: "q1", Answers: answers}); err != nil {
+		t.Fatal(err)
+	}
+	if len(replies) != 2 || !reflect.DeepEqual(replies[1].Answers, answers) {
+		t.Fatalf("replies = %+v", replies)
+	}
+	drained(t, s, "the turn fails", func() bool { return len(kinds(rows(t, s, a.AgentID, 0), EventTurnCompleted)) == 1 })
+	var p struct{ StopReason, Error string }
+	if err := json.Unmarshal(kinds(rows(t, s, a.AgentID, 0), EventTurnCompleted)[0].Payload, &p); err != nil || p.StopReason != "failed" || p.Error != "model not found" {
+		t.Fatalf("turn_completed payload = %+v %v", p, err)
+	}
+}
+
+// recvSkipGaps receives n events, skipping feed.gap notices and the
+// warm-up tool's late start (see TestToolCallsSavedWithToolAndStartsLiveForDeltas).
+func recvSkipGaps(t *testing.T, s *Subscription, n int) []loomstore.Event {
+	t.Helper()
+	var out []loomstore.Event
+	for len(out) < n {
+		e := recv(t, s, 1)[0]
+		if e.Kind == KindFeedGap || bytes.Contains(e.Payload, []byte(`"name":"warm"`)) {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// recvKinds receives until it has seen each of kinds, in any order,
+// skipping anything else.
+func recvKinds(t *testing.T, s *Subscription, kinds ...string) {
+	t.Helper()
+	want := map[string]bool{}
+	for _, k := range kinds {
+		want[k] = true
+	}
+	for len(want) > 0 {
+		delete(want, recv(t, s, 1)[0].Kind)
 	}
 }

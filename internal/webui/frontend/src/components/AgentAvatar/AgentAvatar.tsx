@@ -16,6 +16,10 @@ export interface AgentAvatarProps {
   compact?: boolean;
   /** Owners use a neutral outline; agents keep their identity color. */
   variant?: "agent" | "owner";
+  /** The agent's own colour (a CSS value), with white initials, in place of the name's. */
+  color?: string | undefined;
+  /** Initials in place of the name's. */
+  initials?: string | undefined;
   title?: string | undefined;
   testId?: string | undefined;
 }
@@ -26,17 +30,21 @@ export function AgentAvatar({
   agent,
   compact = false,
   variant = "agent",
+  color,
+  initials,
   title,
   testId,
 }: AgentAvatarProps): JSX.Element {
   const parsed = agent
     ? parseLoomStatus(effectiveAgentStatus(agent))
     : undefined;
-  const avatarColor = getAvatarColor(name);
+  const avatarColor = color ?? getAvatarColor(name);
   const label =
+    initials ||
     (agent ? agentCompactAvatarLabel(agent) : "") ||
     getCompactAvatarInitials(name);
-  const textColor = shouldUseWhiteText(avatarColor) ? "#fff" : "#1f2937";
+  const textColor =
+    color || shouldUseWhiteText(avatarColor) ? "#fff" : "#1f2937";
 
   return (
     <span

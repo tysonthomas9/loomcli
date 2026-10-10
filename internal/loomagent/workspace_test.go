@@ -4,6 +4,7 @@ import (
 	"context"
 	"go/build"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -35,16 +36,40 @@ func TestWorkspaceImportBoundary(t *testing.T) {
 	walk(module+"internal/loomagent", ".")
 }
 
-type fakeWorkspace struct{ ensured []WorkspaceSpec }
+type fakeWorkspace struct {
+	ensured []WorkspaceSpec
+	path    string // every Ensure's path; "" is /wt/<key>
+	mu      sync.Mutex
+	failing error // every Ensure fails with it, as with its base ref gone; under mu
+}
+
+// setEnsureErr makes every Ensure fail with err; nil restores it.
+func (f *fakeWorkspace) setEnsureErr(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failing = err
+}
 
 func (f *fakeWorkspace) Ensure(_ context.Context, s WorkspaceSpec) (WorkingCopy, error) {
+	f.mu.Lock()
+	err := f.failing
+	f.mu.Unlock()
+	if err != nil {
+		return WorkingCopy{}, err
+	}
 	f.ensured = append(f.ensured, s)
-	return WorkingCopy{Path: "/wt/" + s.Key, Branch: s.Branch, HEAD: "abc"}, nil
+	path := f.path
+	if path == "" {
+		path = "/wt/" + s.Key
+	}
+	return WorkingCopy{Path: path, Branch: s.Branch, HEAD: "abc"}, nil
 }
 
 func (f *fakeWorkspace) Status(_ context.Context, s WorkspaceSpec) (WorkspaceStatus, error) {
 	return WorkspaceStatus{Branch: s.Branch, HEAD: "abc"}, nil
 }
+
+func (f *fakeWorkspace) CheckBase(context.Context, string, string) error { return nil }
 
 func (f *fakeWorkspace) Remove(context.Context, WorkspaceSpec) error { return nil }
 

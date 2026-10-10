@@ -92,7 +92,7 @@ func TestPresetResolveRefusesInvalidValues(t *testing.T) {
 		models []string
 	}{
 		"unknown harness":      {"lead", CreateRequest{Overrides: Overrides{Harness: "gemini"}}, nil},
-		"unknown model":        {"lead", CreateRequest{Overrides: Overrides{Model: "x"}}, []string{"m1"}},
+		"malformed model":      {"lead", CreateRequest{Overrides: Overrides{Model: "openai/"}}, []string{"m1"}},
 		"negative budget":      {"task", CreateRequest{Overrides: Overrides{MaxBudgetUSD: &neg}}, nil},
 		"duration not allowed": {"lead", CreateRequest{Overrides: Overrides{MaxRunDuration: &dur}}, nil},
 		"persona not allowed":  {"pr-review-webhook", CreateRequest{Persona: &Persona{Text: "x"}}, nil},
@@ -106,9 +106,16 @@ func TestPresetResolveRefusesInvalidValues(t *testing.T) {
 			wantCode(t, err, CodePresetInvalid)
 		})
 	}
-	_, err := Resolve(mustPreset(t, "lead"), CreateRequest{Overrides: Overrides{Model: "x"}}, "opencode", []string{"m1", "m2"})
-	if e := wantCode(t, err, CodePresetInvalid); !slices.Equal(e.Allowed, []string{"m1", "m2"}) {
-		t.Fatalf("allowed = %v", e.Allowed)
+	// MCS1: a model the catalog does not list passes, flagged unverified; an
+	// empty (not ready) catalog flags it too, an unwired (nil) one does not.
+	for _, tc := range []struct {
+		models []string
+		want   bool
+	}{{[]string{"m1", "m2"}, true}, {[]string{"x"}, false}, {[]string{}, true}, {nil, false}} {
+		c, err := Resolve(mustPreset(t, "lead"), CreateRequest{Overrides: Overrides{Model: "x"}}, "opencode", tc.models)
+		if err != nil || c.Model != "x" || c.ModelUnverified != tc.want {
+			t.Fatalf("catalog %v: model %q unverified=%v, %v; want unverified=%v", tc.models, c.Model, c.ModelUnverified, err, tc.want)
+		}
 	}
 }
 
@@ -276,5 +283,69 @@ func TestPolicyBridgeCapsNotSetFromJSON(t *testing.T) {
 	out, err := json.Marshal(CreateRequest{Bridge: BridgeCaps{HasGitHubRead: true, HasPublish: true}})
 	if err != nil || strings.Contains(string(out), "Bridge") || strings.Contains(string(out), "HasPublish") {
 		t.Fatalf("encoded request = %s, %v", out, err)
+	}
+}
+
+// TestPolicySubagentDeny (SA1): a lead delegates through Loom child agents,
+// so its compiled policy ends with the subagent deny; task and
+// daemon-worker keep the harness's own subagent tool. An existing lead whose
+// stored preset still allowed it gets the deny from the current preset; a
+// preset no longer served keeps its stored flag.
+func TestPolicySubagentDeny(t *testing.T) {
+	ctx := context.Background()
+	s := newCreateEnv(t).service(ServiceConfig{})
+	compiled := func(cfg Config) []loomharness.PermissionRule {
+		t.Helper()
+		rules, err := s.policy(ctx, cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rules
+	}
+	for _, c := range []struct {
+		preset string
+		deny   bool
+	}{{"lead", true}, {"task", false}, {"daemon-worker", false}} {
+		p := mustPreset(t, c.preset)
+		cfg, err := Resolve(p, CreateRequest{Preset: c.preset, Overrides: Overrides{Harness: "opencode"}}, "opencode", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rules := compiled(cfg)
+		last := rules[len(rules)-1] == subagentDeny
+		has := slices.ContainsFunc(rules, func(r loomharness.PermissionRule) bool { return r.Action == "subagent" })
+		if last != c.deny || has != c.deny || p.Subagents == c.deny {
+			t.Errorf("%s: Subagents %v, rules %+v; want the subagent deny last = %v", c.preset, p.Subagents, rules, c.deny)
+		}
+	}
+	stored := Config{Preset: Preset{Name: "lead", Subagents: true}, Rules: allowAll}
+	if rules := compiled(stored); rules[len(rules)-1] != subagentDeny {
+		t.Errorf("existing lead stored with Subagents: rules %+v; want the current preset's subagent deny", rules)
+	}
+	gone := Config{Preset: Preset{Name: "retired-preset", Subagents: true}, Rules: allowAll}
+	if rules := compiled(gone); !slices.Equal(rules, allowAll) {
+		t.Errorf("unserved preset with Subagents: rules %+v; want its stored rules only", rules)
+	}
+}
+
+// TestLeadPersonaSummarizesOnce (CL2): the lead's persona tells it the
+// completion notice is the result (no agent_get), to stay brief while other
+// children run, and to write one combined summary when none are; it names
+// no harness, so OpenCode and codex Leads read the same rule.
+func TestLeadPersonaSummarizesOnce(t *testing.T) {
+	p, err := BuiltinPresets{}.Get(context.Background(), "lead")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"You are a lead agent", "task_completed notice", "don't call agent_get",
+		"still running", "one short line or not at all", "one combined summary"} {
+		if !strings.Contains(p.Persona, want) {
+			t.Errorf("lead persona lacks %q", want)
+		}
+	}
+	for _, h := range Harnesses {
+		if strings.Contains(strings.ToLower(p.Persona), h) {
+			t.Errorf("lead persona names harness %q", h)
+		}
 	}
 }

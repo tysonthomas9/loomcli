@@ -132,3 +132,34 @@ func TestEnsureThroughWorkspacePortUsesInjectedRunner(t *testing.T) {
 		t.Fatalf("Publish err = %v, want ErrNotImplemented", err)
 	}
 }
+
+// CR1: CheckBase accepts a ref the repo has locally without fetching (Ensure
+// fetches it fresh later, so a create fetches once), refuses one that resolves
+// nowhere, and a local ref still works end to end when origin is unreachable.
+func TestCheckBaseLocalRefNoFetch(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+	repo := newRepo(t, filepath.Join(tmp, "repo"))
+	run(t, repo, "remote", "add", "origin", filepath.Join(tmp, "no-such-remote"))
+	head := run(t, repo, "rev-parse", "main")
+	r := &recordingRunner{}
+	w, err := New(filepath.Join(tmp, "worktrees"), TargetLocal, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range []string{"main", head} {
+		if err := w.CheckBase(ctx, repo, ref); err != nil {
+			t.Fatalf("CheckBase(%s) = %v", ref, err)
+		}
+	}
+	if r.ran("fetch") {
+		t.Fatalf("CheckBase fetched for a local ref: %q", r.calls)
+	}
+	if err := w.CheckBase(ctx, repo, "no-such-ref"); err == nil {
+		t.Fatal("CheckBase(no-such-ref) succeeded")
+	}
+	got, err := Port{W: w}.Ensure(ctx, loomagent.WorkspaceSpec{Key: "agt_l", Repo: repo, BaseRef: "main", Branch: "loom/agent/agt_l"})
+	if err != nil || got.HEAD != head {
+		t.Fatalf("Ensure from a local ref with origin unreachable = %+v, %v", got, err)
+	}
+}

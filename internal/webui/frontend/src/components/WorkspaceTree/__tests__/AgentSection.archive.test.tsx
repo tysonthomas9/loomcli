@@ -30,6 +30,10 @@ vi.mock("@/hooks", async () => {
   };
 });
 
+vi.mock("../AgentList", () => ({
+  AgentList: () => <nav aria-label="Agent API agents" />,
+}));
+
 vi.mock("@/hooks/ui", () => ({
   useToast: () => ({ showToast: mocks.showToast }),
 }));

@@ -82,6 +82,17 @@ func (w *Worktrees) Path(s Spec) (string, error) {
 	return filepath.Join(w.root, repo, key), nil
 }
 
+// CheckBase reports whether ref resolves in repo as Ensure would resolve a
+// new worktree's base, with no worktree made. A ref the repo has locally
+// needs no fetch here (Ensure fetches it fresh), so a create fetches once.
+func (w *Worktrees) CheckBase(ctx context.Context, repo, ref string) error {
+	if _, err := w.git.Run(ctx, repo, "rev-parse", "--verify", "--quiet", ref+"^{commit}"); err == nil {
+		return nil
+	}
+	_, err := localworkspace.ResolveBaseRefWith(ctx, w.git.Run, repo, "", ref)
+	return err
+}
+
 // Ensure makes the worktree for s, or reuses it when it already exists and
 // belongs to s. A removed worktree is remade from its kept branch. It is
 // idempotent by s.Key.

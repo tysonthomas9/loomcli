@@ -3,6 +3,7 @@ package claude
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -173,7 +174,7 @@ func TestClaudeSetModelAndMoveAtTurnBoundary(t *testing.T) {
 	prompt(t, s, "hang")
 	until(t, feed, loomharness.EventTurnStarted)
 	dir := t.TempDir()
-	if err := s.SetModel(ctx, "sonnet"); err != nil {
+	if err := s.SetModel(ctx, "sonnet", []loomharness.Option{{ID: loomharness.OptionEffort, Value: "xhigh"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Move(ctx, dir); err != nil {
@@ -196,9 +197,45 @@ func TestClaudeSetModelAndMoveAtTurnBoundary(t *testing.T) {
 	until(t, feed, loomharness.EventTurnCompleted)
 	got := launches(t, f.dumpPath)
 	cwd, _ := filepath.EvalSymlinks(dir)
+	effort := slices.Index(got[len(got)-1].Args, "--effort")
+	if effort < 0 || got[len(got)-1].Args[effort+1] != "xhigh" || slices.Contains(got[0].Args, "--effort") {
+		t.Fatalf("want --effort xhigh on the relaunch only; got %v then %v", got[0].Args, got[len(got)-1].Args)
+	}
 	if len(got) != 2 || !slices.Contains(got[1].Args, "sonnet") || !slices.Contains(got[1].Args, "--resume") ||
 		!slices.Contains(got[1].Args, ref.NativeID) || got[1].Cwd != cwd {
 		t.Fatalf("want a --resume %s relaunch with sonnet in %s; got %d launches, last %v in %s", ref.NativeID, cwd, len(got), got[len(got)-1].Args, got[len(got)-1].Cwd)
+	}
+}
+
+// TestClaudePresetPersona: the preset persona reaches Claude as
+// --append-system-prompt on the first launch and on every resume, as it
+// reaches codex (developerInstructions) and OpenCode (the preset agent file).
+func TestClaudePresetPersona(t *testing.T) {
+	a, feed, f := newAdapter(t)
+	ctx := context.Background()
+	spec := loomharness.OpenSpec{Key: "agent-lead", Dir: t.TempDir(), Launch: loomharness.Launch{Root: f.root},
+		Preset: loomharness.PresetConfig{Name: "lead", Persona: "be the lead"}}
+	ref, err := a.Open(ctx, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := a.Session(ref)
+	prompt(t, s, "one")
+	until(t, feed, loomharness.EventTurnCompleted)
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	prompt(t, s, "two")
+	until(t, feed, loomharness.EventTurnCompleted)
+	got := launches(t, f.dumpPath)
+	if len(got) != 2 || !slices.Contains(got[1].Args, "--resume") {
+		t.Fatalf("want a launch then a --resume; got %d launches", len(got))
+	}
+	for _, l := range got {
+		i := slices.Index(l.Args, "--append-system-prompt")
+		if i < 0 || i+1 >= len(l.Args) || l.Args[i+1] != "be the lead" {
+			t.Fatalf("want --append-system-prompt %q; got %v", "be the lead", l.Args)
+		}
 	}
 }
 
@@ -694,5 +731,191 @@ func TestClaudeSelfStartedTurnHasNoInputKey(t *testing.T) {
 	}
 	if e := start(); e.InputKey != "" {
 		t.Fatalf("the key bound a second turn: %q", e.InputKey)
+	}
+}
+
+// TestClaudeUsageSumsTurnSteps: a turn's usage is the sum of its steps'
+// stream usage (input and cache from message_start, output from
+// message_delta), not the result's own counts, and the next turn starts at
+// zero; a process exit emits the cut-off turn's partial usage as its own row.
+func TestClaudeUsageSumsTurnSteps(t *testing.T) {
+	m := newMapper(loomharness.NativeRef{NativeID: "s"})
+	step := func(id string, in, read, write, out int) {
+		m.frame([]byte(fmt.Sprintf(`{"type":"stream_event","event":{"type":"message_start","message":{"id":%q,"usage":{"input_tokens":%d,"cache_read_input_tokens":%d,"cache_creation_input_tokens":%d,"output_tokens":1}}}}`, id, in, read, write)))
+		m.frame([]byte(fmt.Sprintf(`{"type":"stream_event","event":{"type":"message_delta","usage":{"output_tokens":%d}}}`, out)))
+	}
+	usage := func() loomharness.Event {
+		for _, e := range m.frame([]byte(`{"type":"result","subtype":"success","usage":{"input_tokens":999,"output_tokens":999}}`)) {
+			if e.Type == loomharness.EventUsage {
+				return e
+			}
+		}
+		t.Fatal("no usage")
+		return loomharness.Event{}
+	}
+	step("msg_1", 10, 100, 5, 20)
+	step("msg_2", 3, 200, 0, 7)
+	u := usage()
+	if want := (loomharness.Usage{InputTokens: 13, OutputTokens: 27, CacheReadTokens: 300, CacheWriteTokens: 5}); u.Usage != want || u.ItemID != u.TurnID+"/usage" {
+		t.Fatalf("usage = %+v (item %q), want %+v", u.Usage, u.ItemID, want)
+	}
+	step("msg_3", 1, 0, 0, 2)
+	if u2 := usage(); u2.Usage != (loomharness.Usage{InputTokens: 1, OutputTokens: 2}) || u2.ItemID == u.ItemID {
+		t.Fatalf("second turn usage = %+v (item %q)", u2.Usage, u2.ItemID)
+	}
+	// A process that exits mid-turn: the exit emits the cut-off turn's own
+	// usage row (no cost), and the next turn's row is only its own steps.
+	step("msg_4", 10, 0, 0, 2)
+	ex := m.exited()
+	if len(ex) != 2 || ex[0].Type != loomharness.EventUsage || ex[0].Usage != (loomharness.Usage{InputTokens: 10, OutputTokens: 2}) ||
+		ex[0].ItemID != ex[0].TurnID+"/usage" || ex[0].TurnID == "" || ex[1].Type != loomharness.EventFeedGap {
+		t.Fatalf("exit events = %+v", ex)
+	}
+	if again := m.exited(); len(again) != 1 { // nothing left to count
+		t.Fatalf("a second exit = %+v", again)
+	}
+	step("msg_5", 5, 0, 0, 3)
+	u3 := usage()
+	if u3.Usage != (loomharness.Usage{InputTokens: 5, OutputTokens: 3}) || u3.ItemID == ex[0].ItemID {
+		t.Fatalf("usage after an exit = %+v (item %q), want 5/3 under a new id", u3.Usage, u3.ItemID)
+	}
+	if in, out := ex[0].Usage.InputTokens+u3.Usage.InputTokens, ex[0].Usage.OutputTokens+u3.Usage.OutputTokens; in != 15 || out != 5 {
+		t.Fatalf("totals %d/%d, want 15/5", in, out)
+	}
+}
+
+// TestClaudeCostIsSessionTotal: a turn's usage carries the result's
+// total_cost_usd as the session's running total (CostTotalUSD) and no CostUSD
+// of its own: loomagent turns the total into the turn's cost.
+func TestClaudeCostIsSessionTotal(t *testing.T) {
+	m := newMapper(loomharness.NativeRef{NativeID: "s"})
+	for _, total := range []float64{0.25, 0.75} {
+		for _, e := range m.frame([]byte(fmt.Sprintf(`{"type":"result","subtype":"success","total_cost_usd":%v}`, total))) {
+			if e.Type == loomharness.EventUsage && (e.Usage.CostTotalUSD != total || e.Usage.CostUSD != 0) {
+				t.Fatalf("usage = %+v, want total %v and no own cost", e.Usage, total)
+			}
+		}
+	}
+}
+
+// TestClaudeCloseKeepsCutOffTurnUsage: a Close during a turn emits that
+// turn's partial usage once; a Close between turns emits no usage.
+func TestClaudeCloseKeepsCutOffTurnUsage(t *testing.T) {
+	a, feed, f := newAdapter(t)
+	_, s := open(t, a, f, "agent-close-usage")
+	ctx := context.Background()
+	prompt(t, s, "hang") // one step started: 4 input tokens, no result
+	started := until(t, feed, loomharness.EventTurnStarted)
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	u := until(t, feed, loomharness.EventUsage)
+	if got := u[len(u)-1]; got.Usage != (loomharness.Usage{InputTokens: 4}) || got.TurnID != started[len(started)-1].TurnID {
+		t.Fatalf("usage at Close = %+v", got)
+	}
+	prompt(t, s, "go")
+	until(t, feed, loomharness.EventTurnCompleted)
+	if err := s.Close(ctx); err != nil { // between turns: nothing to count
+		t.Fatal(err)
+	}
+	prompt(t, s, "go")
+	if n := len(kindsOf(until(t, feed, loomharness.EventTurnCompleted), loomharness.EventUsage)); n != 1 {
+		t.Fatalf("%d usage events in the turn after an idle Close, want only the turn's own", n)
+	}
+}
+
+func kindsOf(es []loomharness.Event, typ loomharness.EventType) []loomharness.Event {
+	var out []loomharness.Event
+	for _, e := range es {
+		if e.Type == typ {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// TestClaudeToolCallCarriesNameInputOutput: a streamed tool_use starts with
+// its name; its whole block gives the input; its tool_result completes it
+// with the result text and is_error.
+func TestClaudeToolCallCarriesNameInputOutput(t *testing.T) {
+	m := newMapper(loomharness.NativeRef{NativeID: "s"})
+	var got []loomharness.Event
+	for _, f := range []string{
+		`{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_t"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_1","name":"Bash","input":{}}}}`,
+		`{"type":"assistant","message":{"id":"msg_t","content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"ls"}}]}}`,
+		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":[{"type":"text","text":"a.go"}]}]}}`,
+		`{"type":"assistant","message":{"id":"msg_u","content":[{"type":"tool_use","id":"toolu_2","name":"Read","input":{"file_path":"x"}}]}}`,
+		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_2","content":"no such file","is_error":true}]}}`,
+	} {
+		for _, e := range m.frame([]byte(f)) {
+			if e.ItemKind == "tool" {
+				got = append(got, e)
+			}
+		}
+	}
+	want := []struct {
+		typ  loomharness.EventType
+		tool loomharness.Tool
+	}{
+		{loomharness.EventItemStarted, loomharness.Tool{Name: "Bash"}},
+		{loomharness.EventItemCompleted, loomharness.Tool{Name: "Bash", Input: `{"command":"ls"}`, Output: "a.go"}},
+		{loomharness.EventItemStarted, loomharness.Tool{Name: "Read", Input: `{"file_path":"x"}`}},
+		{loomharness.EventItemCompleted, loomharness.Tool{Name: "Read", Input: `{"file_path":"x"}`, Output: "no such file", Failed: true}},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d tool events, want %d: %+v", len(got), len(want), got)
+	}
+	for i, w := range want {
+		if got[i].Type != w.typ || got[i].Tool == nil || *got[i].Tool != w.tool {
+			t.Errorf("event %d: %s %+v, want %s %+v", i, got[i].Type, got[i].Tool, w.typ, w.tool)
+		}
+	}
+}
+
+// TestClaudeModelsCatalog: the aliases carry the --effort option (high by
+// default) except haiku, with context limits and input types; none is the
+// default, which the CLI picks per account.
+func TestClaudeModelsCatalog(t *testing.T) {
+	a, _, _ := newAdapter(t)
+	ms, err := a.Models(context.Background())
+	if err != nil || len(ms) != 3 {
+		t.Fatalf("Models = %+v, %v", ms, err)
+	}
+	for _, m := range ms {
+		if m.Default || m.Provider != "anthropic" || !slices.Equal(m.Input, []string{"text", "image", "pdf"}) || m.ContextLimit == 0 {
+			t.Fatalf("model = %+v", m)
+		}
+	}
+	var choices []string
+	for _, c := range ms[0].Options[0].Choices {
+		choices = append(choices, c.ID)
+	}
+	if ms[0].ID != "opus" || ms[0].Options[0].ID != loomharness.OptionEffort || ms[0].Options[0].Current != "high" ||
+		!slices.Equal(choices, []string{"low", "medium", "high", "xhigh", "max"}) || len(ms[2].Options) != 0 {
+		t.Fatalf("catalog = %+v", ms)
+	}
+}
+
+// TestClaudeFailedResultCarriesError: a non-success result ends the turn
+// failed with its first user-facing error (never an [ede_diagnostic] entry),
+// or its subtype when it lists none; a success carries no error.
+func TestClaudeFailedResultCarriesError(t *testing.T) {
+	for raw, want := range map[string][2]string{
+		`{"type":"result","subtype":"error_during_execution","errors":["[ede_diagnostic] x","API Error: 401 invalid key"]}`: {"failed", "API Error: 401 invalid key"},
+		`{"type":"result","subtype":"error_max_turns"}`:                                                                     {"failed", "error_max_turns"},
+		`{"type":"result","subtype":"success","errors":["ignored"]}`:                                                        {"completed", ""},
+	} {
+		m := newMapper(loomharness.NativeRef{NativeID: "s"})
+		m.frame([]byte(`{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_a"}}}`))
+		var done loomharness.Event
+		for _, e := range m.frame([]byte(raw)) {
+			if e.Type == loomharness.EventTurnCompleted {
+				done = e
+			}
+		}
+		if done.StopReason != want[0] || done.Error != want[1] {
+			t.Errorf("%s -> %q %q; want %q %q", raw, done.StopReason, done.Error, want[0], want[1])
+		}
 	}
 }

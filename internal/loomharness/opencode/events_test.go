@@ -2,6 +2,7 @@ package opencode
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -44,6 +45,13 @@ func TestEventsFeedReconnectGapAndNoDuplicateItems(t *testing.T) {
 			ev(13, "session.execution.interrupted", `{"sessionID":"ses_a","reason":"user"}`),
 		},
 	}
+	// History as OpenCode holds it after the restart: the turn is still
+	// open (no idle marker), so it keeps its id across the reconnect.
+	st.messages["ses_a"] = []map[string]any{
+		{"id": "msg_in", "type": "user"},
+		{"id": "msg_a1", "type": "assistant", "content": []map[string]any{{"type": "text", "text": "PAST"}}},
+		{"id": "msg_8", "type": "synthetic", "metadata": map[string]string{"notice": "restart"}},
+	}
 	c := fakeServer(t, st)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -53,7 +61,7 @@ func TestEventsFeedReconnectGapAndNoDuplicateItems(t *testing.T) {
 	}
 	var got []string
 	completed := map[string]int{}
-	for len(got) < 15 {
+	for len(got) < 16 {
 		var e loomharness.Event
 		select {
 		case e = <-f.Events():
@@ -80,6 +88,7 @@ func TestEventsFeedReconnectGapAndNoDuplicateItems(t *testing.T) {
 		"item.started ses_a msg_in tool msg_a1/tool/call_1   ",
 		"ask.opened ses_a msg_in    per_1 ",
 		"feed.gap       ",
+		"turn.started ses_a msg_in   msg_in  ", // the same turn again, from history (Loom saves it once)
 		"turn.resumed ses_a msg_in  msg_8   ",
 		"item.completed ses_a msg_in tool msg_a1/tool/call_1   ",
 		"ask.resolved ses_a msg_in    per_1 ",
@@ -95,6 +104,58 @@ func TestEventsFeedReconnectGapAndNoDuplicateItems(t *testing.T) {
 		if n != 1 {
 			t.Errorf("item %s completed %d times", id, n)
 		}
+	}
+}
+
+// A turn that ends while the stream is down leaves no open turn behind: the
+// next message opens its own turn, with its own turn.started and
+// turn.completed, instead of joining the ended one.
+func TestEventsFeedReconnectAfterUnseenTurnEnd(t *testing.T) {
+	st := newStore()
+	st.streams = [][]string{
+		{
+			ev(1, "session.inbox.delivered", `{"sessionID":"ses_a","inboxID":"msg_in"}`),
+			ev(2, "session.text.ended", `{"sessionID":"ses_a","assistantMessageID":"msg_a1","ordinal":0,"text":"one"}`),
+		},
+		{
+			ev(5, "session.inbox.delivered", `{"sessionID":"ses_a","inboxID":"msg_in2"}`),
+			ev(6, "session.execution.succeeded", `{"sessionID":"ses_a"}`),
+		},
+	}
+	st.messages["ses_a"] = []map[string]any{
+		{"id": "msg_in", "type": "user"},
+		{"id": "msg_a1", "type": "assistant", "content": []map[string]any{{"type": "text", "text": "one"}}},
+		{"id": "msg_idle", "type": "idle"},
+		{"id": "msg_in2", "type": "user"},
+	}
+	c := fakeServer(t, st)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	f, err := c.Feed(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	var got []string
+	for len(got) < 7 {
+		select {
+		case e := <-f.Events():
+			got = append(got, fmt.Sprintf("%s %s %s %s", e.Type, e.TurnID, e.InputKey, e.StopReason))
+		case <-ctx.Done():
+			t.Fatalf("timed out after %d events:\n%s", len(got), strings.Join(got, "\n"))
+		}
+	}
+	want := []string{
+		"turn.started msg_in msg_in ",
+		"message.delivered msg_in msg_in ",
+		"item.completed msg_in  ",
+		"feed.gap   ",
+		"turn.started msg_in2 msg_in2 ",
+		"message.delivered msg_in2 msg_in2 ",
+		"turn.completed msg_in2  completed",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("events:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
 
@@ -252,5 +313,186 @@ func TestReadSSE(t *testing.T) {
 	readSSE(strings.NewReader("data: 1\n\ndata: 2\n\n"), func(b []byte) bool { first = append(first, string(b)); return false })
 	if len(first) != 1 {
 		t.Fatalf("readSSE went on after fn returned false: %q", first)
+	}
+}
+
+// TestEventsToolCallCarriesNameInputOutput: a tool call's start carries its
+// name and input, and its end adds the output, or the error when it failed;
+// a catch-up read of the stored message gives the same tool data.
+func TestEventsToolCallCarriesNameInputOutput(t *testing.T) {
+	m := newMapper(nil, nil)
+	var got []loomharness.Event
+	for _, raw := range []string{
+		live("session.tool.input.started", `{"sessionID":"s","assistantMessageID":"msg_a1","id":"call_1","name":"bash"}`),
+		live("session.tool.called", `{"sessionID":"s","assistantMessageID":"msg_a1","id":"call_1","input":{"command":"ls"},"executed":true}`),
+		live("session.tool.success", `{"sessionID":"s","assistantMessageID":"msg_a1","id":"call_1","content":[{"type":"text","text":"a.go\nb.go"}],"executed":true}`),
+		live("session.tool.input.started", `{"sessionID":"s","assistantMessageID":"msg_a1","id":"call_2","name":"read"}`),
+		live("session.tool.called", `{"sessionID":"s","assistantMessageID":"msg_a1","id":"call_2","input":{"filePath":"x"},"executed":true}`),
+		live("session.tool.failed", `{"sessionID":"s","assistantMessageID":"msg_a1","id":"call_2","error":{"type":"tool","message":"no such file"},"executed":true}`),
+	} {
+		if e, ok := m.mapEvent([]byte(raw)); ok {
+			got = append(got, e)
+		}
+	}
+	want := []loomharness.Tool{
+		{Name: "bash", Input: `{"command":"ls"}`},
+		{Name: "bash", Input: `{"command":"ls"}`, Output: "a.go\nb.go"},
+		{Name: "read", Input: `{"filePath":"x"}`},
+		{Name: "read", Input: `{"filePath":"x"}`, Output: "no such file", Failed: true},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d events, want %d: %+v", len(got), len(want), got)
+	}
+	for i, e := range got {
+		if e.ItemKind != "tool" || e.Tool == nil || *e.Tool != want[i] {
+			t.Errorf("event %d: %s %+v, want tool %+v", i, e.Type, e.Tool, want[i])
+		}
+	}
+
+	msg := message{ID: "msg_a1", Type: "assistant", Finish: "stop"}
+	if err := json.Unmarshal([]byte(`{"content":[
+		{"type":"tool","id":"call_1","name":"bash","state":{"status":"completed","input":{"command":"ls"},"content":[{"type":"text","text":"a.go\nb.go"}]}},
+		{"type":"tool","id":"call_2","name":"read","state":{"status":"error","input":{"filePath":"x"},"error":{"type":"tool","message":"no such file"}}}]}`), &msg); err != nil {
+		t.Fatal(err)
+	}
+	stored := msg.events(loomharness.NativeRef{NativeID: "s"})
+	for i, e := range stored[:2] {
+		if e.Tool == nil || *e.Tool != *got[2*i+1].Tool || e.ItemID != got[2*i+1].ItemID {
+			t.Errorf("catch-up %d: %s %+v, live %s %+v", i, e.ItemID, e.Tool, got[2*i+1].ItemID, got[2*i+1].Tool)
+		}
+	}
+}
+
+// TestEventsAsksAndFailureText: a live permission ask says what it asks
+// about, a form carries its questions, and a failed execution carries its
+// error's message (its type when it has none).
+func TestEventsAsksAndFailureText(t *testing.T) {
+	m := mapper{seq: map[string]int64{}, turn: map[string]string{}}
+	e, ok := m.mapEvent([]byte(`{"type":"permission.asked","data":{"sessionID":"ses_1","id":"per_1","action":"bash","resources":["rm -rf build"]}}`))
+	if !ok || e.Text != "bash rm -rf build" {
+		t.Fatalf("permission.asked -> %+v", e)
+	}
+	e, _ = m.mapEvent([]byte(`{"type":"permission.asked","data":{"sessionID":"ses_1","id":"per_2","action":"edit","resources":["a.go"],"message":"Edit a.go?","metadata":{"files":[{"file":"a.go","patch":"@@ -1 +1 @@"}]}}}`))
+	if e.Text != "Edit a.go?\n@@ -1 +1 @@" {
+		t.Fatalf("edit ask Text = %q", e.Text)
+	}
+	e, _ = m.mapEvent([]byte(`{"type":"form.created","data":{"form":{"id":"frm_1","sessionID":"ses_1","title":"Questions","fields":[{"key":"q0","type":"multiselect","title":"Pick","description":"Which ones?","options":[{"value":"a","label":"A"}]}]}}}`))
+	if len(e.Questions) != 1 || e.Text != "Which ones?" || !e.Questions[0].MultiSelect || e.Questions[0].Options[0].Label != "A" {
+		t.Fatalf("form.created -> %+v", e)
+	}
+	for raw, want := range map[string]string{
+		`{"type":"session.execution.failed","data":{"sessionID":"ses_1","error":{"type":"provider.invalid-output","message":"tool call delta is missing id"}}}`: "tool call delta is missing id",
+		`{"type":"session.execution.failed","data":{"sessionID":"ses_1","error":{"type":"provider.auth"}}}`:                                                     "provider.auth",
+		`{"type":"session.execution.succeeded","data":{"sessionID":"ses_1"}}`:                                                                                   "",
+	} {
+		e, ok := m.mapEvent([]byte(raw))
+		if !ok || e.Type != loomharness.EventTurnCompleted || e.Error != want {
+			t.Fatalf("%s -> %+v; want Error %q", raw, e, want)
+		}
+	}
+}
+
+// OC1: a rejected permission makes OpenCode b30c4d0 interrupt its own step,
+// and with no stop reason the execution ends as a "shutdown" interrupt
+// (core/src/session/execution.ts terminal) that writes no idle marker. The
+// sequence below is the real build's, recorded by a reject on a shell ask.
+// After a reject that interrupt ends the turn as declined; a real shutdown
+// still ends nothing, and a reject's mark lasts only its own turn.
+func TestEventsDeclineEndsTheTurn(t *testing.T) {
+	m := newMapper(nil, nil)
+	var got []loomharness.Event
+	for _, raw := range []string{
+		ev(1, "session.inbox.delivered", `{"sessionID":"ses_a","inboxID":"msg_in"}`),
+		ev(2, "session.tool.called", `{"sessionID":"ses_a","assistantMessageID":"msg_a1","id":"call_1"}`),
+		live("permission.asked", `{"sessionID":"ses_a","id":"per_1","action":"shell","resources":["echo hi"]}`),
+		live("permission.replied", `{"sessionID":"ses_a","requestID":"per_1","reply":"reject"}`),
+		ev(3, "session.tool.failed", `{"sessionID":"ses_a","assistantMessageID":"msg_a1","id":"call_1","error":{"type":"aborted","message":"The user declined this tool call"},"executed":false}`),
+		ev(4, "session.execution.interrupted", `{"sessionID":"ses_a","reason":"shutdown"}`),
+		ev(5, "session.inbox.delivered", `{"sessionID":"ses_a","inboxID":"msg_in2"}`),
+		ev(6, "session.execution.interrupted", `{"sessionID":"ses_a","reason":"shutdown"}`),
+	} {
+		got = append(got, m.process([]byte(raw))...)
+	}
+	var ends []loomharness.Event
+	for _, e := range got {
+		if e.Type == loomharness.EventTurnCompleted {
+			ends = append(ends, e)
+		}
+	}
+	if len(ends) != 1 || ends[0].StopReason != "declined" || ends[0].TurnID != "msg_in" || ends[0].Error != "" {
+		t.Fatalf("turn ends = %+v; want one, the declined turn msg_in, with no error", ends)
+	}
+}
+
+// OC1: a declined turn writes no idle marker, so in OpenCode's history the
+// declined assistant message (its tool call "The user declined this tool
+// call") closes the turn. The next input opens its own turn, live and in
+// history, with its own InputKey, and history ends the declined turn as the
+// feed does.
+func TestEventsTurnAfterADeclineIsItsOwn(t *testing.T) {
+	st := newStore()
+	st.streams = [][]string{{
+		ev(1, "session.inbox.delivered", `{"sessionID":"ses_a","inboxID":"msg_in"}`),
+		live("permission.replied", `{"sessionID":"ses_a","requestID":"per_1","reply":"reject"}`),
+		ev(2, "session.tool.failed", `{"sessionID":"ses_a","assistantMessageID":"msg_a1","id":"call_1","error":{"type":"aborted","message":"The user declined this tool call"}}`),
+		ev(3, "session.execution.interrupted", `{"sessionID":"ses_a","reason":"shutdown"}`),
+		ev(4, "session.inbox.delivered", `{"sessionID":"ses_a","inboxID":"msg_in2"}`),
+		ev(5, "session.execution.succeeded", `{"sessionID":"ses_a"}`),
+	}}
+	declined := map[string]any{"type": "tool", "id": "call_1", "name": "shell",
+		"state": map[string]any{"status": "error", "error": map[string]string{"type": "aborted", "message": "The user declined this tool call"}}}
+	st.messages["ses_a"] = []map[string]any{
+		{"id": "msg_in", "type": "user"},
+		{"id": "msg_a1", "type": "assistant", "content": []map[string]any{declined}, "error": map[string]string{"type": "aborted", "message": "Step interrupted"}},
+		{"id": "msg_in2", "type": "user"},
+		{"id": "msg_idle", "type": "idle", "outcome": "succeeded"},
+	}
+	c := fakeServer(t, st)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	f, err := c.Feed(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	var got []string
+	for len(got) < 7 {
+		select {
+		case e := <-f.Events():
+			got = append(got, fmt.Sprintf("%s %s %s %s", e.Type, e.TurnID, e.InputKey, e.StopReason))
+		case <-ctx.Done():
+			t.Fatalf("timed out after %d events:\n%s", len(got), strings.Join(got, "\n"))
+		}
+	}
+	want := []string{
+		"turn.started msg_in msg_in ",
+		"message.delivered msg_in msg_in ",
+		"ask.resolved msg_in  ",
+		"item.completed msg_in  ",
+		"turn.completed msg_in  declined",
+		"turn.started msg_in2 msg_in2 ",
+		"message.delivered msg_in2 msg_in2 ",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("live events:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	page, err := c.Session(loomharness.NativeRef{NativeID: "ses_a"}).Messages(ctx, "", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hist []string
+	for _, e := range page.Events {
+		if e.Type == loomharness.EventTurnStarted || e.Type == loomharness.EventTurnCompleted {
+			hist = append(hist, fmt.Sprintf("%s %s %s %s", e.Type, e.TurnID, e.InputKey, e.StopReason))
+		}
+	}
+	wantHist := []string{
+		"turn.started msg_in msg_in ",
+		"turn.completed msg_in  declined",
+		"turn.started msg_in2 msg_in2 ",
+		"turn.completed msg_in2  completed",
+	}
+	if strings.Join(hist, "\n") != strings.Join(wantHist, "\n") {
+		t.Fatalf("history turns:\n%s\nwant:\n%s", strings.Join(hist, "\n"), strings.Join(wantHist, "\n"))
 	}
 }

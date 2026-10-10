@@ -27,13 +27,13 @@ func (s *Service) Withdraw(ctx context.Context, req WithdrawRequest) (WithdrawRe
 	if req.Actor.Kind == "" {
 		req.Actor = ActorRef{Kind: "user", ID: "local"}
 	}
-	defer s.lock(req.AgentID)()
+	defer s.lockReady(ctx, req.AgentID)()
 	a, err := s.live(ctx, req.AgentID)
 	if err != nil {
 		return WithdrawResult{}, err
 	}
 	sender := senderOf(req.Actor)
-	res, err := s.store.ClearSlot(ctx, a.AgentID, sender)
+	res, err := s.store.ClearSlot(ctx, a.AgentID, sender, true)
 	if err != nil {
 		return WithdrawResult{}, err
 	}

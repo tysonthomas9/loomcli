@@ -68,6 +68,11 @@ func appendEvent(ctx context.Context, tx *sql.Tx, e Event) (Event, error) {
 	if err == nil || !errors.Is(err, sql.ErrNoRows) {
 		return got, err
 	}
+	var purged bool
+	err = tx.QueryRowContext(ctx, `SELECT history_purged_at IS NOT NULL FROM agents WHERE agent_id = ?`, e.AgentID).Scan(&purged)
+	if purged || (err != nil && !errors.Is(err, sql.ErrNoRows)) {
+		return e, err // purged history stays purged: a later event is live only (seq 0)
+	}
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq), 0) + 1 FROM agent_events WHERE agent_id = ?`,
 		e.AgentID).Scan(&e.Seq); err != nil {
 		return Event{}, err
@@ -194,4 +199,105 @@ func (s *Store) ListEvents(ctx context.Context, q EventQuery) (EventPage, error)
 		page.Next = e.Seq
 	}
 	return page, rows.Err()
+}
+
+// HasEvent reports whether agentID has saved event eventID.
+func (s *Store) HasEvent(ctx context.Context, agentID, eventID string) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_events WHERE agent_id = ? AND event_id = ?`,
+		agentID, eventID).Scan(&n)
+	return n > 0, err
+}
+
+// Unreceipted lists agentID's events of kind, in order, whose EventID has
+// no Send receipt on the agent yet: notices not yet put in a slot.
+func (s *Store) Unreceipted(ctx context.Context, agentID, kind string) ([]Event, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+eventCols+` FROM agent_events e WHERE agent_id = ? AND kind = ?
+		AND NOT EXISTS (SELECT 1 FROM agent_send_receipts r WHERE r.agent_id = e.agent_id AND r.request_id = e.event_id)
+		ORDER BY seq`, agentID, kind)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Event
+	for rows.Next() {
+		e, err := scanEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// LastCostTotal returns the costTotalUsd of agentID's newest usage row for
+// native session that has one, or 0 when none does. Rows are appended in seq
+// order, so the newest is the highest rowid: the lookup walks the kind index
+// back and stops at the first match.
+func (s *Store) LastCostTotal(ctx context.Context, agentID, session string) (float64, error) {
+	var total float64
+	err := s.db.QueryRowContext(ctx, `SELECT json_extract(redacted_payload, '$.costTotalUsd') FROM agent_events
+		WHERE agent_id = ? AND kind = 'usage' AND json_extract(redacted_payload, '$.session') = ?
+		AND json_extract(redacted_payload, '$.costTotalUsd') > 0
+		ORDER BY rowid DESC LIMIT 1`, agentID, session).Scan(&total)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return total, err
+}
+
+// LastReply returns the texts of the completed message items of the turn
+// that holds agentID's last message item in its current attempt, in order:
+// the whole final reply, which a harness may save as several message items
+// (OpenCode saves one per text part, so the last alone can be a one-line
+// stub). The turn is that message's turn_id: every message of the attempt
+// tagged with it (a codex history replay saves items with their turn_id but
+// no turn.started). An untagged message's turn starts after the last
+// turn.started before it in the attempt; with none, only that message is
+// provably the reply. Never before the attempt (attempt_after_seq).
+// It is empty when the attempt has no message.
+func (s *Store) LastReply(ctx context.Context, agentID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `WITH
+		attempt AS (SELECT attempt_after_seq AS after FROM agents WHERE agent_id = ?1),
+		msgs AS (SELECT e.seq, COALESCE(e.turn_id, '') AS turn, json_extract(e.redacted_payload, '$.text') AS text
+			FROM agent_events e, attempt
+			WHERE e.agent_id = ?1 AND e.kind = 'item.completed' AND json_extract(e.redacted_payload, '$.itemKind') = 'message'
+			AND e.seq > attempt.after),
+		last AS (SELECT seq, turn FROM msgs ORDER BY seq DESC LIMIT 1),
+		start AS (SELECT MAX(t.seq) AS seq FROM agent_events t, last, attempt
+			WHERE t.agent_id = ?1 AND t.kind = 'turn.started' AND t.seq < last.seq AND t.seq > attempt.after)
+		SELECT COALESCE(msgs.text, '') FROM msgs, last, start
+		WHERE CASE WHEN last.turn <> '' THEN msgs.turn = last.turn
+			WHEN start.seq IS NOT NULL THEN msgs.seq > start.seq ELSE msgs.seq = last.seq END ORDER BY msgs.seq`, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var text string
+		if err := rows.Scan(&text); err != nil {
+			return nil, err
+		}
+		out = append(out, text)
+	}
+	return out, rows.Err()
+}
+
+// LastMessage returns the text of the last completed message item of
+// agentID's current attempt, or "" when that attempt has none. The attempt
+// starts after attempt_after_seq, which the reopen sets in its own
+// transaction, so an earlier attempt's message is never returned, even after
+// a crash right after the reopen.
+func (s *Store) LastMessage(ctx context.Context, agentID string) (string, error) {
+	var text sql.NullString
+	err := s.db.QueryRowContext(ctx, `SELECT json_extract(e.redacted_payload, '$.text') FROM agent_events e
+		JOIN agents a USING (agent_id)
+		WHERE e.agent_id = ? AND e.kind = 'item.completed' AND json_extract(e.redacted_payload, '$.itemKind') = 'message'
+		AND e.seq > a.attempt_after_seq
+		ORDER BY e.seq DESC LIMIT 1`, agentID).Scan(&text)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return text.String, err
 }

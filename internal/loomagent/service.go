@@ -2,6 +2,7 @@ package loomagent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -21,6 +22,7 @@ const (
 	StateStopping = "stopping"
 	StateFinished = "finished"
 	StateArchived = "archived"
+	StateDeleted  = "deleted" // read only: Get and List show a tombstoned agent so; its row keeps the state Delete left
 )
 
 // transitions is the one state machine: the states each state may move to.
@@ -58,15 +60,27 @@ type ServiceConfig struct {
 	ResolveRepo     ResolveRepo
 	PrepareWorktree PrepareWorktree
 	Target          Target
-	// Interrupt stops a's running turn; nil when no harness is wired.
+	// Interrupt stops a's running turn; nil uses the current session's own
+	// Interrupt, the same call on every harness.
 	Interrupt func(ctx context.Context, a loomstore.Agent) error
-	// Purge removes exactly the native sessions a owns (2.1c's R29 hook); nil
-	// until 2.1c wires it. A failure leaves the Delete pending for Reconcile.
+	// Purge removes exactly the native sessions a owns (R29); nil purges each
+	// through its recorded harness. A failure leaves the Delete pending for
+	// Reconcile.
 	Purge func(ctx context.Context, a loomstore.Agent, owned []loomstore.NativeSession) error
 	// Harnesses are the wired harness runtimes by name.
 	Harnesses map[string]loomharness.Harness
 	// Launch returns a's opaque launch input on harness; nil launches with none.
 	Launch func(ctx context.Context, a loomstore.Agent, harness string) (loomharness.Launch, error)
+	// Retire runs once a is archived, or purged by its Delete just before
+	// the tombstone (so a failed one is retried), to remove what Launch left
+	// at rest (its bridge settings); the next Resume after an Unarchive
+	// launches it again. It must be safe to repeat; nil does nothing.
+	Retire func(ctx context.Context, a loomstore.Agent) error
+	// CatalogWarmUp is how long after this service first lists a harness's
+	// models a create naming a model the catalog lacks re-fetches it: a
+	// harness that just started may list only some providers (MC1). Zero
+	// refuses the missing model at once.
+	CatalogWarmUp time.Duration
 	// WorkspaceID is the workspace this service creates agents in.
 	WorkspaceID string
 	// Presets defaults to BuiltinPresets.
@@ -84,6 +98,10 @@ type ServiceConfig struct {
 	// same message always gets the same key, so HasInput can find it after a
 	// crash. nil uses OpenCode's msg_ form.
 	InputKey func(harness, agentID, requestID string) string
+	// RecoverFirst holds every write and the dispatcher until RunDispatcher's
+	// first Reconcile of each wired harness has finished (a serve start,
+	// design v2 §4.14).
+	RecoverFirst bool
 }
 
 // Backend is a workspace default harness and model.
@@ -103,6 +121,7 @@ type Service struct {
 	purge       func(context.Context, loomstore.Agent, []loomstore.NativeSession) error
 	harnesses   map[string]loomharness.Harness
 	launch      func(context.Context, loomstore.Agent, string) (loomharness.Launch, error)
+	retire      func(context.Context, loomstore.Agent) error
 	workspaceID string
 	presets     Presets
 	backend     func(context.Context) (Backend, error)
@@ -112,6 +131,32 @@ type Service struct {
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
 	asks  map[string]map[string]Ask // open asks by agent and ask ID, under mu
+	// resumed holds, by harness, the sessions this process opened or
+	// resumed, under mu: Reconcile resumes each live session once, so its
+	// policy is installed here, and again after its harness restarts.
+	resumed map[string]map[loomharness.NativeRef]bool
+	// ready closes when start-up recovery is done (nil: no gate); recovered closes it.
+	ready     chan struct{}
+	recovered func()
+	// catalogWait bounds how long a create waits for a harness's model
+	// catalog to load after it boots, polling every catalogPoll (MC1).
+	catalogWait, catalogPoll time.Duration
+	catalogWarmUp            time.Duration
+	listed                   map[string]time.Time // by harness, the first successful catalog listing, under mu
+	// loops are the running background loops Drain waits on, in the order
+	// they started, under mu.
+	loops []*loop
+	// stoppedWork sums the items stopped loops handled after their last
+	// Drain answer, under mu.
+	stoppedWork int
+	// tick is the dispatcher's recovery resync clock and after RunFeed's
+	// backoff timer: time's own, or a test's.
+	tick  ticker
+	after func(time.Duration) <-chan time.Time
+	// queue is the reconcile queue by agent ID, under mu; queueWake tells
+	// the dispatcher it changed.
+	queue     map[string]*queued
+	queueWake chan struct{}
 }
 
 // New returns a Service for cfg.
@@ -119,11 +164,23 @@ func New(cfg ServiceConfig) *Service {
 	s := &Service{Bus: NewBus(), store: cfg.Store, events: cfg.Events, workspace: cfg.Workspace,
 		resolveRepo: cfg.ResolveRepo, prepare: cfg.PrepareWorktree, target: cfg.Target,
 		interrupt: cfg.Interrupt, purge: cfg.Purge, harnesses: cfg.Harnesses, launch: cfg.Launch,
-		workspaceID: cfg.WorkspaceID, presets: cfg.Presets, backend: cfg.DefaultBackend, bridge: cfg.Bridge,
-		inputKey: cfg.InputKey,
-		locks:    map[string]*sync.Mutex{}, asks: map[string]map[string]Ask{}}
+		retire: cfg.Retire, workspaceID: cfg.WorkspaceID, presets: cfg.Presets, backend: cfg.DefaultBackend, bridge: cfg.Bridge,
+		inputKey: cfg.InputKey, catalogWait: 15 * time.Second, catalogPoll: 250 * time.Millisecond,
+		catalogWarmUp: cfg.CatalogWarmUp, listed: map[string]time.Time{}, tick: realTicker, after: time.After,
+		queue: map[string]*queued{}, queueWake: make(chan struct{}, 1),
+		locks: map[string]*sync.Mutex{}, asks: map[string]map[string]Ask{}, resumed: map[string]map[loomharness.NativeRef]bool{}}
+	if cfg.RecoverFirst {
+		s.ready = make(chan struct{})
+		s.recovered = sync.OnceFunc(func() { close(s.ready) })
+	}
 	if s.presets == nil {
 		s.presets = BuiltinPresets{}
+	}
+	if s.interrupt == nil {
+		s.interrupt = s.sessionInterrupt
+	}
+	if s.purge == nil {
+		s.purge = s.purgeOwned
 	}
 	if s.backend == nil {
 		s.backend = func(context.Context) (Backend, error) { return Backend{}, nil }
@@ -154,17 +211,64 @@ func New(cfg ServiceConfig) *Service {
 	return s
 }
 
+// gateHeld runs when a write starts waiting on start-up recovery; tests
+// use it to know the write is held.
+var gateHeld = func() {}
+
+// waitReady holds a write until start-up recovery is done.
+func (s *Service) waitReady(ctx context.Context) error {
+	if s.ready == nil {
+		return nil
+	}
+	select {
+	case <-s.ready:
+		return nil
+	default:
+		gateHeld() // recovery is still running: this write waits
+	}
+	select {
+	case <-s.ready:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// lockReady waits for start-up recovery, then takes agentID's lock. If ctx
+// ends first it still locks, and the caller's next store read fails with
+// ctx's error.
+func (s *Service) lockReady(ctx context.Context, agentID string) func() {
+	_ = s.waitReady(ctx)
+	return s.lock(agentID)
+}
+
+// markResumed records that this process installed ref's policy on harness.
+func (s *Service) markResumed(harness string, ref loomharness.NativeRef) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.resumed[harness] == nil {
+		s.resumed[harness] = map[loomharness.NativeRef]bool{}
+	}
+	s.resumed[harness][ref] = true
+}
+
 // lock takes agentID's lock, which orders that agent's writes, and returns its unlock.
 func (s *Service) lock(agentID string) func() {
+	l := s.agentLock(agentID)
+	l.Lock()
+	return l.Unlock
+}
+
+// agentLock returns agentID's lock.
+func (s *Service) agentLock(agentID string) *sync.Mutex {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	l, ok := s.locks[agentID]
 	if !ok {
 		l = &sync.Mutex{}
 		s.locks[agentID] = l
 	}
-	s.mu.Unlock()
-	l.Lock()
-	return l.Unlock
+	return l
 }
 
 // repoPath resolves repo for the service's target.
@@ -172,21 +276,83 @@ func (s *Service) repoPath(ctx context.Context, repo string) (string, error) {
 	return s.resolveRepo(ctx, s.target, repo)
 }
 
-// setState moves a to `to` by compare-and-set on a's state columns, then,
-// after the commit, publishes the change. It returns loomstore.ErrStateChanged
-// when another writer moved a first; that writer alone publishes.
+// setState moves a to `to` by compare-and-set on a's state columns and
+// revision, saving the change's events in the same transaction under the
+// event lane, then publishes them (EventLog.CommitState). It returns
+// loomstore.ErrStateChanged when another writer moved a first; that writer
+// alone publishes. On any error nothing is saved or published.
 func (s *Service) setState(ctx context.Context, a loomstore.Agent, to loomstore.AgentState) (loomstore.Agent, error) {
+	return s.changeState(ctx, a, to, nil)
+}
+
+// archiveCols is the archive reason and R29 clock start an archive change
+// records (loomstore.SetArchive).
+type archiveCols struct {
+	reason *string
+	at     *time.Time
+}
+
+// changeState is setState that, when arch is set, also records arch in the
+// same transaction, and saves more events after the change's own.
+func (s *Service) changeState(ctx context.Context, a loomstore.Agent, to loomstore.AgentState, arch *archiveCols,
+	more ...Event) (loomstore.Agent, error) {
 	from := a.StateOf()
 	if to.State != from.State && !slices.Contains(transitions[from.State], to.State) {
 		return a, fmt.Errorf("loomagent: invalid state change %s -> %s", from.State, to.State)
 	}
-	if err := s.store.CompareAndSetState(ctx, a.AgentID, from, to); err != nil {
-		return a, err
-	}
 	before := a
 	a.State, a.StateReason, a.WaitingOn, a.Outcome = to.State, to.StateReason, to.WaitingOn, to.Outcome
 	a.AttentionReason, a.RunningTurnID, a.Attempt = to.AttentionReason, to.RunningTurn, to.Attempt
-	return a, s.publishChange(ctx, before, a)
+	a.Revision++
+	out := append(changeEvents(before, a), more...)
+	rows, err := eventRows(out)
+	if err != nil {
+		return before, err
+	}
+	_, err = s.events.commit(func() ([]loomstore.Event, error) {
+		var owed []loomstore.CompletionMarker
+		if completed(a) && !completed(before) { // a child's attempt ended: its parent is owed its record (§10.3)
+			m, err := s.marker(ctx, a) // read under the lane, so no append slips between it and the commit
+			if err != nil {
+				return nil, err
+			}
+			owed = append(owed, m)
+		}
+		if arch == nil {
+			return s.store.CommitState(ctx, a.AgentID, from, to, before.Revision, rows, owed...)
+		}
+		return s.store.CommitArchive(ctx, a.AgentID, from, to, before.Revision, arch.reason, arch.at, rows, owed...)
+	}, s.busPublish(out))
+	if err != nil {
+		return before, err
+	}
+	return a, nil
+}
+
+// eventRows are out as rows to save; each keeps its EventID ("" lets the
+// write name it).
+func eventRows(out []Event) ([]loomstore.Event, error) {
+	rows := make([]loomstore.Event, len(out))
+	for i, e := range out {
+		b, err := json.Marshal(e)
+		if err != nil {
+			return nil, err
+		}
+		rows[i] = loomstore.Event{AgentID: e.AgentID, EventID: e.EventID, Kind: e.Type, TurnID: e.TurnID, Payload: b}
+	}
+	return rows, nil
+}
+
+// busPublish publishes out, whose rows were saved as saved, on the Bus too,
+// in commit order. A write that saved nothing (a retry) publishes nothing.
+func (s *Service) busPublish(out []Event) func(saved []loomstore.Event) {
+	return func(saved []loomstore.Event) {
+		for i, row := range saved[:min(len(saved), len(out))] { // out's rows come first
+			e := out[i]
+			e.EventID = row.EventID
+			s.Bus.publish(e)
+		}
+	}
 }
 
 // raiseAttention sets Attention{reason} beside a's state.
@@ -212,8 +378,8 @@ func (s *Service) handOver(ctx context.Context, a loomstore.Agent, nativeKey fun
 	return s.store.HandNext(ctx, a.AgentID, nativeKey)
 }
 
-// publishChange saves, then publishes, the events of a's committed change.
-func (s *Service) publishChange(ctx context.Context, before, after loomstore.Agent) error {
+// changeEvents are the events of a's change from before to after.
+func changeEvents(before, after loomstore.Agent) []Event {
 	e, out := Event{AgentID: after.AgentID, Time: time.Now()}, []Event{}
 	if before.State != after.State {
 		c := e
@@ -239,12 +405,7 @@ func (s *Service) publishChange(ctx context.Context, before, after loomstore.Age
 		c.Type, c.Reason, c.Outcome, c.Attempt = EventSettled, r, deref(after.Outcome), after.Attempt
 		out = append(out, c)
 	}
-	for _, c := range out {
-		if err := s.emit(ctx, c); err != nil {
-			return err
-		}
-	}
-	return nil
+	return out
 }
 
 // settledReason is why a is settled (§5.1), or "" when it is not.

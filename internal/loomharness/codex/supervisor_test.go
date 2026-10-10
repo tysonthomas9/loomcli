@@ -67,6 +67,7 @@ func fakeCodex() int {
 		var p struct {
 			ThreadID, Method string
 			Params           json.RawMessage // the ask's params; default {threadId}
+			Async            bool            // answer the ask call at once; the ask stays open
 		}
 		_ = json.Unmarshal(req.Params, &p)
 		var result any
@@ -79,6 +80,18 @@ func fakeCodex() int {
 			result = os.Getpid()
 		case "exit":
 			return 1
+		case "model/list": // the 0.157.1 shape, one page
+			result = json.RawMessage(`{"data":[{"id":"gpt-5.5","model":"gpt-5.5","displayName":"GPT-5.5","description":"",` +
+				`"hidden":false,"isDefault":true,"inputModalities":["text","image"],"defaultReasoningEffort":"medium",` +
+				`"supportedReasoningEfforts":[{"reasoningEffort":"low","description":"Fast"},{"reasoningEffort":"medium","description":""},` +
+				`{"reasoningEffort":"xhigh","description":""}]},{"id":"mini","model":"mini","displayName":"Mini","description":"",` +
+				`"hidden":false,"isDefault":false,"defaultReasoningEffort":"","supportedReasoningEfforts":[]}],"nextCursor":null}`)
+		case "turn/start": // recorded, one line each, in $CODEX_HOME/turn-starts
+			if f, err := os.OpenFile(filepath.Join(home, "turn-starts"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+				_, _ = f.Write(append(req.Params, '\n'))
+				_ = f.Close()
+			}
+			result = map[string]any{}
 		case "ask":
 			method := cmp.Or(p.Method, "item/tool/requestUserInput")
 			params := p.Params
@@ -86,6 +99,10 @@ func fakeCodex() int {
 				params = json.RawMessage(fmt.Sprintf(`{"threadId":%q}`, p.ThreadID))
 			}
 			_ = out.Encode(map[string]any{"id": "srv-1", "method": method, "params": params})
+			if p.Async {
+				result = map[string]any{}
+				break
+			}
 			in.Scan()
 			result = json.RawMessage(in.Bytes())
 		default:

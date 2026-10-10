@@ -376,6 +376,13 @@ func addBranchWorktree(ctx context.Context, git GitFunc, repoPath, targetPath, b
 	return nil
 }
 
+// ResolveBaseRefWith resolves ref in repoPath as a new worktree's base would
+// be, fetching it from remoteName (default origin) when the repo has that
+// remote, else from the local refs; it fails when ref resolves in neither.
+func ResolveBaseRefWith(ctx context.Context, git GitFunc, repoPath, remoteName, ref string) (string, error) {
+	return resolveFreshBaseRef(ctx, git, repoPath, remoteName, ref)
+}
+
 func resolveFreshBaseRef(ctx context.Context, git GitFunc, repoPath, remoteName, defaultBranch string) (string, error) {
 	defaultBranch = strings.TrimSpace(defaultBranch)
 	if defaultBranch == "" {

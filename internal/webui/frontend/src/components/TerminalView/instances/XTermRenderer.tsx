@@ -111,6 +111,19 @@ export function XTermRenderer({
       scrollback: TERMINAL_SCROLLBACK_LINES,
       theme: readTheme(),
     });
+    // The minified build of xterm 6.0.0's DECRQM handler (requestMode) throws
+    // and freezes the pane (esbuild bug evanw/esbuild#4508); OpenCode 2's TUI
+    // sends DECRQM at start. Answer "not recognized" here; remove when on
+    // xterm >= 6.1 stable or esbuild >= 0.28.2.
+    for (const prefix of ["", "?"]) {
+      terminal.parser.registerCsiHandler(
+        { prefix, intermediates: "$", final: "p" },
+        (params) => {
+          terminal.input(`\x1b[${prefix}${params[0]};0$y`, false);
+          return true;
+        },
+      );
+    }
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
     terminal.open(host);

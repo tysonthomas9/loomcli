@@ -162,6 +162,30 @@ tests:
           exit 1
         intent: "An operator reads back the shell tab metadata and confirms it has no agent launch spec"
 
+  # covers: 2.0y; the minified xterm 6.0.0 DECRQM handler threw and froze the pane
+  # on the first mode query, which OpenCode 2's TUI sends at start.
+  - name: shell tab keeps rendering after DECRQM mode queries
+    intent: An operator runs a program that asks the terminal which modes it supports, and the pane keeps showing later output
+    steps:
+      - open: /ws/E2E-WS-LEAD/terminal
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('[data-testid^="terminal-tab-label-"]'))
+              .map((n) => (n.textContent || '').trim()).includes('lead-shell-1')
+        intent: "Wait until the shell tab from the previous case is listed"
+      - click: { text: "lead-shell-1", exact: true }
+      - wait:
+          fn: >-
+            !!document.querySelector('[role=tabpanel][aria-hidden="false"] .xterm')
+        intent: "Wait until the shell pane renders a terminal grid"
+      - fill: { label: "Terminal input", value: "printf '\\033[?2026$p\\033[4$p'; echo DECRQM-$((6*7))" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[role=tabpanel][aria-hidden="false"] .xterm-rows')?.textContent || '').includes('DECRQM-42')
+        budget: 40000
+        intent: "Wait until the pane shows output printed after the mode queries"
+
   # covers: LED-D1; CreateAgentModal lead template; GET /api/workspaces/:ws/agents; role list; no lead worktree
   - name: lead template creates an interactive lead agent and role
     intent: An operator creates a Lead agent through CreateAgentModal and verifies the stored agent, role, and absence of an agent worktree
@@ -344,69 +368,44 @@ tests:
           exit 1
         intent: "An operator reads back the Claude lead terminal launch contract from the agent session endpoint"
 
-  # covers: LED-D3; CreateAgentModal lead repo scope; cross_repo and repos readbacks
-  - name: lead repo scope round trips workspace-wide and pinned choices
-    intent: An operator creates one workspace-wide Lead and one repo-pinned Lead and verifies the derived repo scope on both agent records
+  # covers: LED-D3; CreateAgentModal lead repo requirement; repo hint and empty-repo refusal
+  - name: lead repo scope requires a repo and refuses an empty choice
+    intent: An operator picking a Lead sees that it needs a repo, and clearing the repo chip makes submit refuse with the pick-a-repo error instead of creating a workspace-wide Lead
     steps:
       - open: /ws/E2E-WS-LEAD/agents
       - wait:
           fn: *agentsPageReady
-        intent: "Wait until the agents page is ready for workspace-wide lead creation"
+        intent: "Wait until the agents page is ready for the lead repo requirement check"
       - click: { role: button, name: "+ Add agent", exact: true }
       - wait:
           fn: *createAgentDialogOpen
         intent: "Wait until the agent creation dialog is open"
       - click: { testid: create-agent-template-lead }
-      - fill: { testid: create-agent-name, value: "atlas-all-${RUN_ID:-local}" }
+      - fill: { testid: create-agent-name, value: "atlas-norepo-${RUN_ID:-local}" }
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=create-agent-overlay]')?.textContent || '').includes('Pick the repo this lead works in.')
+        intent: "Wait until the lead repo hint is rendered with the preselected repo"
+      - expect: { text: "Pick the repo this lead works in." }
       - click: { selector: "[data-testid='create-agent-repo-chips'] button", first: true }
       - wait:
           fn: >-
             (() => {
-              const text = document.body.textContent.replace(/\s+/g, ' ');
-              return text.includes('No repo selected — the agent gets workspace-wide scope.');
+              const text = (document.querySelector('[data-testid=create-agent-overlay]')?.textContent || '').replace(/\s+/g, ' ');
+              return !document.querySelector("[data-testid='create-agent-repo-chips'] button[aria-pressed='true']") &&
+                text.includes('Pick the repo this lead works in.') &&
+                !text.includes('workspace-wide scope');
             })()
-        intent: "Wait until the workspace-wide scope copy is rendered after clearing the repo chip"
-      - expect: { text: "No repo selected — the agent gets workspace-wide scope." }
+        intent: "Wait until the repo chip is cleared and the lead hint still asks for a repo without offering workspace-wide scope"
       - click: { testid: create-agent-submit }
       - wait:
           fn: >-
-            !document.querySelector('[data-testid=create-agent-overlay]') &&
-            document.body.textContent.includes('atlas-all-${RUN_ID:-local}')
-        intent: "Wait until the workspace-wide lead appears after submit"
-      - click: { role: button, name: "+ Add agent", exact: true }
-      - wait:
-          fn: *createAgentDialogOpen
-        intent: "Wait until the agent creation dialog is open for the pinned lead"
-      - click: { testid: create-agent-template-lead }
-      - fill: { testid: create-agent-name, value: "atlas-pin-${RUN_ID:-local}" }
-      - click: { testid: create-agent-submit }
-      - wait:
-          fn: >-
-            !document.querySelector('[data-testid=create-agent-overlay]') &&
-            document.body.textContent.includes('atlas-pin-${RUN_ID:-local}')
-        intent: "Wait until the repo-pinned lead appears after submit"
-      - run: |
-          set -e
-          run="${RUN_ID:-local}"
-          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-LEAD/agents" > "$AFT_WORK_DIR/lead-d3-agents.json"
-          python3 - "$AFT_WORK_DIR/lead-d3-agents.json" "atlas-all-$run" "atlas-pin-$run" <<'PY'
-          import json, sys
-          d = json.load(open(sys.argv[1]))
-          data = d.get("data", d)
-          agents = data.get("agents") if isinstance(data, dict) else data
-          by_name = {a.get("name"): a for a in agents or []}
-          all_name, pin_name = sys.argv[2], sys.argv[3]
-          assert all_name in by_name and pin_name in by_name, agents
-          all_agent = by_name[all_name]
-          pin_agent = by_name[pin_name]
-          assert all_agent.get("role_name") == "lead", all_agent
-          assert all_agent.get("cross_repo") is True, all_agent
-          assert (all_agent.get("repos") or []) == [], all_agent
-          assert pin_agent.get("role_name") == "lead", pin_agent
-          assert not pin_agent.get("cross_repo"), pin_agent
-          assert pin_agent.get("repos") == ["lead-repo"], pin_agent
-          PY
-        intent: "An operator's readback confirms lead repo-scope choices persisted with omitempty-safe booleans"
+            (document.querySelector('[data-testid=create-agent-error]')?.textContent || '').includes('Pick a repo for the lead to work in.')
+        intent: "Wait until submit with no repo is refused with the pick-a-repo error"
+      - expect: { visible: { testid: create-agent-error } }
+      - expect: { text: "Pick a repo for the lead to work in." }
+      - expect: { visible: { testid: create-agent-overlay } }
+      - click: { testid: create-agent-close }
 
   # covers: LED-D4; CreateAgentModal lead name validation; normalized uppercase positive control
   - name: lead name validation blocks invalid submit

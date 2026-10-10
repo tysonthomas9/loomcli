@@ -558,6 +558,87 @@ stop_fake_github() {
     FAKE_GH_PID=""
 }
 
+# Real OpenCode for the Agent API suites (agents-v1-*): the pinned build (R22:
+# 2.0.19, b30c4d0) driven by 2.0d's scripted fake model, so no paid model runs.
+# Deterministic tier only, and only serve's environment changes: OpenCode's XDG
+# roots point at an owned /tmp sandbox whose opencode.json routes provider "aft"
+# to the fake model. The product itself still reads the user's own config (R1).
+# LOOM_HARNESS_EMU=1 is the one switch for emulator mode (R28/R29), in the
+# deterministic tier only: it builds the test-only OpenCode emulator
+# (cmd/loom-harness-emu), which refuses to run without that switch, puts it
+# in place of the pinned build, as LOOM_OPENCODE_BIN and as `opencode` ahead
+# of the stub farm on serve's PATH, and points it at the same fake model.
+EMU_BIN_DIR=""
+case "${LOOM_HARNESS_EMU:-}" in
+    "") ;;
+    1)  if [[ -n "${AFT_REAL_BACKEND:-}" || -n "$AFT_LIVE" ]]; then
+            echo "[aft] LOOM_HARNESS_EMU=1 runs only the deterministic tier" >&2; exit 1
+        fi
+        EMU_BIN_DIR="$REPORT_DIR/emu-bin"
+        mkdir -p "$EMU_BIN_DIR"
+        (cd "$REPO_ROOT" && go build -o "$EMU_BIN_DIR/opencode" ./cmd/loom-harness-emu) || exit 1
+        LOOM_OPENCODE_BIN="$EMU_BIN_DIR/opencode" ;;
+    *)  echo "[aft] LOOM_HARNESS_EMU must be 1 or unset" >&2; exit 1 ;;
+esac
+: "${LOOM_OPENCODE_BIN:=$HOME/.loom/harness/opencode/2.0.19/opencode}"
+FAKE_MODEL_PID=""
+OPENCODE_SBX=""
+OPENCODE_ENV=()
+
+start_fake_model() {
+    local log="$REPORT_DIR/fake-model.log" port="" svc
+    if [[ ! -x "$LOOM_OPENCODE_BIN" ]]; then
+        echo "[aft] no pinned OpenCode at $LOOM_OPENCODE_BIN; agents-v1 suites will fail" >&2
+        return 0
+    fi
+    : > "$log"
+    # The physical path: the fixture serves only when argv[1] is its own file.
+    node "$(cd "$SCRIPT_DIR/fixtures/fake-model" && pwd -P)/server.mjs" >>"$log" 2>&1 &
+    FAKE_MODEL_PID=$!
+    for _ in $(seq 1 30); do
+        port="$(grep -oE 'listening [0-9]+' "$log" 2>/dev/null | awk '{print $2}' | head -1)"
+        [[ -n "$port" ]] && break
+        sleep 0.5
+    done
+    [[ -n "$port" ]] || { echo "[aft] fake-model never reported a port" >&2; tail -20 "$log" >&2; return 1; }
+    export AFT_FAKE_MODEL_URL="http://127.0.0.1:$port"
+    OPENCODE_SBX="$(cd "$(mktemp -d /tmp/loom-aft-opencode.XXXXXX)" && pwd -P)"
+    export AFT_OPENCODE_SERVICE="$OPENCODE_SBX/state/opencode/service.json"
+    mkdir -p "$OPENCODE_SBX/config/opencode"
+    # Its own port, never the default where the user's own service binds.
+    svc="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')"
+    printf '{"port":%s}\n' "$svc" > "$OPENCODE_SBX/config/opencode/service.json"
+    cat > "$OPENCODE_SBX/config/opencode/opencode.json" <<JSON
+{"provider":{"aft":{"name":"AFT fake","npm":"@ai-sdk/openai-compatible",
+  "options":{"baseURL":"$AFT_FAKE_MODEL_URL/v1","apiKey":"x"},
+  "models":{"m":{"name":"M","limit":{"context":100000,"output":4000}}}}},"model":"aft/m"}
+JSON
+    # GOCACHE is pinned because Go reads XDG_CACHE_HOME on Linux and serve's
+    # start script builds loom.
+    # LOOM_AGENT_HISTORY_RETENTION shortens R29 retention, and its sweep, to
+    # a minute so agents-v1-lifecycle can watch the real sweep expire history.
+    OPENCODE_ENV=(LOOM_OPENCODE_BIN="$LOOM_OPENCODE_BIN" GOCACHE="$(go env GOCACHE)" OPENCODE_DISABLE_MODELS_FETCH=1
+        LOOM_AGENT_HISTORY_RETENTION=60s
+        XDG_CONFIG_HOME="$OPENCODE_SBX/config" XDG_DATA_HOME="$OPENCODE_SBX/data"
+        XDG_STATE_HOME="$OPENCODE_SBX/state" XDG_CACHE_HOME="$OPENCODE_SBX/cache")
+    if [[ -n "$EMU_BIN_DIR" ]]; then
+        export AFT_EMU_SCENARIOS="$OPENCODE_SBX/emu-scenarios.json"
+        OPENCODE_ENV+=(LOOM_HARNESS_EMU=1 LOOM_HARNESS_EMU_MODEL="$AFT_FAKE_MODEL_URL/v1"
+            LOOM_HARNESS_EMU_SCENARIOS="$AFT_EMU_SCENARIOS")
+    fi
+    echo "[aft] fake-model ready at $AFT_FAKE_MODEL_URL; OpenCode sandbox $OPENCODE_SBX"
+}
+
+# The OpenCode service outlives loom serve by design (shared service mode).
+stop_fake_model() {
+    local pid
+    pid="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "${AFT_OPENCODE_SERVICE:-}" 2>/dev/null || true)"
+    if [[ -n "$pid" ]]; then kill "$pid" 2>/dev/null || true; fi
+    if [[ -n "$FAKE_MODEL_PID" ]]; then kill "$FAKE_MODEL_PID" 2>/dev/null || true; wait "$FAKE_MODEL_PID" 2>/dev/null || true; fi
+    if [[ -n "$OPENCODE_SBX" ]]; then rm -rf "$OPENCODE_SBX"; fi
+    FAKE_MODEL_PID="" OPENCODE_SBX=""
+}
+
 DAEMON_PID=""
 DAEMON_PID_FILE="$REPORT_DIR/daemon.pid"
 DAEMON_LOG="$REPORT_DIR/daemon.log"
@@ -686,6 +767,7 @@ cleanup() {
         kill "$SERVER_PID" 2>/dev/null || true   # fires the script's own trap (kills loom + preview)
         wait "$SERVER_PID" 2>/dev/null || true
     fi
+    stop_fake_model   # after serve, which would otherwise start a new service
     if [[ "$LOCK_WRITTEN" == "1" ]]; then
         # belt-and-braces, but only our-signature listeners on this run's ports
         for port in "$E2E_PORT" "$E2E_FRONTEND_PORT"; do
@@ -744,10 +826,12 @@ else
     # 503 egress_unavailable contract into a live connector-seed + egress attempt
     # with the operator's real PAT. The deterministic tier also needs no Gemini keys.
     # Load-bearing: the seed resolver's fallback reads a sealed settings credential; that is only safe because scripts/start-e2e-server.sh exports LOOM_CONFIG_DIR to tmp/e2e-workspace/.loom-config (wiped per run) — do not remove that export.
-    SERVER_PATH="$REPO_ROOT/e2e/stubs:$PATH"
-    assert_server_cli_closure "$SERVER_PATH" "$REPO_ROOT/e2e/stubs" || exit 1
+    SERVER_PATH="${EMU_BIN_DIR:+$EMU_BIN_DIR:}$REPO_ROOT/e2e/stubs:$PATH"
+    assert_server_cli_closure "$SERVER_PATH" "$REPO_ROOT/e2e/stubs" "$EMU_BIN_DIR" || exit 1
+    start_fake_model || exit 1
     env -u LOOM_WEBUI_GITHUB_TOKEN -u GH_TOKEN -u GITHUB_TOKEN \
         -u GEMINI_API_KEY -u GOOGLE_API_KEY \
+        ${OPENCODE_ENV[@]+"${OPENCODE_ENV[@]}"} \
         E2E_PORT="$E2E_PORT" E2E_FRONTEND_PORT="$E2E_FRONTEND_PORT" FLEET_DB_REPO="$FLEET_DB_REPO" \
         PATH="$SERVER_PATH" OPENAI_API_KEY="stub-e2e" FLUE_REPO="$FLUE_REPO" \
         ${FAKE_GH_BASE:+LOOM_CONNECTOR_GITHUB_BASE_URL="$FAKE_GH_BASE"} \

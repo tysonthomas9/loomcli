@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"slices"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
@@ -18,6 +19,7 @@ var dispatchCrash = func(string) {}
 const (
 	AttentionHarnessUnavailable = "harness_unavailable"
 	AttentionDeliveryUnknown    = "delivery_unknown"
+	AttentionReplyUnknown       = "reply_unknown" // an answer's Reply may not have landed
 )
 
 // defaultInputKey is the native input key when ServiceConfig.InputKey is nil:
@@ -35,7 +37,7 @@ func defaultInputKey(_, agentID, requestID string) string {
 // delivered, not found puts it back in line, unknown raises Attention
 // delivery_unknown and sends nothing.
 func (s *Service) Dispatch(ctx context.Context, agentID string) error {
-	defer s.lock(agentID)()
+	defer s.lockReady(ctx, agentID)()
 	a, err := s.live(ctx, agentID)
 	if err != nil {
 		return err
@@ -77,6 +79,9 @@ func takes(a loomstore.Agent) bool {
 
 // dispatch is Dispatch with the agent lock held.
 func (s *Service) dispatch(ctx context.Context, a loomstore.Agent) (loomstore.Agent, error) {
+	if err := s.deliverCompletions(ctx, a); err != nil {
+		return a, err
+	}
 	if !takes(a) {
 		return a, nil
 	}
@@ -89,7 +94,7 @@ func (s *Service) dispatch(ctx context.Context, a loomstore.Agent) (loomstore.Ag
 			continue
 		}
 		var ok bool
-		if a, ok, err = s.recoverHanded(ctx, a, sl); err != nil || !ok {
+		if a, ok, err = s.recoverHanded(ctx, a, sl, slots); err != nil || !ok {
 			return a, err
 		}
 		if slots, err = s.store.Slots(ctx, a.AgentID); err != nil {
@@ -110,7 +115,7 @@ func (s *Service) dispatch(ctx context.Context, a loomstore.Agent) (loomstore.Ag
 // recoverHanded settles a message a crash left handed. It returns true when
 // no turn runs from it and dispatch may go on: it never landed and is back
 // in line, or it landed and its turn already ended.
-func (s *Service) recoverHanded(ctx context.Context, a loomstore.Agent, sl loomstore.Slot) (loomstore.Agent, bool, error) {
+func (s *Service) recoverHanded(ctx context.Context, a loomstore.Agent, sl loomstore.Slot, slots []loomstore.Slot) (loomstore.Agent, bool, error) {
 	sess, _, err := s.current(ctx, a)
 	if err != nil || sess == nil {
 		return a, false, errors.Join(err, &Error{Code: CodeHarnessUnavailable, Message: a.Harness + " is not available"})
@@ -121,7 +126,7 @@ func (s *Service) recoverHanded(ctx context.Context, a loomstore.Agent, sl looms
 	}
 	switch landed {
 	case loomharness.LandedFound:
-		if err := s.store.MarkDelivered(ctx, a.AgentID, sl.Sender, sl.RequestID); err != nil {
+		if err := s.settleInput(ctx, a.AgentID, slots, deref(sl.NativeKey), s.store.MarkDelivered); err != nil {
 			return a, false, err
 		}
 		st, err := sess.Status(ctx)
@@ -142,7 +147,7 @@ func (s *Service) recoverHanded(ctx context.Context, a loomstore.Agent, sl looms
 		a, err = s.setState(ctx, a, to)
 		return a, false, err
 	case loomharness.LandedNotFound:
-		return a, true, s.store.Requeue(ctx, a.AgentID, sl.Sender, sl.RequestID)
+		return a, true, s.settleInput(ctx, a.AgentID, slots, deref(sl.NativeKey), s.store.Requeue)
 	}
 	if deref(a.AttentionReason) == AttentionDeliveryUnknown {
 		return a, false, nil
@@ -173,7 +178,7 @@ func (s *Service) handOff(ctx context.Context, a loomstore.Agent) (loomstore.Age
 	}
 	dispatchCrash("handed")
 	if err := sess.Prompt(ctx, loomharness.Input{Key: *sl.NativeKey, Text: sl.Body}); err != nil {
-		return a, harnessErr(err)
+		return a, openErr(err) // a bad request is not retried
 	}
 	dispatchCrash("prompted")
 	to := a.StateOf()
@@ -185,6 +190,20 @@ func (s *Service) handOff(ctx context.Context, a loomstore.Agent) (loomstore.Age
 		to.AttentionReason = nil
 	}
 	return s.setState(ctx, a, to)
+}
+
+// settleInput applies f (MarkDelivered or Requeue) to every one of slots
+// handed with native key key: the slots of one input.
+func (s *Service) settleInput(ctx context.Context, agentID string, slots []loomstore.Slot, key string,
+	f func(ctx context.Context, agentID, sender, requestID string) error) error {
+	for _, sl := range slots {
+		if sl.State == loomstore.SlotHanded && deref(sl.NativeKey) == key {
+			if err := f(ctx, agentID, sl.Sender, sl.RequestID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // HarnessEvent applies one harness event of agentID's current session to its
@@ -225,89 +244,192 @@ func (s *Service) turnStarted(ctx context.Context, a loomstore.Agent, e loomharn
 	return err
 }
 
-// delivered marks a's handed message with native key key delivered.
+// delivered marks a's handed input with native key key delivered: every
+// slot handed with it (OR4c batches records into one input).
 func (s *Service) delivered(ctx context.Context, a loomstore.Agent, key string) error {
 	slots, err := s.store.Slots(ctx, a.AgentID)
 	if err != nil {
 		return err
 	}
-	for _, sl := range slots {
-		if sl.State == loomstore.SlotHanded && deref(sl.NativeKey) == key {
-			return s.store.MarkDelivered(ctx, a.AgentID, sl.Sender, sl.RequestID)
-		}
-	}
-	return nil // already delivered
+	return s.settleInput(ctx, a.AgentID, slots, key, s.store.MarkDelivered) // none: already delivered
 }
 
 // turnCompleted ends a's running turn e. Only the running turn's own
 // completion counts: one for any other turn ID, such as an older turn's late
 // completion, or one before turn.started named the turn, changes nothing.
 func (s *Service) turnCompleted(ctx context.Context, a loomstore.Agent, e loomharness.Event) error {
-	if a.RunningTurnID == nil || *a.RunningTurnID != e.TurnID {
-		return nil // not the running turn
-	}
-	slots, err := s.store.Slots(ctx, a.AgentID)
-	if err != nil {
-		return err
-	}
-	for _, sl := range slots { // a turn that ran had its input delivered
-		if sl.State == loomstore.SlotHanded {
-			if err := s.store.MarkDelivered(ctx, a.AgentID, sl.Sender, sl.RequestID); err != nil {
-				return err
-			}
-		}
-	}
-	if err := s.endTurnAsks(ctx, a, e.TurnID); err != nil {
-		return err
-	}
-	more := slices.ContainsFunc(slots, func(sl loomstore.Slot) bool { return sl.State == loomstore.SlotWaiting })
-	to := a.StateOf()
-	to.RunningTurn, to.WaitingOn = nil, nil
-	switch {
-	case a.State == StateStopping || more:
-	case a.Mode == "single_task":
-		to.State, to.Outcome = StateFinished, &e.StopReason
-	default:
-		to.State = StateIdle
-	}
-	if a, err = s.setState(ctx, a, to); err != nil {
+	a, ended, err := s.endTurn(ctx, a, e)
+	if err != nil || !ended {
 		return err
 	}
 	_, err = s.wake(ctx, a)
 	return err
 }
 
-// RunDispatcher wakes the dispatcher on agent.idle until ctx ends. It first
-// retries purge-pending native sessions and dispatches every agent with a
-// pending slot (a restart), and does so again whenever its subscription lags
-// and is replaced.
-func (s *Service) RunDispatcher(ctx context.Context) {
-	for ctx.Err() == nil {
+// endTurn is turnCompleted without its wake: it reports whether e ended
+// a's running turn. It decides on a and its slots (decideTurnCompleted),
+// then marks the handed input delivered, ends the turn's asks and commits
+// the state.
+func (s *Service) endTurn(ctx context.Context, a loomstore.Agent, e loomharness.Event) (loomstore.Agent, bool, error) {
+	if a.RunningTurnID == nil || *a.RunningTurnID != e.TurnID {
+		return a, false, nil // not the running turn: no store read
+	}
+	slots, err := s.store.Slots(ctx, a.AgentID)
+	if err != nil {
+		return a, false, err
+	}
+	d := decideTurnCompleted(turnInput{Row: a, Slots: slots, Event: e})
+	for _, sl := range d.Deliver {
+		if err := s.store.MarkDelivered(ctx, a.AgentID, sl.Sender, sl.RequestID); err != nil {
+			return a, false, err
+		}
+	}
+	if err := s.endTurnAsks(ctx, a, e.TurnID); err != nil {
+		return a, false, err
+	}
+	a, err = s.setState(ctx, a, d.To)
+	return a, err == nil, err
+}
+
+// turnInput is what decideTurnCompleted decides from: the agent's row, its
+// slots and the turn.completed event.
+type turnInput struct {
+	Row   loomstore.Agent
+	Slots []loomstore.Slot
+	Event loomharness.Event
+}
+
+// turnDecision is a turn completion's decision. Ended: the event ends the
+// row's running turn; then Deliver are the handed slots its input was, now
+// delivered, and To is the row's state after it.
+type turnDecision struct {
+	Ended   bool
+	Deliver []loomstore.Slot
+	To      loomstore.AgentState
+}
+
+// decideTurnCompleted is turn completion's decision, pure: no store or
+// harness call. Only the running turn's own completion counts: one for any
+// other turn ID, such as an older turn's late completion, or one before
+// turn.started named the turn, ends nothing. The turn's handed input was
+// delivered. The turn and any ask it waited on clear; with a message still
+// waiting, or the agent stopping, the state stays for the dispatcher or the
+// stop; else a single task finishes with the turn's stop reason as its
+// outcome and a persistent agent goes idle.
+func decideTurnCompleted(in turnInput) turnDecision {
+	a, e := in.Row, in.Event
+	if a.RunningTurnID == nil || *a.RunningTurnID != e.TurnID {
+		return turnDecision{}
+	}
+	d := turnDecision{Ended: true, To: a.StateOf()}
+	for _, sl := range in.Slots {
+		if sl.State == loomstore.SlotHanded {
+			d.Deliver = append(d.Deliver, sl)
+		}
+	}
+	more := slices.ContainsFunc(in.Slots, func(sl loomstore.Slot) bool { return sl.State == loomstore.SlotWaiting })
+	d.To.RunningTurn, d.To.WaitingOn = nil, nil
+	switch {
+	case a.State == StateStopping || more:
+	case a.Mode == "single_task":
+		d.To.State, d.To.Outcome = StateFinished, &e.StopReason
+	default:
+		d.To.State = StateIdle
+	}
+	return d
+}
+
+// RunDispatcher wakes the dispatcher on agent.idle until ctx ends. With
+// RecoverFirst it first reconciles every wired harness once and then opens
+// the write gate. It then reconciles every lifecycle marker (resync) and
+// dispatches every agent with a pending slot (a restart), and does so again
+// whenever its subscription lags and is replaced. It runs the reconcile
+// queue too. Drain waits for it.
+func (s *Service) RunDispatcher(ctx context.Context) { s.Dispatcher()(ctx) }
+
+// Dispatcher registers s's dispatcher with Drain now and returns
+// RunDispatcher's body, for a caller that runs it on another goroutine, so
+// a Drain right after waits for it. Run the body once; with ctx already
+// done it only ends the registration.
+func (s *Service) Dispatcher() func(context.Context) {
+	l := s.startLoop()
+	return func(ctx context.Context) {
+		defer s.stopLoop(l)
+		if ctx.Err() == nil {
+			s.runDispatcher(ctx, l)
+		}
+	}
+}
+
+// runDispatcher is RunDispatcher as the loop l, which the caller registered.
+func (s *Service) runDispatcher(ctx context.Context, l *loop) {
+	ctx = within(ctx)
+	s.recoverAtStart(ctx)
+	for start := true; ctx.Err() == nil; start = false {
 		sub := s.Bus.Subscribe()
-		_ = s.PurgeLeftovers(ctx)
-		if ids, err := s.store.PendingAgents(ctx); err == nil {
-			for _, id := range ids {
-				_ = s.dispatchWake(ctx, id)
+		s.resync(ctx, start) // what ended before the subscription, or while it lagged
+		if ids, err := s.store.PendingAgents(ctx, s.workspaceID); err == nil {
+			for _, id := range ids { // a restart: settle every agent with a waiting or handed slot
+				s.enqueue(id)
 			}
 		}
-		s.follow(ctx, sub)
+		s.reconcileDue(ctx)
+		l.took() // the sweep is work a Drain must see
+		s.follow(ctx, sub, l)
 		s.Bus.Unsubscribe(sub)
 	}
 }
 
-// follow dispatches on each agent.idle until sub ends or ctx does.
-func (s *Service) follow(ctx context.Context, sub *BusSubscription) {
+// resyncInterval is how often the dispatcher resyncs the reconcile queue:
+// the one recovery clock.
+var resyncInterval = 5 * time.Second
+
+// follow dispatches on each agent.idle and task_completed until sub ends or
+// ctx does, runs the reconcile queue as agents are queued and their
+// backoffs end, resyncs the queue on each tick of s.tick (the recovery
+// resync clock), and answers Drain once sub's queued events and the due
+// reconciles are handled.
+func (s *Service) follow(ctx context.Context, sub *BusSubscription, l *loop) {
+	retry, stop := s.tick(resyncInterval)
+	defer stop()
+	handle := func(e Event) bool {
+		if e.Type == EventStateChanged && (e.To == StateFinished || e.To == StateArchived) {
+			s.enqueue(e.AgentID) // an attempt may have ended: its marker is owed
+		}
+		if e.Type == EventIdle || e.Type == KindTaskCompleted {
+			_ = s.dispatchWake(ctx, e.AgentID)
+		}
+		return true
+	}
 	for {
+		id, backoff := s.nextRetry()
 		select {
 		case <-ctx.Done():
 			return
+		case <-retry:
+			l.took()
+			s.resync(ctx, false)
+			s.reconcileDue(ctx)
+		case <-s.queueWake:
+			l.took()
+			s.reconcileDue(ctx)
+		case <-backoff:
+			l.took()
+			s.fired(id, backoff)
+			s.reconcileDue(ctx)
+		case req := <-l.drain:
+			if s.reconcileDue(ctx) { // a backoff that ended, or an agent queued, is work this Drain must see
+				l.took()
+			}
+			if !settle(l, req, sub.C, handle) {
+				return
+			}
 		case e, ok := <-sub.C:
+			l.took()
 			if !ok {
 				return
 			}
-			if e.Type == EventIdle {
-				_ = s.dispatchWake(ctx, e.AgentID)
-			}
+			handle(e)
 		}
 	}
 }

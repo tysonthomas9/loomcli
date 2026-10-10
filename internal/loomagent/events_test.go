@@ -43,14 +43,6 @@ func kinds(es []loomstore.Event, kind string) []loomstore.Event {
 	return out
 }
 
-// startFeed runs s's feed ingestion on e's harness until the returned stop.
-func startFeed(s *Service, e *createEnv) (stop func()) {
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() { defer close(done); s.RunFeed(ctx, "opencode") }()
-	return func() { cancel(); <-done }
-}
-
 // TestOpenCodeWatchEventsPersistBeforePublish: every event the Bus publishes
 // (agent.state_changed, agent.idle, agent.settled, message.waiting, ...) is
 // already a saved row when a subscriber receives it; agent.turn_completed is
@@ -73,6 +65,10 @@ func TestOpenCodeWatchEventsPersistBeforePublish(t *testing.T) {
 			mu.Lock()
 			seen[ev.Type]++
 			saved := rows(t, s, ev.AgentID, 0)
+			if a, _ := s.store.GetAgent(ctx, ev.AgentID); a.HistoryPurgedAt != nil {
+				mu.Unlock()
+				continue // Delete purged the history: later events are live only
+			}
 			if !slices.ContainsFunc(saved, func(r loomstore.Event) bool { return r.EventID == ev.EventID && r.Kind == ev.Type }) {
 				problems = append(problems, ev.Type+" published before it was saved")
 			}
@@ -82,18 +78,18 @@ func TestOpenCodeWatchEventsPersistBeforePublish(t *testing.T) {
 			mu.Unlock()
 		}
 	}()
-	stop := startFeed(s, e)
+	stop := runFeed(t, s, "opencode")
 	defer stop()
 	a, ref := newLead(t, e, s, "alpha")
 	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Delta: "hi"}, {Ask: "t1"}}})
 	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "first", user))
-	eventually(t, "the ask saved", func() bool { return len(kinds(rows(t, s, a.AgentID, 0), "ask.opened")) == 1 })
+	drained(t, s, "the ask saved", func() bool { return len(kinds(rows(t, s, a.AgentID, 0), "ask.opened")) == 1 })
 	if err := fh.Session(ref).Reply(ctx, "t1", loomharness.Reply{Allow: true}); err != nil {
 		t.Fatal(err)
 	}
-	eventually(t, "idle", func() bool { return len(kinds(rows(t, s, a.AgentID, 0), EventIdle)) == 1 })
+	drained(t, s, "idle", func() bool { return len(kinds(rows(t, s, a.AgentID, 0), EventIdle)) == 1 })
 	idleRows := len(rows(t, s, a.AgentID, 0))
-	if err := s.backfill(ctx, "opencode"); err != nil { // a repeat of the whole native history
+	if _, err := s.backfill(ctx, "opencode"); err != nil { // a repeat of the whole native history
 		t.Fatal(err)
 	}
 	if again := len(rows(t, s, a.AgentID, 0)); again != idleRows {
@@ -112,8 +108,12 @@ func TestOpenCodeWatchEventsPersistBeforePublish(t *testing.T) {
 	if got := len(rows(t, s, a.AgentID, 0)); got != n+1 {
 		t.Fatalf("one event emitted twice saved %d rows", got-n)
 	}
+	saved := rows(t, s, a.AgentID, 0)
 	if err := s.Delete(ctx, DeleteRequest{AgentID: a.AgentID}); err != nil {
 		t.Fatal(err)
+	}
+	if left := rows(t, s, a.AgentID, 0); len(left) != 0 {
+		t.Fatalf("Delete left %d saved events", len(left))
 	}
 	stop()
 	s.Bus.Unsubscribe(bus)
@@ -126,8 +126,6 @@ func TestOpenCodeWatchEventsPersistBeforePublish(t *testing.T) {
 			t.Fatalf("no %s published", k)
 		}
 	}
-	all := rows(t, s, a.AgentID, 0)
-	saved := all[:len(all)-len(kinds(all, EventDeleted))] // written after the purge
 	tc := kinds(saved, EventTurnCompleted)
 	if len(tc) != 1 || len(kinds(saved, EventIdle)) != 1 || tc[0].TurnID == "" {
 		t.Fatalf("turn_completed %v idle %d; want one each", tc, len(kinds(saved, EventIdle)))
@@ -151,7 +149,7 @@ func TestOpenCodeWatchReplayAfterRestart(t *testing.T) {
 	e := newCreateEnv(t)
 	fh := e.h.Harness.(*fake.Harness)
 	s1 := e.service(ServiceConfig{})
-	stop1 := startFeed(s1, e)
+	stop1 := runFeed(t, s1, "opencode")
 	a, ref := newLead(t, e, s1, "alpha")
 	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Delta: "one"}}}, fake.Turn{Steps: []fake.Step{{Ask: "t2", Gap: true}}})
 
@@ -167,7 +165,7 @@ func TestOpenCodeWatchReplayAfterRestart(t *testing.T) {
 	cursor := got[len(got)-1].Seq // the watcher reloads here
 
 	mustSendMsg(t, s1, sendReq(a.AgentID, "u2", "second", user)) // its ask misses the live feed
-	eventually(t, "the gap backfilled", func() bool { return len(kinds(rows(t, s1, a.AgentID, 0), "ask.opened")) == 1 })
+	drained(t, s1, "the gap backfilled", func() bool { return len(kinds(rows(t, s1, a.AgentID, 0), "ask.opened")) == 1 })
 	stop1() // serve crashes
 	if err := fh.Session(ref).Reply(ctx, "t2", loomharness.Reply{Allow: true}); err != nil {
 		t.Fatal(err) // the turn ends while Loom is down
@@ -178,11 +176,11 @@ func TestOpenCodeWatchReplayAfterRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stop2 := startFeed(s2, e)
+	stop2 := runFeed(t, s2, "opencode")
 	defer stop2()
-	eventually(t, "the missed turn end backfilled", func() bool { return s2.get(t, a.AgentID).State == StateIdle })
+	drained(t, s2, "the missed turn end backfilled", func() bool { return s2.get(t, a.AgentID).State == StateIdle })
 	mustSendMsg(t, s2, sendReq(a.AgentID, "u3", "third", user)) // live after the restart
-	eventually(t, "turn 3 idle", func() bool { return len(kinds(rows(t, s2, a.AgentID, cursor), EventIdle)) == 2 })
+	drained(t, s2, "turn 3 idle", func() bool { return len(kinds(rows(t, s2, a.AgentID, cursor), EventIdle)) == 2 })
 
 	want := rows(t, s2, a.AgentID, cursor)
 	replayed := recv(t, sub2, len(want))
@@ -199,7 +197,7 @@ func TestOpenCodeWatchReplayAfterRestart(t *testing.T) {
 		t.Fatal("the gap's ask.opened or the down-time ask.resolved is missing")
 	}
 	before := len(rows(t, s2, a.AgentID, 0))
-	_ = s2.backfill(ctx, "opencode")
+	_, _ = s2.backfill(ctx, "opencode")
 	if after := len(rows(t, s2, a.AgentID, 0)); after != before {
 		t.Fatalf("a repeat backfill added %d rows", after-before)
 	}
@@ -273,12 +271,16 @@ func TestOpenCodeEventsBackfillRetriesFailedRead(t *testing.T) {
 	var fails atomic.Int32
 	fails.Store(1)
 	s.harnesses["opencode"] = flaky{e.h, &fails}
-	stop := startFeed(s, e)
-	defer stop()
+	clk := useTestClock(s)
+	runFeed(t, s, "opencode")
 	a, _ := newLead(t, e, s, "alpha")
 	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{{Ask: "t1", Gap: true}}})
 	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "first", user))
-	eventually(t, "the missed ask saved after the failed read", func() bool {
+	settled(t, s) // the gap's backfill failed; the feed backs off
+	if clk.fire() != 1 {
+		t.Fatal("the feed did not back off after the failed backfill")
+	}
+	drained(t, s, "the missed ask saved after the failed read", func() bool {
 		return len(kinds(rows(t, s, a.AgentID, 0), "ask.opened")) == 1
 	})
 	if fails.Load() >= 0 {
@@ -310,22 +312,74 @@ func (closedFeed) Close() error                       { return nil }
 
 // TestOpenCodeEventsBackfillBacksOffOnClosedFeed: a feed that keeps closing,
 // with nothing, a feed.gap or an unowned session's event first, is reopened (and history backfilled)
-// with a doubling backoff, not at a fixed rate: only a live native event
-// resets it. RunFeed still ends at once on ctx cancel.
+// with a doubling backoff up to feedRetryMax, not at a fixed rate: only a
+// live native event resets it. RunFeed still ends at once on ctx cancel,
+// mid-backoff.
 func TestOpenCodeEventsBackfillBacksOffOnClosedFeed(t *testing.T) {
-	retry, retryMax := feedRetry, feedRetryMax
-	feedRetry, feedRetryMax = 10*time.Millisecond, time.Second
-	t.Cleanup(func() { feedRetry, feedRetryMax = retry, retryMax })
+	const reopens = 9 // 200 ms doubled 8 times passes the 30 s cap
+	var want []time.Duration
+	for w := feedRetry; len(want) <= reopens; w = min(2*w, feedRetryMax) {
+		want = append(want, w)
+	}
 	for _, first := range []loomharness.EventType{"", loomharness.EventFeedGap, loomharness.EventItemCompleted} {
 		e := newCreateEnv(t)
 		s := e.service(ServiceConfig{})
+		clk := useTestClock(s)
 		var opened atomic.Int32
 		s.harnesses["opencode"] = closedFeeds{e.h, &opened, first}
-		stop := startFeed(s, e)
-		time.Sleep(600 * time.Millisecond) // a fixed 10 ms retry would open ~60 times
-		stop()
-		if n := opened.Load(); n < 2 || n > 8 {
-			t.Fatalf("first %q: the closed feed was opened %d times in 600 ms; want a doubling backoff (2-8)", first, n)
+		stop := runFeed(t, s, "opencode")
+		for range reopens {
+			settled(t, s) // the feed closed; RunFeed backs off
+			if clk.fire() != 1 {
+				t.Fatalf("first %q: RunFeed did not back off", first)
+			}
 		}
+		settled(t, s)
+		stop()
+		if got := clk.backoffs(); !slices.Equal(got, want) || opened.Load() != reopens+1 {
+			t.Fatalf("first %q: opened %d times, backoffs %v; want %d and %v", first, opened.Load(), got, reopens+1, want)
+		}
+	}
+}
+
+// TestUsageRowCarriesStepTokens: a harness usage event is saved with its
+// step's counts under the payload keys loom usage sums; a turn's other rows
+// carry none.
+func TestUsageRowCarriesStepTokens(t *testing.T) {
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	s := e.service(ServiceConfig{})
+	stop := runFeed(t, s, "opencode")
+	defer stop()
+	a, _ := newLead(t, e, s, "alpha")
+	fh.Script(a.AgentID, fake.Turn{Steps: []fake.Step{
+		{Usage: &loomharness.Usage{InputTokens: 10, OutputTokens: 20, CacheReadTokens: 30, CacheWriteTokens: 40, CostUSD: 0.25}},
+		{Delta: "hi"},
+		{Usage: &loomharness.Usage{InputTokens: 1, OutputTokens: 2}},
+	}})
+	mustSendMsg(t, s, sendReq(a.AgentID, "u1", "go", user))
+	drained(t, s, "idle", func() bool { return len(kinds(rows(t, s, a.AgentID, 0), EventIdle)) == 1 })
+	type tokens struct { // the keys 2.8's reader (cli/cleanup usageTokens) sums
+		In    int64   `json:"inputTokens"`
+		Out   int64   `json:"outputTokens"`
+		Read  int64   `json:"cacheReadTokens"`
+		Write int64   `json:"cacheWriteTokens"`
+		Cost  float64 `json:"costUsd"`
+	}
+	var got []tokens
+	for _, r := range rows(t, s, a.AgentID, 0) {
+		var u tokens
+		if err := json.Unmarshal(r.Payload, &u); err != nil {
+			t.Fatal(err)
+		}
+		if r.Kind == string(loomharness.EventUsage) {
+			got = append(got, u)
+		} else if u != (tokens{}) {
+			t.Errorf("%s row has tokens %+v", r.Kind, u)
+		}
+	}
+	want := []tokens{{10, 20, 30, 40, 0.25}, {1, 2, 0, 0, 0}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("usage rows %+v, want %+v", got, want)
 	}
 }

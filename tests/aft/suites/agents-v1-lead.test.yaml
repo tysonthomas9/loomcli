@@ -1,0 +1,1047 @@
+# Agent API lead chat on the real OpenCode build (R22: 2.0.19, b30c4d0). Only
+# the model is scripted: run-aft.sh routes OpenCode's "aft" provider to 2.0d's
+# fake model ($AFT_FAKE_MODEL_URL), so no paid model runs. The first case is
+# the real-OpenCode CI canary: Create, Send, event replay and restart.
+suite: agents-v1-lead
+classification: { area: agents, feature: agent-api-lead, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: |
+  set -e
+  curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LEAD" >/dev/null || true
+  repo="$AFT_WORK_DIR/agv1-lead-repo"
+  mkdir -p "$repo"
+  git -C "$repo" init -q -b main
+  echo "agents-v1 lead ${RUN_ID:-local}" > "$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" -c user.email=e2e@x -c user.name=e2e commit -q -m init
+  printf '{"name":"e2e-agv1-lead","type":"empty","repos":["%s"]}' "$repo" |
+    curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @- >/dev/null
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-BADREPO" >/dev/null || true
+  bad="$AFT_WORK_DIR/agv1-badrepo-repo"
+  mkdir -p "$bad"
+  git -C "$bad" init -q -b main
+  git -C "$bad" -c user.email=e2e@x -c user.name=e2e commit -q --allow-empty -m init
+  printf '{"name":"e2e-agv1-badrepo","type":"empty","repos":["%s"]}' "$bad" |
+    curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @- >/dev/null
+teardown: |
+  set +e
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LEAD" >/dev/null
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-BADREPO" >/dev/null
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-GHREAD" >/dev/null
+
+tests:
+  - name: canary - an OpenCode lead replies, replays after reload and survives an OpenCode restart
+    intent: An operator chats with an OpenCode lead, sees its streamed reply, reloads to the same transcript, and keeps chatting after the OpenCode service dies
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-LEAD/v1/agents
+          headers: { Idempotency-Key: "agv1-canary-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-canary-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-lead-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1CanaryId
+        intent: "Create an OpenCode lead through the Agent API"
+      - run: |
+          set -e
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" \
+            -d '{"steps":[{"text":"AGV1-REPLY-ONE"}]}' >/dev/null
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-LEAD/chat/$(cat "$AFT_WORK_DIR/agv1CanaryId")"
+        intent: "Script the fake model's next reply and open the lead's chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the chat labels the lead's harness as opencode"
+      - fill: { label: Message, value: "hello lead" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-REPLY-ONE')
+        budget: 90000
+        intent: "Wait until the scripted reply streams into the transcript"
+      - reload: true
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              return t.includes('hello lead') && t.includes('AGV1-REPLY-ONE'); })()
+        intent: "Wait until a reload replays the message and the reply from saved events"
+      - run: |
+          set -e
+          pid="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$AFT_OPENCODE_SERVICE")"
+          echo "$pid" > "$AFT_WORK_DIR/agv1-opencode-pid"
+          kill "$pid"
+          for i in $(seq 1 40); do kill -0 "$pid" 2>/dev/null || break; sleep 0.25; done
+          ! kill -0 "$pid" 2>/dev/null
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" \
+            -d '{"steps":[{"text":"AGV1-REPLY-AFTER-RESTART"}]}' >/dev/null
+        intent: "Kill the OpenCode service Loom started, then script the next reply"
+      - fill: { label: Message, value: "after restart" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-REPLY-AFTER-RESTART')
+        budget: 90000
+        intent: "Wait until the reply arrives from a new OpenCode service"
+      - run: |
+          set -e
+          old="$(cat "$AFT_WORK_DIR/agv1-opencode-pid")"
+          new="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$AFT_OPENCODE_SERVICE")"
+          [ -n "$new" ] && [ "$new" != "$old" ] && kill -0 "$new"
+        intent: "Check that a new OpenCode service process answered"
+
+  - name: the New lead modal creates an OpenCode lead and opens its chat
+    intent: An operator picks the lead template and the OpenCode backend, lands in the new lead's chat and gets a reply
+    steps:
+      - run: |
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" \
+            -d '{"steps":[{"text":"AGV1-MODAL-REPLY"}]}' >/dev/null
+        intent: "Script the fake model's next reply"
+      - open: /ws/E2E-AGV1-LEAD/agents
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('button')).some((b) => (b.textContent || '').trim() === '+ Add agent')
+        intent: "Wait until the agents page offers + Add agent"
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait: { testid: create-agent-overlay }
+      - click: { testid: create-agent-template-lead }
+      - fill: { testid: create-agent-name, value: "agv1-modal-${RUN_ID:-local}" }
+      - select: { testid: create-agent-backend, value: opencode }
+      - click: { testid: create-agent-submit }
+      - wait: { url: "/ws/E2E-AGV1-LEAD/chat/" }
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the chat labels the new lead's harness as opencode"
+      - fill: { label: Message, value: "hello from the modal" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-MODAL-REPLY')
+        budget: 90000
+        intent: "Wait until the scripted reply streams into the transcript"
+
+  - name: the composer works while busy - type twice, edit and clear the waiting bubble, stop the turn
+    intent: While a turn runs, the operator's messages wait in one editable bubble, a cleared message is never delivered, and Stop ends the turn
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-LEAD/v1/agents
+          headers: { Idempotency-Key: "agv1-busy-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-busy-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-lead-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1BusyId
+        intent: "Create an OpenCode lead through the Agent API"
+      - run: |
+          set -e
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" \
+            -d '{"steps":[{"bash":"sleep 120"}]}' >/dev/null
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-LEAD/chat/$(cat "$AFT_WORK_DIR/agv1BusyId")"
+        intent: "Script a shell call that keeps the next turn running and open the lead's chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the chat for the lead is ready"
+      - fill: { label: Message, value: "start a long turn" }
+      - press: Enter
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('form button')).some((b) => b.textContent === 'Stop')
+        budget: 60000
+        intent: "Wait until the turn runs and the composer offers Stop"
+      - fill: { label: Message, value: "first while busy" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              return t.includes('Waiting') && t.includes('first while busy'); })()
+        intent: "Wait until the first busy message shows in a waiting bubble"
+      - fill: { label: Message, value: "second while busy" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              return t.includes('Waiting') && t.includes('second while busy') && !t.includes('first while busy'); })()
+        intent: "Wait until the second message replaces the first in the one waiting bubble"
+      - click: { role: button, name: Edit, exact: true }
+      - expect: { value: { selector: "textarea[aria-label=Message]", equals: "second while busy" } }
+      - fill: { label: Message, value: "edited while busy" }
+      - click: { role: button, name: Save, exact: true }
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              return t.includes('edited while busy') && !t.includes('second while busy'); })()
+        intent: "Wait until the edit replaces the waiting text"
+      - click: { role: button, name: Clear, exact: true }
+      - wait:
+          fn: >-
+            !(document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('Waiting')
+        intent: "Wait until Clear withdraws the waiting bubble"
+      - click: { role: button, name: Stop, exact: true }
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              return /Turn (interrupted|cancelled|canceled|aborted)/.test(t) && !Array.from(document.querySelectorAll('form button')).some((b) => b.textContent === 'Stop'); })()
+        budget: 30000
+        intent: "Wait until Stop ends the turn and the Stop button goes away"
+      - run: |
+          set -e
+          curl -sf "$AFT_FAKE_MODEL_URL/__requests" > "$AFT_WORK_DIR/agv1-busy-requests.json"
+          python3 - "$AFT_WORK_DIR/agv1-busy-requests.json" <<'PY'
+          import json, sys
+          body = json.dumps(json.load(open(sys.argv[1]))["requests"])
+          assert "start a long turn" in body, "the first message never reached the model"
+          for text in ("first while busy", "second while busy", "edited while busy"):
+              assert text not in body, f"a withdrawn waiting message reached the model: {text}"
+          PY
+        intent: "Check that the cleared waiting message never reached the model"
+
+  - name: the New lead modal shows the clear 400 when the repo is not a clone
+    intent: An operator picks a workspace repo that is no longer a git clone; Create is refused with the server's clear repo message, the modal stays open and no lead is made, and an unknown repo gets the same 400
+    steps:
+      - open: /ws/E2E-AGV1-BADREPO/agents
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('button')).some((b) => (b.textContent || '').trim() === '+ Add agent')
+        intent: "Wait until the agents page offers + Add agent"
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait: { testid: create-agent-overlay }
+      - click: { testid: create-agent-template-lead }
+      - fill: { testid: create-agent-name, value: "agv1-badrepo-${RUN_ID:-local}" }
+      - select: { testid: create-agent-backend, value: opencode }
+      - run: |
+          set -e
+          path="$(curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-BADREPO" |
+            python3 -c 'import json,sys; d=json.load(sys.stdin); print((d.get("data") or d)["repos"][0]["path"])')"
+          [ -e "$path/.git" ]
+          mv "$path/.git" "$path/.git-moved"
+        intent: "Make the repo checkout the modal offers no longer a git clone"
+      - click: { testid: create-agent-submit }
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=create-agent-error]')?.textContent || '').includes('is not the absolute path of a repo clone') &&
+            !!document.querySelector('[data-testid=create-agent-overlay]')
+        intent: "Wait until the modal shows the server's clear repo message and stays open"
+      - run: |
+          set -e
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-BADREPO/v1/agents" > "$AFT_WORK_DIR/agv1-badrepo-agents.json"
+          code="$(printf '{"preset":"lead","name":"agv1-unknown-%s","repo":"%s/agv1-no-such-repo","base_ref":"main","overrides":{"harness":"opencode"}}' "${RUN_ID:-local}" "$AFT_WORK_DIR" |
+            curl -s -o "$AFT_WORK_DIR/agv1-unknown-repo.json" -w '%{http_code}' -X POST "$AFT_BASE_URL/api/workspaces/E2E-AGV1-BADREPO/v1/agents" \
+              -H "Content-Type: application/json" -H "Idempotency-Key: agv1-unknown-${RUN_ID:-local}" -d @-)"
+          [ "$code" = 400 ] || { echo "unknown repo answered $code, want 400"; exit 1; }
+          python3 - "$AFT_WORK_DIR/agv1-badrepo-agents.json" "$AFT_WORK_DIR/agv1-unknown-repo.json" <<'PY'
+          import json, sys
+          agents = json.load(open(sys.argv[1])).get("agents") or []
+          assert not agents, f"a refused Create made agents: {agents}"
+          err = json.dumps(json.load(open(sys.argv[2])))
+          assert "preset_invalid" in err and "is not the absolute path of a repo clone" in err, err
+          PY
+        intent: "Check that no lead was made and that an unknown repo gets the same 400"
+
+  - name: a lead calls a Loom bridge tool and the chat shows the call and the reply
+    intent: The lead's model calls loom.agent_list through OpenCode's execute tool, the Loom bridge answers from the Agent API, the chat shows the call as one plain bridge line and the follow-up reply, and the model received the tool's result
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-LEAD/v1/agents
+          headers: { Idempotency-Key: "agv1-bridge-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-bridge-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-lead-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1BridgeId
+        intent: "Create an OpenCode lead through the Agent API"
+      - run: |
+          set -e
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" \
+            -d '{"steps":[{"tool_calls":[{"name":"execute","arguments":{"code":"return await tools.loom.agent_list({})"}}]},{"text":"AGV1-BRIDGE-REPLY"}]}' >/dev/null
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-LEAD/chat/$(cat "$AFT_WORK_DIR/agv1BridgeId")"
+        intent: "Script a Code Mode call of loom.agent_list and the reply after it, and open the lead's chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the chat for the lead is ready"
+      - fill: { label: Message, value: "list your agents" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const c = document.querySelector('[data-testid=chat-transcript]');
+              const t = c?.textContent || '';
+              const b = c?.querySelectorAll('[data-testid=bridge-call]') || [];
+              return b.length === 1 && b[0].dataset.status === 'completed' && b[0].textContent.includes('Listed agents') &&
+                t.indexOf('AGV1-BRIDGE-REPLY') > t.indexOf('Listed agents') && !t.includes('tools.loom.agent_list'); })()
+        budget: 90000
+        intent: "Wait until the chat shows the bridge call as one plain 'Listed agents' line (CL1, no raw Execute input) and then the reply"
+      - run: |
+          set -e
+          curl -sf "$AFT_FAKE_MODEL_URL/__requests" > "$AFT_WORK_DIR/agv1-bridge-requests.json"
+          python3 - "$AFT_WORK_DIR/agv1-bridge-requests.json" <<'PY'
+          import json, sys
+          def text(c):
+              return c if isinstance(c, str) else "".join(p.get("text", "") for p in (c or []) if isinstance(p, dict))
+          results = [text(m.get("content")) for r in json.load(open(sys.argv[1]))["requests"]
+                     for m in r.get("messages", []) if m.get("role") == "tool"]
+          assert any('"agents":[]' in "".join(t.split()) for t in results), f"the model never got agent_list's result: {results}"
+          PY
+        intent: "Check that the model received the bridge's agent list"
+
+  - name: a lead on an unavailable harness is refused clearly and leaves its name free, and the New lead modal defaults to an available harness
+    intent: An operator who asks for a codex lead on a server without codex gets a clear refusal, can retry the same name on OpenCode, and the modal never offers codex for a lead
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-LEAD/v1/agents
+          headers: { Idempotency-Key: "agv1-nocodex-1-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-nocodex-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-lead-repo", base_ref: main, overrides: { harness: codex } }
+          status: 503
+          assert:
+            - path: code
+              equals: harness_unavailable
+            - path: error
+              equals: "codex is not available on this server; use opencode"
+        intent: "Check that a codex lead is refused with a message naming the harness to use"
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-LEAD/v1/agents
+          headers: { Idempotency-Key: "agv1-nocodex-2-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-nocodex-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-lead-repo", base_ref: main, overrides: { harness: opencode } }
+          assert:
+            - path: harness
+              equals: opencode
+        intent: "Check that a retry with the same name on OpenCode is created, not refused as a taken name"
+      - open: /ws/E2E-AGV1-LEAD/agents
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('button')).some((b) => (b.textContent || '').trim() === '+ Add agent')
+        intent: "Wait until the agents page offers + Add agent"
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait: { testid: create-agent-overlay }
+      - click: { testid: create-agent-template-lead }
+      - wait:
+          fn: >-
+            (() => { const s = document.querySelector('[data-testid=create-agent-backend]');
+              return !!s && s.value === 'opencode' && Array.from(s.options).every((o) => o.value !== 'codex'); })()
+        intent: "Wait until the lead's backend defaults to opencode with no codex option"
+      - fill: { testid: create-agent-name, value: "agv1-default-${RUN_ID:-local}" }
+      - click: { testid: create-agent-submit }
+      - wait: { url: "/ws/E2E-AGV1-LEAD/chat/" }
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the chat labels the new lead's harness as opencode"
+
+  - name: R10 github_read with no host GitHub token fails at once as github_unavailable and the lead keeps working
+    intent: A lead whose host has the GitHub reader wired but no GitHub token calls github_read, gets the typed github_unavailable error straight away with no credential in it, and its next turn replies normally
+    steps:
+      - run: |
+          set -e
+          curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-GHREAD" >/dev/null || true
+          repo="$AFT_WORK_DIR/agv1-ghread-repo"
+          mkdir -p "$repo"
+          git -C "$repo" init -q -b main
+          git -C "$repo" -c user.email=e2e@x -c user.name=e2e commit -q --allow-empty -m init
+          git -C "$repo" remote add origin https://github.com/loom-e2e/agv1-ghread.git
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" \
+            -d '{"name":"e2e-agv1-ghread","type":"empty","repos":[]}' >/dev/null
+          printf '{"repos":["%s"]}' "$repo" |
+            curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-AGV1-GHREAD/repos" -H "Content-Type: application/json" -d @- \
+            > "$AFT_WORK_DIR/agv1-ghread-ws.json"
+          python3 - "$AFT_WORK_DIR/agv1-ghread-ws.json" "agv1-ghread-${RUN_ID:-local}" > "$AFT_WORK_DIR/agv1-ghread-create.json" <<'PY'
+          import json, sys
+          r = json.load(open(sys.argv[1]))["data"]["repos"][0]
+          assert r["remote_url"].startswith("https://github.com/"), r
+          print(json.dumps({"preset": "lead", "name": sys.argv[2], "repo": r["path"], "base_ref": r["default_branch"], "overrides": {"harness": "opencode"}}))
+          PY
+          curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-AGV1-GHREAD/v1/agents" -H "Content-Type: application/json" \
+            -H "Idempotency-Key: agv1-ghread-${RUN_ID:-local}" -d @"$AFT_WORK_DIR/agv1-ghread-create.json" |
+            python3 -c 'import json,sys; print(json.load(sys.stdin)["agent_id"])' > "$AFT_WORK_DIR/agv1GhReadId"
+        intent: "Add a repo whose origin is on GitHub to a new workspace, and create an OpenCode lead on the workspace's copy"
+      - run: |
+          set -e
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          python3 -c 'import json; code="return await tools.loom.github_read({\"op\": \"repo_view\"})"
+          print(json.dumps({"steps": [{"tool_calls": [{"name": "execute", "arguments": {"code": code}}]}, {"text": "AGV1-GH-DONE"}, {"text": "AGV1-GH-AFTER"}]}))' |
+            curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" -d @- >/dev/null
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-GHREAD/chat/$(cat "$AFT_WORK_DIR/agv1GhReadId")"
+        intent: "Script the lead's github_read call and the replies after it, and open the lead's chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the chat labels the lead's harness as opencode"
+      - fill: { label: Message, value: "read the repo on GitHub" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-GH-DONE')
+        budget: 30000
+        intent: "Wait until the turn with the github_read call ends promptly"
+      - run: |
+          set -e
+          curl -sf "$AFT_FAKE_MODEL_URL/__requests" > "$AFT_WORK_DIR/agv1-ghread-requests.json"
+          python3 - "$AFT_WORK_DIR/agv1-ghread-requests.json" <<'PY'
+          import json, sys
+          reqs = json.load(open(sys.argv[1]))["requests"]
+          text = [json.dumps(r) for r in reqs]
+          hits = [t for t in text if "github_unavailable" in t]
+          assert hits, "no model request carried a github_unavailable tool result"
+          assert "GitHub is not configured on this Loom host" in hits[0], hits[0][-600:]
+          for bad in ("ghp_", "github_pat_", "Bearer ", "Authorization"):
+              assert not any(bad in t for t in hits), "the tool result carries " + bad
+          PY
+        intent: "Check that the model got the typed github_unavailable result, with no credential in it"
+      - fill: { label: Message, value: "hello after github" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-GH-AFTER')
+        budget: 90000
+        intent: "Wait until the lead's next turn replies normally"
+
+  - name: the New lead modal says why Create is disabled for an invalid name
+    intent: An operator who types "My Lead" sees the name rule under the Name field with Create disabled, and fixing the name clears the message and enables Create
+    steps:
+      - open: /ws/E2E-AGV1-LEAD/agents
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('button')).some((b) => (b.textContent || '').trim() === '+ Add agent')
+        intent: "Wait until the agents page offers + Add agent"
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait: { testid: create-agent-overlay }
+      - click: { testid: create-agent-template-lead }
+      - fill: { testid: create-agent-name, value: "My Lead" }
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=create-agent-name-error]')?.textContent || '').includes('lowercase letters, numbers, hyphens') &&
+            document.querySelector('[data-testid=create-agent-submit]')?.disabled === true
+        intent: "Wait until the Name field shows the name rule and Create is disabled"
+      - fill: { testid: create-agent-name, value: "my-lead-${RUN_ID:-local}" }
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=create-agent-name-error]') &&
+            document.querySelector('[data-testid=create-agent-submit]')?.disabled === false
+        intent: "Wait until a valid name clears the message and enables Create"
+
+  - name: UI3 - the lead chat shows grouped tool calls with input, output and error, a markdown table and a highlighted code block
+    intent: An operator watches a lead run a command and a failing read, sees one summary row for both calls that expands to each call's input and output with the failure marked, and reads the reply's table as a table and its Go code as a highlighted block, before and after a reload
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-LEAD/v1/agents
+          headers: { Idempotency-Key: "agv1-ui3-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-ui3-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-lead-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1Ui3Id
+        intent: "Create an OpenCode lead through the Agent API"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1Ui3Id")"
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          python3 - "$id" "${AFT_EMU_SCENARIOS:-}" "$AFT_FAKE_MODEL_URL" <<'PY'
+          import json, sys, urllib.request
+          agent, scenarios, model = sys.argv[1:4]
+          reply = ("Files:\n\n| Name | Lines |\n| --- | ---: |\n| README.md | 1 |\n\n"
+                   "```go\nfunc main() {\n\treturn\n}\n```\n\nAGV1-UI3-REPLY")
+          if scenarios:
+              # The emulator runs no tools itself: the turn's calls and their results are scripted.
+              # The failed read comes first, so a group shows a failure that is not its last call.
+              turn = {"tools": [
+                  {"id": "call_ui3_read", "name": "read", "input": {"filePath": "missing-ui3.txt"},
+                   "output": "", "fail": "File not found: missing-ui3.txt"},
+                  {"id": "call_ui3_ls", "name": "shell", "input": {"command": "ls"}, "output": "README.md"}], "text": reply}
+              think = {"reasoning": "AGV1-UI3-THINKING weigh the files", "text": "AGV1-UI3-DONE"}
+              json.dump({agent: [turn, think]}, open(scenarios, "w"))
+          else:
+              steps = [{"tool_calls": [{"name": "read", "arguments": {"filePath": "missing-ui3.txt"}},
+                                       {"name": "shell", "arguments": {"command": "ls"}}]},
+                       {"text": reply}, {"text": "AGV1-UI3-DONE"}]
+              req = urllib.request.Request(model + "/__script", data=json.dumps({"steps": steps}).encode(),
+                                           headers={"Content-Type": "application/json"})
+              urllib.request.urlopen(req).read()
+          PY
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-LEAD/chat/$id"
+        intent: "Script a turn that reads a missing file, runs ls and replies with a table and Go code, then a turn that reasons, and open the lead's chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the chat for the lead is ready"
+      - fill: { label: Message, value: "show me the files" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]');
+              const g = t?.querySelector('[data-testid=tool-group]');
+              return !!g && g.textContent.includes('Read 1 file and ran 1 command') && g.textContent.includes('Tool calls (2)') &&
+                (g.getAttribute('aria-label') || '').includes('tool call failed') &&
+                (t.textContent || '').indexOf('AGV1-UI3-REPLY') > (t.textContent || '').indexOf('Read 1 file'); })()
+        budget: 90000
+        intent: "Wait until both calls show as one summary row, marked failed though the failure is not the last call, before the reply"
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]');
+              const cells = Array.from(t?.querySelectorAll('table td') || []).map((c) => c.textContent);
+              const code = t?.querySelector('[data-testid=chat-codeblock][data-language=go]');
+              return cells.includes('README.md') && cells.includes('1') && !(t.textContent || '').includes('| Name |') &&
+                !!code && (code.textContent || '').includes('func main()') && !!code.querySelector('pre code span'); })()
+        intent: "Wait until the reply's table renders as a table and its Go code as a highlighted code block"
+      - wait:
+          fn: >-
+            (() => { window.__ui3Copied = [];
+              Object.defineProperty(navigator, 'clipboard', { configurable: true,
+                value: { writeText: async (s) => { window.__ui3Copied.push(s); } } });
+              return true; })()
+        intent: "Record clipboard writes, so each copy action's text can be checked in a headless browser"
+      - click: { role: button, name: "Copy code", exact: true }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=chat-codeblock] button[aria-label="Copied"]') &&
+            window.__ui3Copied.includes('func main() {\n\treturn\n}')
+        intent: "Wait until the code block's copy shows Copied and copied the code"
+      - click: { role: button, name: "Copy as Markdown", exact: true }
+      - wait:
+          fn: >-
+            window.__ui3Copied.includes('| Name | Lines |\n| --- | ---: |\n| README.md | 1 |')
+        intent: "Wait until the table copied as Markdown"
+      - click: { role: button, name: "Copy message", exact: true }
+      - wait:
+          fn: >-
+            window.__ui3Copied.some((s) => s.startsWith('Files:') && s.includes('AGV1-UI3-REPLY')) &&
+            !!document.querySelector('button[aria-label="Copied"]')
+        intent: "Wait until the message copy shows Copied and copied the message's markdown"
+      - click: { testid: tool-group }
+      - wait:
+          fn: >-
+            (() => { const calls = Array.from(document.querySelectorAll('[data-testid=tool-call]'));
+              return calls.length === 2 && calls[0].dataset.status === 'failed' && !!calls[0].querySelector('[aria-label="Tool call failed"]') &&
+                calls[1].dataset.status === 'completed' && (calls[1].textContent || '').includes('ls'); })()
+        intent: "Wait until the group expands to the failed read and the ls call"
+      - click: { selector: "[data-testid=tool-call][data-status=completed] [role=button]" }
+      - wait:
+          fn: >-
+            (() => { const c = document.querySelector('[data-testid=tool-call][data-status=completed]')?.textContent || '';
+              return c.includes('Input') && c.includes('"command": "ls"') && c.includes('Output') && c.includes('README.md'); })()
+        intent: "Wait until the ls call shows its input and output"
+      - click: { selector: "[data-testid=tool-call][data-status=failed] [role=button]" }
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=tool-call][data-status=failed]')?.textContent || '').includes('Error')
+        intent: "Wait until the failed read shows its error"
+      - fill: { label: Message, value: "think it over" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-UI3-DONE')
+        budget: 90000
+        intent: "Wait until the second turn replies"
+      - run: |
+          set -e
+          if [ -z "${AFT_EMU_SCENARIOS:-}" ]; then
+            echo "real tier: the fake model emits no reasoning; the Thinking row is checked on the emulator tier"
+            exit 0
+          fi
+          ab() { agent-browser --session "$AFT_SESSION" "$@"; }
+          row='[data-testid=reasoning] [role=button]'
+          preview="$(ab eval "document.querySelector('$row')?.textContent || ''")"
+          echo "reasoning row: $preview"
+          case "$preview" in *Thinking*AGV1-UI3-THINKING*) ;; *) echo "no Thinking row with the reasoning preview" >&2; exit 1 ;; esac
+          # The row can sit under the composer; click it where it shows.
+          ab eval "document.querySelector('$row').scrollIntoView({ block: 'center' })" >/dev/null
+          ab click "$row" >/dev/null
+          body="$(ab eval "document.querySelector('[data-testid=reasoning] pre')?.textContent || ''")"
+          echo "reasoning body: $body"
+          case "$body" in *"AGV1-UI3-THINKING weigh the files"*) ;; *) echo "the Thinking row did not expand to the reasoning" >&2; exit 1 ;; esac
+        intent: "On the emulator, the turn's reasoning shows as a Thinking row that expands to the reasoning text"
+      - reload: true
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]');
+              return (t?.querySelector('[data-testid=tool-group]')?.textContent || '').includes('Read 1 file and ran 1 command') &&
+                !!t.querySelector('table') && !!t.querySelector('[data-testid=chat-codeblock][data-language=go]') &&
+                (t.textContent || '').includes('AGV1-UI3-DONE'); })()
+        intent: "Wait until a reload replays the summary row, the table, the code block and the second reply from saved events"
+
+  - name: UI1 the model catalog lists the lead's models with effort, and PATCH effort is checked and used by the next turn
+    intent: An operator (or the UI's picker) reads OpenCode's model catalog, sets the lead's reasoning effort, sees a bad value refused with the allowed ones, and the lead's next reply runs at that effort
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-LEAD/v1/agents
+          headers: { Idempotency-Key: "agv1-effort-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-effort-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-lead-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1EffortId
+        intent: "Create an OpenCode lead through the Agent API"
+      - run: |
+          set -e
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LEAD/v1/harnesses/opencode/models" > "$AFT_WORK_DIR/agv1-models.json"
+          python3 - "$AFT_WORK_DIR/agv1-models.json" <<'PY'
+          import json, sys
+          cat = json.load(open(sys.argv[1]))
+          assert cat["harness"] == "opencode" and cat["providers"], cat
+          models = [m for p in cat["providers"] for m in p["models"]]
+          default = [m for m in models if m["is_default"]]
+          assert len(default) == 1, f"want one default model: {models}"
+          effort = [d for d in default[0]["option_descriptors"] if d["id"] == "effort"]
+          assert effort and effort[0]["type"] == "select", default[0]
+          ids = [o["id"] for o in effort[0]["options"]]
+          assert "high" in ids, ids
+          assert default[0]["context_limit"] > 0 and "text" in default[0]["input"], default[0]
+          PY
+        intent: "Check that the catalog lists a default model whose effort option offers high"
+      - api:
+          method: PATCH
+          path: "/api/workspaces/E2E-AGV1-LEAD/v1/agents/${var:agv1EffortId}"
+          headers: { Idempotency-Key: "agv1-effort-bad-${RUN_ID:-local}" }
+          body: { effort: ultra-max }
+          status: 400
+          assert:
+            - path: code
+              equals: preset_invalid
+        intent: "Check that an effort the model does not offer is refused as preset_invalid"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1EffortId")"
+          curl -sf -X PATCH "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LEAD/v1/agents/$id" -H "Content-Type: application/json" \
+            -H "Idempotency-Key: agv1-effort-high-${RUN_ID:-local}" -d '{"effort":"high"}' > "$AFT_WORK_DIR/agv1-effort.json"
+          grep -q '\\"Options\\":\[{\\"ID\\":\\"effort\\",\\"Value\\":\\"high\\"}\]' "$AFT_WORK_DIR/agv1-effort.json"
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" \
+            -d '{"steps":[{"text":"AGV1-EFFORT-REPLY"}]}' >/dev/null
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-LEAD/chat/$id"
+        intent: "Set the lead's effort to high, script the next reply and open the lead's chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the chat labels the lead's harness as opencode"
+      - fill: { label: Message, value: "think hard" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-EFFORT-REPLY')
+        budget: 90000
+        intent: "Wait until the reply streams into the transcript"
+      - run: |
+          set -e
+          curl -sf "$AFT_FAKE_MODEL_URL/__requests" > "$AFT_WORK_DIR/agv1-effort-requests.json"
+          python3 - "$AFT_WORK_DIR/agv1-effort-requests.json" <<'PY'
+          import json, sys
+          reqs = json.load(open(sys.argv[1]))["requests"]
+          turn = [r for r in reqs if "think hard" in json.dumps(r)]
+          assert turn, f"the message never reached the model: {reqs}"
+          assert '"reasoning_effort": "high"' in json.dumps(turn[-1]), turn[-1]
+          PY
+        intent: "Check that the turn after the PATCH reached the model at effort high"
+
+  - name: UI2 the composer's model and effort pickers show the lead's model, set effort through PATCH, keep it after a reload and the next turn uses it
+    intent: An operator opens a lead's chat, sees its model and effort in the composer bar, finds the model by provider and by search, picks High effort, reloads and still sees High, and the lead's next reply runs at effort high
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-LEAD/v1/agents
+          headers: { Idempotency-Key: "agv1-ui2-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-ui2-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-lead-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1Ui2Id
+        intent: "Create an OpenCode lead through the Agent API"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1Ui2Id")"
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-LEAD/chat/$id"
+        intent: "Open the lead's chat"
+      - wait:
+          fn: >-
+            (() => { const m = document.querySelector('[data-chat-provider-model-picker]');
+              const t = document.querySelector('[data-chat-traits-picker]');
+              return !!m && !m.disabled && (m.textContent || '').includes('Emulator') &&
+                !!t && (t.textContent || '').trim() === 'Default'; })()
+        intent: "Wait until the composer bar shows the catalog's default model, and Default effort as no variant is chosen"
+      - click: { selector: "[data-chat-provider-model-picker]" }
+      - wait:
+          fn: >-
+            (() => { const d = document.querySelector('[data-model-picker-content]');
+              const rail = d?.querySelector('[data-model-picker-provider="provider:emu"]');
+              const opt = d?.querySelector('[role=option][aria-selected=true]');
+              return !!rail && rail.getAttribute('aria-label') === 'Emulator' && (opt?.textContent || '').includes('Emulator'); })()
+        intent: "Wait until the picker shows the Emulator provider in its rail with the current model selected"
+      - fill: { label: "Search models", value: "emul" }
+      - wait:
+          fn: >-
+            document.querySelectorAll('[data-model-picker-content] [role=option]').length === 1
+        intent: "Wait until searching finds the one Emulator model"
+      - press: Escape
+      - click: { selector: "[data-chat-traits-picker]" }
+      - click: { role: menuitemradio, name: High, exact: true }
+      - wait:
+          fn: >-
+            (document.querySelector('[data-chat-traits-picker]')?.textContent || '').includes('High')
+        intent: "Wait until the effort control shows High"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1Ui2Id")"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LEAD/v1/agents/$id" > "$AFT_WORK_DIR/agv1-ui2-agent.json"
+          python3 - "$AFT_WORK_DIR/agv1-ui2-agent.json" <<'PY'
+          import json, sys
+          spec = json.loads(json.load(open(sys.argv[1]))["spec_json"])
+          assert {"ID": "effort", "Value": "high"} in spec.get("Options", []), spec
+          PY
+        intent: "Check that the pick was saved on the agent through PATCH"
+      - reload: true
+      - wait:
+          fn: >-
+            (document.querySelector('[data-chat-traits-picker]')?.textContent || '').includes('High') &&
+            (document.querySelector('[data-chat-provider-model-picker]')?.textContent || '').includes('Emulator')
+        intent: "Wait until a reload still shows the model and High effort"
+      - run: |
+          set -e
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" \
+            -d '{"steps":[{"text":"AGV1-UI2-REPLY"}]}' >/dev/null
+        intent: "Script the next reply"
+      - fill: { label: Message, value: "ui2 effort turn" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-UI2-REPLY')
+        budget: 90000
+        intent: "Wait until the reply streams into the transcript"
+      - run: |
+          set -e
+          curl -sf "$AFT_FAKE_MODEL_URL/__requests" > "$AFT_WORK_DIR/agv1-ui2-requests.json"
+          python3 - "$AFT_WORK_DIR/agv1-ui2-requests.json" <<'PY'
+          import json, sys
+          reqs = json.load(open(sys.argv[1]))["requests"]
+          turn = [r for r in reqs if "ui2 effort turn" in json.dumps(r)]
+          assert turn, f"the message never reached the model: {reqs}"
+          assert '"reasoning_effort": "high"' in json.dumps(turn[-1]), turn[-1]
+          PY
+        intent: "Check that the turn after the pick reached the model at effort high"
+
+  - name: UI4 - an approval shows its command and Always allow this session answers it, and a failed turn says why in the chat
+    intent: An operator sees what a review agent asks to run, allows it for the session, gets the reply, and when the next turn fails reads the harness's reason in a banner and in the turn's note
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-LEAD/v1/agents
+          headers: { Idempotency-Key: "agv1-ui4ok-${RUN_ID:-local}" }
+          body: { preset: pr-review-interactive, name: "agv1-ui4ok-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-lead-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1Ui4OkId
+        intent: "Create an OpenCode agent whose preset asks before running a shell command"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1Ui4OkId")"
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          python3 - "$id" "${AFT_EMU_SCENARIOS:-}" "$AFT_FAKE_MODEL_URL" <<'PY'
+          import json, sys, urllib.request
+          agent, scenarios, model = sys.argv[1:4]
+          cmd = "echo AGV1-UI4-RAN"
+          fail = "AGV1-UI4-FAIL the model refused the request"
+          if scenarios:
+              # The emulator asks the scripted permission as OpenCode's bash "ask" rule does.
+              turns = [{"tools": [{"id": "call_ui4_bash", "name": "shell", "input": {"command": cmd},
+                                   "output": "AGV1-UI4-RAN",
+                                   "permission": {"action": "bash", "resources": [cmd], "save": ["echo *"]}}],
+                        "text": "AGV1-UI4-AFTER"},
+                       {"fail": fail}]
+              json.dump({agent: turns}, open(scenarios, "w"))
+          else:
+              steps = [{"bash": cmd}, {"text": "AGV1-UI4-AFTER"}, {"error": fail}]
+              req = urllib.request.Request(model + "/__script", data=json.dumps({"steps": steps}).encode(),
+                                           headers={"Content-Type": "application/json"})
+              urllib.request.urlopen(req).read()
+          PY
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-LEAD/chat/$id"
+        intent: "Script a turn that runs a shell command, then a turn the model refuses, and open the agent's chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the chat for the agent is ready"
+      - fill: { label: Message, value: "run the check" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const c = document.querySelector('[data-testid=ask-card]');
+              const d = c?.querySelector('[aria-label="Approval request"]')?.textContent || '';
+              return d.includes('echo AGV1-UI4-RAN') && Array.from(c.querySelectorAll('button')).map((b) => b.textContent).join('|')
+                .includes('Always allow this session'); })()
+        budget: 90000
+        intent: "Wait until the approval card shows the command it asks to run and offers Always allow this session"
+      - click: { role: button, name: Always allow this session, exact: true }
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=ask-card]') &&
+              (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-UI4-AFTER')
+        budget: 60000
+        intent: "Wait until the card closes and the agent replies after running the command"
+      - fill: { label: Message, value: "try again" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const b = document.querySelector('[data-testid=turn-error]');
+              const n = document.querySelector('[data-testid=turn-end-error]');
+              return (b?.textContent || '').includes('AGV1-UI4-FAIL') && (n?.textContent || '').includes('AGV1-UI4-FAIL'); })()
+        budget: 90000
+        intent: "Wait until the failed turn's reason shows in the error banner and the turn's note"
+      - reload: true
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=turn-end-error]')?.textContent || '').includes('AGV1-UI4-FAIL') &&
+              (document.querySelector('[data-testid=turn-error]')?.textContent || '').includes('AGV1-UI4-FAIL')
+        intent: "Wait until a reload replays the reason from saved events"
+      - click: { role: button, name: Dismiss error, exact: true }
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=turn-error]') &&
+              (document.querySelector('[data-testid=turn-end-error]')?.textContent || '').includes('AGV1-UI4-FAIL')
+        intent: "Wait until Dismiss hides the banner and the turn's note keeps the reason"
+
+  - name: UI4 - the agent asks several questions and the operator answers them one by one with an option and a custom answer
+    intent: An operator answers a lead's two questions in turn, picking an option for the first and writing a custom answer for the second, and the lead gets both answers
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-LEAD/v1/agents
+          headers: { Idempotency-Key: "agv1-ui4q-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-ui4q-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-lead-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1Ui4QId
+        intent: "Create an OpenCode lead through the Agent API"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1Ui4QId")"
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          python3 - "$id" "${AFT_EMU_SCENARIOS:-}" "$AFT_FAKE_MODEL_URL" <<'PY'
+          import json, sys, urllib.request
+          agent, scenarios, model = sys.argv[1:4]
+          qs = [{"header": "Color", "question": "AGV1-UI4 which color?",
+                 "options": [{"label": "Blue", "description": "calm"}, {"label": "Red", "description": "loud"}]},
+                {"header": "Size", "question": "AGV1-UI4 which size?",
+                 "options": [{"label": "Small", "description": "fits"}, {"label": "Large", "description": "roomy"}]}]
+          if scenarios:
+              turn = {"tools": [{"id": "call_ui4_q", "name": "question", "input": {"questions": qs},
+                                 "output": "", "questions": qs}], "text": "AGV1-UI4-ANSWERED"}
+              json.dump({agent: [turn]}, open(scenarios, "w"))
+          else:
+              steps = [{"tool_calls": [{"name": "question", "arguments": {"questions": qs}}]},
+                       {"text": "AGV1-UI4-ANSWERED"}]
+              req = urllib.request.Request(model + "/__script", data=json.dumps({"steps": steps}).encode(),
+                                           headers={"Content-Type": "application/json"})
+              urllib.request.urlopen(req).read()
+          PY
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-LEAD/chat/$id"
+        intent: "Script a turn that asks two questions with OpenCode's question tool and open the lead's chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the chat for the lead is ready"
+      - fill: { label: Message, value: "ask me" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const c = document.querySelector('[data-testid=ask-card]')?.textContent || '';
+              return c.includes('AGV1-UI4 which color?') && c.includes('1/2') && c.includes('Blue'); })()
+        budget: 90000
+        intent: "Wait until the card shows the first of two questions with its options"
+      - click: { selector: "[data-testid=ask-card] button[aria-pressed]", first: true }
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=ask-card]')?.textContent || '').includes('AGV1-UI4 which size?')
+        intent: "Wait until picking Blue moves on to the second question"
+      - fill: { label: Write custom answer, value: "AGV1-UI4-CUSTOM medium" }
+      - click: { role: button, name: Submit answers, exact: true }
+      - wait:
+          fn: >-
+            !document.querySelector('[data-testid=ask-card]') &&
+              (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-UI4-ANSWERED')
+        budget: 60000
+        intent: "Wait until the card closes and the lead replies after the answers"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1Ui4QId")"
+          if [ -n "${AFT_EMU_SCENARIOS:-}" ]; then
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LEAD/v1/agents/$id/events?limit=500" > "$AFT_WORK_DIR/agv1-ui4q.json"
+          else
+            curl -sf "$AFT_FAKE_MODEL_URL/__requests" > "$AFT_WORK_DIR/agv1-ui4q.json"
+          fi
+          python3 - "$AFT_WORK_DIR/agv1-ui4q.json" <<'PY'
+          import json, sys
+          body = json.dumps(json.load(open(sys.argv[1])))
+          assert "AGV1-UI4-CUSTOM medium" in body, "the custom answer never reached the lead"
+          assert "Blue" in body, "the picked option never reached the lead"
+          PY
+        intent: "Check that both answers reached the lead"
+
+  - name: OC1 - Decline ends the turn as declined and the agent takes the next message, and Stop ends a turn OpenCode left running nothing
+    intent: An operator who declines an approval sees that turn end as declined instead of the agent staying busy forever, carries on with the next message, and Stop still ends a turn the harness no longer runs
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-LEAD/v1/agents
+          headers: { Idempotency-Key: "agv1-oc1-${RUN_ID:-local}" }
+          body: { preset: pr-review-interactive, name: "agv1-oc1-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-lead-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1Oc1Id
+        intent: "Create an OpenCode agent whose preset asks before running a shell command"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1Oc1Id")"
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          python3 - "$id" "${AFT_EMU_SCENARIOS:-}" "$AFT_FAKE_MODEL_URL" <<'PY'
+          import json, sys, urllib.request
+          agent, scenarios, model = sys.argv[1:4]
+          cmd = "echo AGV1-OC1-NEVER-RAN"
+          if scenarios:
+              # A reject plays as OpenCode b30c4d0's does; the third turn then
+              # ends the same way with no reject, so Loom sees no end and only
+              # Stop can end it.
+              turns = [{"tools": [{"id": "call_oc1_bash", "name": "shell", "input": {"command": cmd},
+                                   "output": "AGV1-OC1-NEVER-RAN",
+                                   "permission": {"action": "bash", "resources": [cmd], "save": ["echo *"]}}],
+                        "text": "AGV1-OC1-NEVER-SAID"},
+                       {"text": "AGV1-OC1-NEXT"},
+                       {"text": "AGV1-OC1-SUSPENDED", "suspend": True}]
+              json.dump({agent: turns}, open(scenarios, "w"))
+          else:
+              steps = [{"bash": cmd}, {"text": "AGV1-OC1-NEXT"}, {"bash": "sleep 120"}]
+              req = urllib.request.Request(model + "/__script", data=json.dumps({"steps": steps}).encode(),
+                                           headers={"Content-Type": "application/json"})
+              urllib.request.urlopen(req).read()
+          PY
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-LEAD/chat/$id"
+        intent: "Script a turn that asks to run a shell command, a plain reply, and a third turn that stays busy, and open the agent's chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the chat for the agent is ready"
+      - fill: { label: Message, value: "run the check" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const c = document.querySelector('[data-testid=ask-card]');
+              return (c?.querySelector('[aria-label="Approval request"]')?.textContent || '').includes('echo AGV1-OC1-NEVER-RAN'); })()
+        budget: 90000
+        intent: "Wait until the approval card shows the command it asks to run"
+      - click: { role: button, name: Decline, exact: true }
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              return !document.querySelector('[data-testid=ask-card]') && t.includes('Turn declined') &&
+                !Array.from(document.querySelectorAll('form button')).some((b) => b.textContent === 'Stop'); })()
+        budget: 60000
+        intent: "Wait until the card closes, the turn's note says it was declined and the composer no longer offers Stop"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1Oc1Id")"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LEAD/v1/agents/$id" > "$AFT_WORK_DIR/agv1-oc1-agent.json"
+          python3 - "$AFT_WORK_DIR/agv1-oc1-agent.json" <<'PY'
+          import json, sys
+          a = json.load(open(sys.argv[1]))
+          assert a["state"] == "idle" and a["running_turn_id"] is None, "after Decline: %s, running turn %s" % (a["state"], a["running_turn_id"])
+          PY
+        intent: "Check that the agent is idle with no running turn after Decline"
+      - fill: { label: Message, value: "carry on" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-OC1-NEXT')
+        budget: 60000
+        intent: "Wait until the agent answers the next message"
+      - fill: { label: Message, value: "one more" }
+      - press: Enter
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('form button')).some((b) => b.textContent === 'Stop')
+        budget: 60000
+        intent: "Wait until the third turn runs and the composer offers Stop"
+      - run: |
+          set -e
+          [ -n "${AFT_EMU_SCENARIOS:-}" ] || exit 0
+          id="$(cat "$AFT_WORK_DIR/agv1Oc1Id")"
+          for _ in $(seq 1 120); do
+            if curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LEAD/v1/agents/$id/events?limit=500" | grep -q 'AGV1-OC1-SUSPENDED'; then exit 0; fi
+            sleep 0.5
+          done
+          echo "the third turn never streamed its text" >&2; exit 1
+        intent: "On the emulator, wait until the third turn streamed its text and its execution ended with no end Loom can see"
+      - click: { role: button, name: Stop, exact: true }
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('Turn cancelled') &&
+              !Array.from(document.querySelectorAll('form button')).some((b) => b.textContent === 'Stop')
+        budget: 30000
+        intent: "Wait until Stop ends the turn, its note says it was cancelled (OC2: Loom saves the end of a turn it ends itself) and the Stop button goes away"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1Oc1Id")"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LEAD/v1/agents/$id" > "$AFT_WORK_DIR/agv1-oc1-agent.json"
+          python3 - "$AFT_WORK_DIR/agv1-oc1-agent.json" <<'PY'
+          import json, sys
+          a = json.load(open(sys.argv[1]))
+          assert a["state"] == "idle" and a["running_turn_id"] is None, "after Stop: %s, running turn %s" % (a["state"], a["running_turn_id"])
+          PY
+        intent: "Check that the agent is idle with no running turn after Stop"
+
+  - name: SA1 - a lead told to use OpenCode's own subagent tool is denied and starts no harness subagent
+    intent: An operator tells a lead to call an agent through OpenCode's subagent tool; the lead's policy denies that tool, so no harness subagent starts and the lead goes on, delegating only through Loom child agents
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-LEAD/v1/agents
+          headers: { Idempotency-Key: "agv1-sa1-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-sa1-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-lead-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1Sa1Id
+        intent: "Create an OpenCode lead"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1Sa1Id")"
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          python3 - "$id" "${AFT_EMU_SCENARIOS:-}" "$AFT_FAKE_MODEL_URL" <<'PY'
+          import json, sys, urllib.request
+          agent, scenarios, model = sys.argv[1:4]
+          call = {"agent": "general", "description": "AGV1-SA1 helper", "prompt": "say hi"}
+          if scenarios:
+              # The emulator's subagent tool asserts the session's rules as OpenCode's does.
+              turns = [{"tools": [{"id": "call_sa1_sub", "name": "subagent", "input": call, "output": "AGV1-SA1-CHILD"}],
+                        "text": "AGV1-SA1-AFTER"}]
+              json.dump({agent: turns}, open(scenarios, "w"))
+          else:
+              steps = [{"tool_calls": [{"name": "subagent", "arguments": call}]}, {"text": "AGV1-SA1-AFTER"}]
+              req = urllib.request.Request(model + "/__script", data=json.dumps({"steps": steps}).encode(),
+                                           headers={"Content-Type": "application/json"})
+              urllib.request.urlopen(req).read()
+          PY
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-LEAD/chat/$id"
+        intent: "Script a turn that calls OpenCode's subagent tool, then replies, and open the lead's chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the chat for the lead is ready"
+      - fill: { label: Message, value: "use OpenCode's subagent tool to call an agent" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-SA1-AFTER')
+        budget: 90000
+        intent: "Wait until the lead replies after the subagent call"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1Sa1Id")"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LEAD/v1/agents/$id/events?limit=500" > "$AFT_WORK_DIR/agv1-sa1.json"
+          python3 - "$AFT_WORK_DIR/agv1-sa1.json" "${AFT_EMU_SCENARIOS:-}" <<'PY'
+          import json, sys
+          body = json.load(open(sys.argv[1]))
+          text = json.dumps(body)
+          assert "harness.subagent.started" not in text, "the lead started a harness subagent"
+          assert "AGV1-SA1-CHILD" not in text, "the subagent call ran"
+          if sys.argv[2]:
+              assert "Subagent denied: general" in text, "the subagent call was not denied"
+          PY
+        intent: "Check that the lead's events have no harness subagent start and the call was denied"

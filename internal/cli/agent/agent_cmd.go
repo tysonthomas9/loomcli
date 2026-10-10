@@ -76,6 +76,10 @@ Examples:
 	Run:  runAgent,
 }
 
+// AddSubcommand adds c under `loom agent`, for a command kept in its own
+// package (the MCP bridge, internal/cli/agentbridge).
+func AddSubcommand(c *cobra.Command) { agentCmd.AddCommand(c) }
+
 func init() {
 	agentCmd.Flags().StringVarP(&agentPromptFile, "prompt", "p", "", "Path to prompt template file")
 	_ = agentCmd.MarkFlagRequired("prompt")

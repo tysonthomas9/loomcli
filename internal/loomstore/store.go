@@ -80,8 +80,8 @@ func (s *Store) tx(ctx context.Context, fn func(*sql.Tx) error) error {
 	if err != nil {
 		return err
 	}
+	defer func() { _ = tx.Rollback() }() // after a commit, a no-op; on a panic, the rollback
 	if err := fn(tx); err != nil {
-		_ = tx.Rollback()
 		return err
 	}
 	return tx.Commit()

@@ -51,6 +51,42 @@ func (l *EventLog) Append(ctx context.Context, e loomstore.Event) (loomstore.Eve
 // tests crash there.
 var appendAllCrash = func() {}
 
+// commitStateCrash runs between a commit's (CommitState, Send) COMMIT and its publication;
+// tests crash there.
+var commitStateCrash = func() {}
+
+// CommitState is the ordered atomic write of agentID's state change. It takes
+// the lane before the transaction begins and holds it until the fanout ends,
+// so commit order is publish order: in one transaction it compares and sets
+// the row from (from, rev) to `to`, bumping the revision, and saves events
+// (loomstore.CommitState); only after the commit does it publish them, to
+// its subscribers and then, still under the lane, through publish. If any
+// write or the commit fails, nothing is saved or published.
+func (l *EventLog) CommitState(ctx context.Context, agentID string, from, to loomstore.AgentState, rev int64,
+	events []loomstore.Event, publish func(saved []loomstore.Event)) ([]loomstore.Event, error) {
+	return l.commit(func() ([]loomstore.Event, error) {
+		return l.store.CommitState(ctx, agentID, from, to, rev, events)
+	}, publish)
+}
+
+// commit runs write, one transaction that returns the events it saved,
+// under the lane, then fans them out and publishes them, still under the
+// lane. If write fails, nothing is published.
+func (l *EventLog) commit(write func() ([]loomstore.Event, error), publish func(saved []loomstore.Event)) ([]loomstore.Event, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	saved, err := write()
+	if err != nil {
+		return nil, err
+	}
+	commitStateCrash() // committed, not yet published
+	for _, e := range saved {
+		l.fanout(e)
+	}
+	publish(saved)
+	return saved, nil
+}
+
 // AppendAll appends events to agentID in one short transaction and
 // publishes the new ones, in order, only after the commit: if any write or
 // the commit fails, nothing is saved or published.
@@ -133,7 +169,8 @@ func (l *EventLog) Backfill(ctx context.Context, s loomharness.Session,
 // Subscription delivers each subscribed agent's events in seq order: first
 // the committed rows after its cursor, then live rows. A Service.Subscribe
 // subscription also gets live-only notices (Seq 0): deltas if it asked for
-// them, and feed.gap; and only the kinds it asked for.
+// them, tool starts if it asked for deltas or named tool.started, and
+// feed.gap; and only the saved kinds it asked for.
 type Subscription struct {
 	C      <-chan loomstore.Event // closed when the subscription ends; then read Err
 	out    chan loomstore.Event
@@ -147,12 +184,14 @@ type Subscription struct {
 }
 
 // Notify sends a live-only notice (Seq 0, never saved) to subscriptions that
-// take them: a delta to its agent's, a feed.gap (AgentID "") to all.
+// take them: a delta or tool start to its agent's, a feed.gap (AgentID "")
+// to all.
 func (l *EventLog) Notify(e loomstore.Event) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for s := range l.subs {
-		if !s.notes || (e.AgentID != "" && !s.agents[e.AgentID]) || (e.Kind == KindDelta && !s.deltas) {
+		if !s.notes || (e.AgentID != "" && !s.agents[e.AgentID]) || (e.Kind == KindDelta && !s.deltas) ||
+			(e.Kind == KindToolStarted && !s.deltas && !s.kinds[KindToolStarted]) {
 			continue
 		}
 		select {

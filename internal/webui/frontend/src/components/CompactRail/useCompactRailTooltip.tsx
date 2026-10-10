@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactPortal,
@@ -23,8 +24,13 @@ export function useCompactRailTooltip(label: string): {
   visible: boolean;
 } {
   const [visible, setVisible] = useState(false);
-  const [position, setPosition] = useState({ top: 0, left: 0 });
+  const [position, setPosition] = useState<{
+    top: number;
+    left: number;
+    flip?: "top" | "bottom";
+  }>({ top: 0, left: 0 });
   const anchorEl = useRef<HTMLElement | null>(null);
+  const tooltipEl = useRef<HTMLSpanElement | null>(null);
   const tooltipId = useId();
 
   const anchorRef = useCallback((node: HTMLElement | null) => {
@@ -40,6 +46,27 @@ export function useCompactRailTooltip(label: string): {
       left: rect.right + 8,
     });
   }, []);
+
+  // A tooltip that would run past the right edge (the mobile bottom rail)
+  // goes above its anchor instead, or below when there is no room above,
+  // kept inside the viewport.
+  useLayoutEffect(() => {
+    const tip = tooltipEl.current;
+    const anchor = anchorEl.current;
+    if (!visible || position.flip || !tip || !anchor) return;
+    const vw = window.innerWidth;
+    const box = tip.getBoundingClientRect();
+    const width = Math.min(box.width, vw - 8);
+    if (position.left + width <= vw - 4) return;
+    const rect = anchor.getBoundingClientRect();
+    const centered = rect.left + rect.width / 2 - width / 2;
+    const below = rect.top - 8 - box.height < 4;
+    setPosition({
+      top: below ? rect.bottom + 8 : rect.top - 8,
+      left: Math.max(4, Math.min(centered, vw - width - 4)),
+      flip: below ? "bottom" : "top",
+    });
+  }, [visible, position]);
 
   const show = useCallback(() => {
     updatePosition();
@@ -64,12 +91,16 @@ export function useCompactRailTooltip(label: string): {
   const tooltipPortal = visible
     ? createPortal(
         <span
+          ref={tooltipEl}
           id={tooltipId}
           className={tooltipStyles.tooltipPortal}
+          data-placement={position.flip}
           role="tooltip"
           style={{
             top: `${position.top}px`,
             left: `${position.left}px`,
+            // Wraps only a label wider than the viewport (width: max-content).
+            maxWidth: "calc(100vw - 8px)",
           }}
         >
           {label}

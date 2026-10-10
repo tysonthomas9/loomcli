@@ -169,17 +169,19 @@ func TestUpdateNameAndModel(t *testing.T) {
 	if err != nil || got.Name != "lead-x" || got.SpecVersion != 2 {
 		t.Fatalf("rename = %+v, %v", got, err)
 	}
-	if got, err = e.s.Update(ctx, UpdateRequest{Envelope: Envelope{RequestID: "r1"}, AgentID: "a1", Name: "again"}); err != nil ||
+	if got, err = e.s.Update(ctx, UpdateRequest{Envelope: Envelope{RequestID: "r1"}, AgentID: "a1", Name: "lead-x"}); err != nil ||
 		got.Name != "lead-x" || got.SpecVersion != 2 {
 		t.Fatalf("retry = %+v, %v", got, err)
 	}
+	_, err = e.s.Update(ctx, UpdateRequest{Envelope: Envelope{RequestID: "r1"}, AgentID: "a1", Name: "again"})
+	wantCode(t, err, CodeConflict) // r1 is bound to its first payload
 	stale := int64(1)
 	_, err = e.s.Update(ctx, UpdateRequest{Envelope: Envelope{Expect: &Expect{SpecVersion: &stale}}, AgentID: "a1", Name: "y"})
 	wantCode(t, err, CodeSpecVersionMismatch)
 	_, err = e.s.Update(ctx, UpdateRequest{AgentID: "a1", Name: "a2"})
 	wantCode(t, err, CodeAgentNameTaken)
-	_, err = e.s.Update(ctx, UpdateRequest{AgentID: "a1", Model: "nope"})
-	wantCode(t, err, CodePresetInvalid)
+	_, err = e.s.Update(ctx, UpdateRequest{AgentID: "a1", Model: "no pe"})
+	wantCode(t, err, CodePresetInvalid) // malformed; an unlisted model passes (MCS1)
 	_, err = e.s.Update(ctx, UpdateRequest{AgentID: "a2", Model: "fake-model"})
 	wantCode(t, err, CodeAgentBusy)
 	if _, err = e.s.Update(ctx, UpdateRequest{AgentID: "a2", Name: "renamed"}); err != nil {
@@ -239,7 +241,7 @@ func TestHarnessSwitchOpenApprovalReportsAskLostOnce(t *testing.T) {
 	e.startTurn(t)
 	to := e.s.get(t, "a1").StateOf()
 	to.WaitingOn, to.RunningTurn = sp("approval"), sp("turn1")
-	if err := e.s.store.CompareAndSetState(ctx, "a1", e.s.get(t, "a1").StateOf(), to); err != nil {
+	if _, err := e.s.store.CommitState(ctx, "a1", e.s.get(t, "a1").StateOf(), to, e.s.get(t, "a1").Revision, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.s.Update(ctx, switchReq("r1", 1, "fb")); err != nil {
@@ -411,5 +413,108 @@ func TestHarnessResumeChangedRootSameID(t *testing.T) {
 	}
 	if got, err := e.s.Get(ctx, "a1"); err != nil || got.HarnessSessionRoot != nil {
 		t.Fatalf("Get exposes the session root: %v, %v", got.HarnessSessionRoot, err)
+	}
+}
+
+// TestUpdateEffortAppliesOnNextTurn: PATCH effort (or options) is checked
+// against the harness catalog, saved in the spec and used by the session's
+// next turn, never the one before; an unknown option or value is
+// preset_invalid and changes nothing.
+func TestUpdateEffortAppliesOnNextTurn(t *testing.T) {
+	ctx := context.Background()
+	e := newSwitchEnv(t, StateIdle)
+	sess := e.fa.Session(e.old)
+	if err := sess.Prompt(ctx, loomharness.Input{Key: "k1", Text: "before"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.s.Update(ctx, UpdateRequest{Envelope: Envelope{RequestID: "r1"}, AgentID: "a1", Effort: "high"})
+	if err != nil || got.SpecVersion != 2 {
+		t.Fatalf("effort = %+v, %v", got, err)
+	}
+	cfg, err := loadConfig(e.s.get(t, "a1"))
+	if err != nil || len(cfg.Options) != 1 || cfg.Options[0] != (loomharness.Option{ID: "effort", Value: "high"}) {
+		t.Fatalf("saved options = %+v, %v", cfg.Options, err)
+	}
+	if err := sess.Prompt(ctx, loomharness.Input{Key: "k2", Text: "after"}); err != nil {
+		t.Fatal(err)
+	}
+	turns := e.fa.Turns(e.old)
+	if len(turns) != 2 || len(turns[0].Options) != 0 || turns[1].Model != "fake-model" ||
+		loomharness.OptionValue(turns[1].Options, "effort") != "high" {
+		t.Fatalf("turns = %+v; want the second turn on fake-model with effort high", turns)
+	}
+
+	for _, req := range []UpdateRequest{
+		{AgentID: "a1", Effort: "ultra"},
+		{AgentID: "a1", Options: []loomharness.Option{{ID: "speed", Value: "fast"}}},
+	} {
+		perr := wantCode(t, func() error { _, err := e.s.Update(ctx, req); return err }(), CodePresetInvalid)
+		if perr.Message == "" || len(perr.Allowed) == 0 {
+			t.Fatalf("%+v: error %+v lacks a message or the allowed values", req, perr)
+		}
+	}
+	if a := e.s.get(t, "a1"); a.SpecVersion != 2 {
+		t.Fatalf("a refused update changed the agent: spec version %d", a.SpecVersion)
+	}
+	if got, err = e.s.Update(ctx, UpdateRequest{AgentID: "a1", Options: []loomharness.Option{{ID: "effort", Value: "high"}}}); err != nil || got.SpecVersion != 2 {
+		t.Fatalf("same effort again = %+v, %v; want a no-op", got, err)
+	}
+	_, err = e.s.Update(ctx, UpdateRequest{Envelope: Envelope{Expect: &Expect{SpecVersion: &got.SpecVersion}}, AgentID: "a1", Harness: "fb", Effort: "low"})
+	wantCode(t, err, CodePresetInvalid)
+	got, err = e.s.Update(ctx, switchReq("r2", 2, "fb"))
+	if err != nil || got.Harness != "fb" {
+		t.Fatalf("switch = %+v, %v", got, err)
+	}
+	if cfg, _ := loadConfig(e.s.get(t, "a1")); len(cfg.Options) != 0 {
+		t.Fatalf("options survived the harness switch: %+v", cfg.Options)
+	}
+}
+
+// TestUpdateModelAppliesOnNextTurn (SM1): a PATCHed model runs the next
+// turn. Every hand-off resumes the session and sets the spec's saved model
+// again, so that model must be the new one, not the one the agent was
+// created with.
+func TestUpdateModelAppliesOnNextTurn(t *testing.T) {
+	ctx := context.Background()
+	e := newSwitchEnv(t, StateIdle)
+	a := e.s.get(t, "a1")
+	to := a.SpecOf()
+	to.SpecJSON = `{"Model":"fake-model"}` // as Create saves it
+	if err := e.s.store.CompareAndSetSpec(ctx, "a1", a.SpecVersion, to); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.s.Update(ctx, UpdateRequest{AgentID: "a1", Model: "fake/other"}); err != nil {
+		t.Fatal(err)
+	}
+	queue(t, e.s, "a1", "user", "after")
+	if _, err := e.s.handOff(ctx, e.s.get(t, "a1")); err != nil {
+		t.Fatal(err)
+	}
+	if turns := e.fa.Turns(e.old); len(turns) != 1 || turns[0].Model != "fake/other" {
+		t.Fatalf("turns = %+v; want one turn on fake/other", turns)
+	}
+}
+
+// TestUpdateModelDropsCreateEffort (SM1): a model change keeps only the
+// options the new model takes, the create override's effort included, and
+// the next turn's reapply does not bring a dropped effort back.
+func TestUpdateModelDropsCreateEffort(t *testing.T) {
+	ctx := context.Background()
+	e := newSwitchEnv(t, StateIdle)
+	a := e.s.get(t, "a1")
+	to := a.SpecOf()
+	to.SpecJSON = `{"Model":"fake-model","Effort":"low"}` // a create override's effort
+	if err := e.s.store.CompareAndSetSpec(ctx, "a1", a.SpecVersion, to); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.s.Update(ctx, UpdateRequest{AgentID: "a1", Model: "fake/other"}); err != nil {
+		t.Fatal(err)
+	}
+	queue(t, e.s, "a1", "user", "after")
+	if _, err := e.s.handOff(ctx, e.s.get(t, "a1")); err != nil {
+		t.Fatal(err)
+	}
+	if turns := e.fa.Turns(e.old); len(turns) != 1 || turns[0].Model != "fake/other" || len(turns[0].Options) != 0 {
+		t.Fatalf("turns = %+v; want one turn on fake/other with no options", turns)
 	}
 }

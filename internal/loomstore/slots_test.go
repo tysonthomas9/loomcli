@@ -2,6 +2,7 @@ package loomstore
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -127,7 +128,7 @@ func TestReceiptStaleRequestIDHasNoEffect(t *testing.T) {
 	retry(s, "r1", "three", SlotWaiting, r1) // after delivery: newer text untouched
 	retry(s, "r2", "three", SlotWaiting, r2)
 
-	if out, err := s.ClearSlot(ctx, "a1", "user:u"); err != nil || out != Withdrawn {
+	if out, err := s.ClearSlot(ctx, "a1", "user:u", true); err != nil || out != Withdrawn {
 		t.Fatalf("ClearSlot = %s, %v", out, err)
 	}
 	retry(s, "r3", "three", SlotWithdrawn, r3) // after withdrawal: stays withdrawn
@@ -144,7 +145,7 @@ func TestReceiptStaleRequestIDHasNoEffect(t *testing.T) {
 func TestSlotGuardsAndWithdraw(t *testing.T) {
 	ctx := context.Background()
 	s, _ := newSlotStore(t)
-	if out, _ := s.ClearSlot(ctx, "a1", "user:u"); out != NothingWaiting {
+	if out, _ := s.ClearSlot(ctx, "a1", "user:u", true); out != NothingWaiting {
 		t.Fatalf("clear empty = %s", out)
 	}
 	mustSend(t, s, send("user:u", "r1", "one"))
@@ -159,7 +160,7 @@ func TestSlotGuardsAndWithdraw(t *testing.T) {
 	if _, err := s.HandNext(ctx, "a1", nativeKey); err != nil {
 		t.Fatal(err)
 	}
-	if out, _ := s.ClearSlot(ctx, "a1", "user:u"); out != AlreadyHanded {
+	if out, _ := s.ClearSlot(ctx, "a1", "user:u", true); out != AlreadyHanded {
 		t.Fatalf("clear handed = %s", out)
 	}
 	if _, _, err := s.Send(ctx, send("user:u", "r3", "three")); !errors.Is(err, ErrSlotBusy) {
@@ -380,8 +381,11 @@ func TestSlotHandedRequeueReceiptAndFinish(t *testing.T) {
 	s, _ := newSlotStore(t)
 	mustSend(t, s, send("user:u", "r1", "one"))
 	mustSend(t, s, send("agent:c", "r2", "two"))
-	if ids, _ := s.PendingAgents(ctx); len(ids) != 1 || ids[0] != "a1" {
+	if ids, _ := s.PendingAgents(ctx, "ws"); len(ids) != 1 || ids[0] != "a1" {
 		t.Fatalf("pending = %v", ids)
+	}
+	if ids, _ := s.PendingAgents(ctx, "other"); len(ids) != 0 {
+		t.Fatalf("pending in another workspace = %v", ids)
 	}
 	sl, err := s.HandNext(ctx, "a1", nativeKey)
 	if err != nil || sl.RequestID != "r1" {
@@ -410,7 +414,7 @@ func TestSlotHandedRequeueReceiptAndFinish(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if ids, _ := s.PendingAgents(ctx); len(ids) != 0 {
+	if ids, _ := s.PendingAgents(ctx, "ws"); len(ids) != 0 {
 		t.Fatalf("pending after delivery = %v", ids)
 	}
 
@@ -420,10 +424,150 @@ func TestSlotHandedRequeueReceiptAndFinish(t *testing.T) {
 		t.Fatal(err)
 	}
 	from := AgentState{State: "active"}
-	if err := s.CompareAndSetState(ctx, "t1", from, AgentState{State: "finished", Outcome: ptr("completed")}); err != nil {
+	if _, err := s.CommitState(ctx, "t1", from, AgentState{State: "finished", Outcome: ptr("completed")}, 0, nil); err != nil {
 		t.Fatal(err)
 	}
 	if a, _ := s.GetAgent(ctx, "t1"); a.FinishedAt == nil {
 		t.Fatal("a finished turn set no finished_at")
+	}
+}
+
+// TestNotifyMergesOnceByKey: notices join a waiting slot in order and keep
+// its place; a notice whose key was already added is skipped; a handed
+// slot refuses them.
+func TestNotifyMergesOnceByKey(t *testing.T) {
+	ctx := context.Background()
+	st, _ := newSlotStore(t)
+	res := func(string, bool) (string, error) { return "{}", nil }
+	n1, n2 := Notice{Key: "k1", Text: "one"}, Notice{Key: "k2", Text: "two"}
+	if added, err := st.Notify(ctx, "a1", "agent:c", "system", []Notice{n1}, res); err != nil || !added {
+		t.Fatalf("first = %v, %v", added, err)
+	}
+	if added, err := st.Notify(ctx, "a1", "agent:c", "system", []Notice{n1, n2}, res); err != nil || !added {
+		t.Fatalf("second = %v, %v", added, err)
+	}
+	if added, err := st.Notify(ctx, "a1", "agent:c", "system", []Notice{n1, n2}, res); err != nil || added {
+		t.Fatalf("repeat = %v, %v", added, err)
+	}
+	slots, err := st.Slots(ctx, "a1")
+	if err != nil || len(slots) != 1 || slots[0].Body != "one\ntwo" || slots[0].RequestID != "k2" || slots[0].State != SlotWaiting {
+		t.Fatalf("slots = %+v, %v", slots, err)
+	}
+	if _, err := st.HandNext(ctx, "a1", func(Slot) string { return "nk" }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Notify(ctx, "a1", "agent:c", "system", []Notice{{Key: "k3", Text: "three"}}, res); !errors.Is(err, ErrSlotBusy) {
+		t.Fatalf("handed = %v", err)
+	}
+	if text, sender, ok, err := st.HandedText(ctx, "a1", "nk"); err != nil || !ok || text != "one\ntwo" || sender != "agent:c" {
+		t.Fatalf("handed text = %q from %q, %v, %v", text, sender, ok, err)
+	}
+}
+
+// TestMigrationAttemptBoundaryBackfill: a database from before migration 6
+// gets each agent's current-attempt boundary: a first attempt keeps every
+// reply; a reopened agent, active or finished, starts at its last saved
+// reopen event when every reopen saved one; otherwise (no reopen event, a
+// missing latest one, or a finished -> stopping change that is no reopen)
+// it starts at its last event, so no earlier reply counts.
+func TestMigrationAttemptBoundaryBackfill(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "loom.db")
+	all := migrations
+	defer func() { migrations = all }()
+	migrations = all[:5] // the schema before attempt_after_seq
+	old := openAt(t, path)
+	event := func(id, eid, kind, payload string) {
+		t.Helper()
+		if _, err := old.AppendEvent(ctx, Event{AgentID: id, EventID: eid, Kind: kind, Payload: json.RawMessage(payload)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reply := func(id, text string) {
+		event(id, "item:"+text, "item.completed", `{"itemKind":"message","text":"`+text+`"}`)
+	}
+	reopened := func(id, n string) {
+		event(id, "reopen:"+id+":"+n, "agent.state_changed", `{"from":"finished","to":"active"}`)
+	}
+	for _, a := range []struct {
+		id, state string
+		attempt   int64
+	}{{"first", "finished", 0}, {"active", "active", 1}, {"finished", "finished", 1}, {"newer", "active", 1}, {"unmarked", "finished", 2},
+		{"partial", "active", 2}, {"archiving", "stopping", 1}, {"twice", "finished", 2}} {
+		ag := agent(a.id, "interactive")
+		ag.Mode, ag.State, ag.Attempt = "single_task", a.state, a.attempt
+		if err := old.InsertAgent(ctx, ag); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reply("first", "first reply")
+	for _, id := range []string{"active", "finished", "newer", "unmarked", "partial", "archiving", "twice"} {
+		reply(id, "old reply "+id)
+	}
+	reopened("active", "1")
+	reopened("finished", "1")
+	reopened("newer", "1")
+	reply("newer", "new reply")
+	reopened("partial", "1") // attempt 1 was published; attempt 2's reopen was lost in a crash
+	reply("partial", "reply from attempt one")
+	reopened("archiving", "1")
+	reply("archiving", "kept reply")
+	event("archiving", "stop:archiving", "agent.state_changed", `{"from":"finished","to":"stopping"}`) // not a reopen
+	reopened("twice", "1")
+	reply("twice", "reply from attempt one")
+	reopened("twice", "2")
+	if err := old.Close(); err != nil {
+		t.Fatal(err)
+	}
+	migrations = all
+	s := openAt(t, path)
+	for id, want := range map[string]string{"first": "first reply", "active": "", "finished": "", "newer": "new reply",
+		"unmarked": "", "partial": "", "archiving": "kept reply", "twice": ""} {
+		if got, err := s.LastMessage(ctx, id); err != nil || got != want {
+			t.Errorf("%s: LastMessage = %q, %v; want %q", id, got, err, want)
+		}
+	}
+}
+
+// TestMigrationNoticesLegacy: a slot and a receipt saved before notices were
+// kept, whose last addition was a child's record, read back as legacy (their
+// record key, for the reader to rebuild from); others do not.
+func TestMigrationNoticesLegacy(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "loom.db")
+	all := migrations
+	defer func() { migrations = all }()
+	migrations = all[:len(all)-1] // the schema before notices
+	old := openAt(t, path)
+	if err := old.InsertAgent(ctx, agent("L", "interactive")); err != nil {
+		t.Fatal(err)
+	}
+	for _, sl := range [][2]string{{"agent:c1", "task_completed:c1:1"}, {"agent:c3", "m-plain"}} {
+		if _, err := old.db.ExecContext(ctx, `INSERT INTO agent_slots (agent_id, sender, request_id, body, source, state, queued_at, updated_at)
+			VALUES ('L', ?, ?, 'text', 'agent', ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`, sl[0], sl[1], SlotWaiting); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, r := range [][2]string{{"k2", "task_completed:c2:1"}, {"k4", "m-other"}} {
+		if _, err := old.db.ExecContext(ctx, `INSERT INTO agent_send_receipts (agent_id, request_id, sender, result_json, created_at, native_key)
+			VALUES ('L', ?, 'agent:x', '{}', '2026-01-01T00:00:00Z', ?)`, r[1], r[0]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old.Close()
+	migrations = all
+	s := openAt(t, path)
+	w, err := s.WaitingNotices(ctx, "L")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(w) != 1 || w["agent:c1"].Legacy != "task_completed:c1:1" {
+		t.Fatalf("waiting notices = %+v", w)
+	}
+	for key, want := range map[string]string{"k2": "task_completed:c2:1", "k4": ""} {
+		n, err := s.HandedNotices(ctx, "L", key)
+		if err != nil || n.Legacy != want || len(n.Keys) != 0 {
+			t.Fatalf("handed %s = %+v %v", key, n, err)
+		}
 	}
 }

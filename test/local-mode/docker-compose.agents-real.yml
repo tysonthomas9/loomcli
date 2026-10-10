@@ -1,0 +1,36 @@
+# Real-model mode for the Agent API stack (LOCAL_MODE_AGENTS_REAL=1 make
+# local-mode-agents-up): serve's OpenCode uses the host's live OpenCode login
+# instead of the fake model, and the image's pinned codex and claude use the
+# host's codex and Claude logins.
+#
+# OpenCode: the host's OpenCode data folder is NEVER mounted. Before `up`,
+# real-opencode-copy.sh takes one read-only online backup of the host's
+# opencode.db (which holds the login) into LOCAL_MODE_OPENCODE_COPY, a mode-600
+# file private to this compose project; it is mounted read-only below and the
+# entrypoint seeds the stack's own database on the loom-data volume from it.
+# Nothing is written back to the host; `down` removes both copies. Several
+# REAL stacks may run at once. Knob: LOCAL_MODE_OPENCODE_DATA (host folder).
+#
+# codex and Claude: each host credential file gets one read-only bind here, at
+# the path that harness reads, with a LOCAL_MODE_<HARNESS>_AUTH knob.
+# Never copy a credential, never log in inside the container. The one
+# exception is opt-in LOCAL_MODE_CLAUDE_COPY=1: real-claude-copy.sh writes a
+# private, project-owned copy of the host's current Claude login with its
+# refresh token removed, and LOCAL_MODE_CLAUDE_AUTH points at that copy.
+
+services:
+  loom-local:
+    environment:
+      LOCAL_MODE_AGENTS_REAL: "1"
+      LOCAL_MODE_AGENTS_MODEL: "${LOCAL_MODE_AGENTS_MODEL:-}"
+      OPENCODE_DISABLE_MODELS_FETCH: ""
+      # codex's and Claude's writable roots live on the loom-data volume, so
+      # down -v removes them; only the auth file inside each is a host bind.
+      CODEX_HOME: /root/.loom/agents-codex
+      CLAUDE_CONFIG_DIR: /root/.loom/agents-claude
+    volumes:
+      - ${LOCAL_MODE_OPENCODE_COPY:?run REAL stacks through make local-mode-agents-up}:/run/secrets/opencode-seed.db:ro
+      - ${LOCAL_MODE_CODEX_AUTH:-${HOME}/.codex/auth.json}:/root/.loom/agents-codex/auth.json:ro
+      - ${LOCAL_MODE_CLAUDE_AUTH:-${HOME}/.claude/.credentials.json}:/root/.loom/agents-claude/.credentials.json:ro
+      # Optional `claude setup-token` token; /dev/null (empty) when unset.
+      - ${LOCAL_MODE_CLAUDE_TOKEN_FILE:-/dev/null}:/run/secrets/claude-token:ro

@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sort"
 	"strconv"
@@ -18,6 +20,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/agentprofile"
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
+	"github.com/tysonthomas9/loomcli/internal/loomharness/codex/protocol"
 	"github.com/tysonthomas9/loomcli/internal/sessions"
 )
 
@@ -423,10 +426,11 @@ type brief struct {
 	Type                          loomharness.EventType
 	Thread, Turn, Item, Kind, Key string
 	Ask, Text, Stop               string
+	Usage                         loomharness.Usage
 }
 
 func briefOf(e loomharness.Event) brief {
-	return brief{e.Type, e.Session.NativeID, e.TurnID, e.ItemID, e.ItemKind, e.InputKey, e.AskID, e.Text, e.StopReason}
+	return brief{e.Type, e.Session.NativeID, e.TurnID, e.ItemID, e.ItemKind, e.InputKey, e.AskID, e.Text, e.StopReason, e.Usage}
 }
 
 const (
@@ -452,14 +456,17 @@ func TestCodexRecordedFrames(t *testing.T) {
 		{Type: loomharness.EventTurnStarted, Thread: thread, Turn: turn, Key: "key-4"},
 		{Type: loomharness.EventMessageDelivered, Thread: thread, Turn: turn, Item: userID, Kind: "message", Key: "key-4", Text: "run it"},
 		{Type: loomharness.EventItemStarted, Thread: thread, Turn: turn, Item: "c1exec_command", Kind: "tool"},
-		{Type: loomharness.EventAskOpened, Thread: thread, Turn: turn, Item: "c1exec_command", Kind: "approval", Ask: "0"},
+		{Type: loomharness.EventAskOpened, Thread: thread, Turn: turn, Item: "c1exec_command", Kind: "approval", Ask: "0",
+			Text: "/bin/zsh -lc 'touch /tmp/codex41b/repo/f2 && echo done'\nin /tmp/codex41b/repo"}, // what it asks about
 		{Type: loomharness.EventAskResolved, Thread: thread, Ask: "0"},
 		{Type: loomharness.EventItemCompleted, Thread: thread, Turn: turn, Item: "c1exec_command", Kind: "tool"},
-		{Type: loomharness.EventUsage, Thread: thread, Turn: turn},
+		// Each usage is the step's own (last), not the thread's total, which
+		// is 2+2 by the second step.
+		{Type: loomharness.EventUsage, Thread: thread, Turn: turn, Item: turn + "/usage/2", Usage: loomharness.Usage{InputTokens: 1, OutputTokens: 1}},
 		{Type: loomharness.EventItemStarted, Thread: thread, Turn: turn, Item: "msg1", Kind: "message"},
 		{Type: loomharness.EventDelta, Thread: thread, Turn: turn, Item: "msg1", Kind: "message", Text: "finished"},
 		{Type: loomharness.EventItemCompleted, Thread: thread, Turn: turn, Item: "msg1", Kind: "message", Text: "finished"},
-		{Type: loomharness.EventUsage, Thread: thread, Turn: turn},
+		{Type: loomharness.EventUsage, Thread: thread, Turn: turn, Item: turn + "/usage/4", Usage: loomharness.Usage{InputTokens: 1, OutputTokens: 1}},
 		{Type: loomharness.EventTurnCompleted, Thread: thread, Turn: turn, Stop: "completed"},
 	}
 	for i, w := range want {
@@ -569,6 +576,81 @@ func TestCodexPromptBusy(t *testing.T) {
 	}
 }
 
+// TestCodexSetModelAndMove: SetModel and Move reach codex on the next
+// turn/start only, which codex keeps for later turns, so the turn after
+// sends neither; Move to a missing dir fails and changes nothing.
+func TestCodexSetModelAndMove(t *testing.T) {
+	f := newFixture(t, "codex-cli 0.157.1")
+	a, ctx := newAdapter(t, f), context.Background()
+	root, dir := a.Root(""), t.TempDir()
+	saveStore(root, fakeStore{Threads: map[string]fakeThread{"t-1": {}}})
+	s := a.Session(loomharness.NativeRef{Root: root, NativeID: "t-1"})
+	if err := s.Move(ctx, filepath.Join(dir, "gone")); err == nil {
+		t.Fatal("Move to a missing dir succeeded")
+	}
+	if err := s.SetModel(ctx, "gpt-5.5", []loomharness.Option{{ID: loomharness.OptionEffort, Value: "xhigh"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Move(ctx, dir); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"k1", "k2"} {
+		if err := s.Prompt(ctx, loomharness.Input{Key: k, Text: "hi"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b, err := os.ReadFile(filepath.Join(root, "turn-starts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+		var p struct{ Model, Effort, Cwd *string }
+		_ = json.Unmarshal([]byte(line), &p)
+		got = append(got, fmt.Sprint(deref(p.Model), "|", deref(p.Effort), "|", deref(p.Cwd)))
+	}
+	if want := []string{"gpt-5.5|xhigh|" + dir, "||"}; !slices.Equal(got, want) {
+		t.Fatalf("turn/start model|effort|cwd %q, want %q", got, want)
+	}
+}
+
+// TestCodexModelsCatalog: model/list maps to the catalog shape, its
+// supported reasoning efforts becoming the effort option with codex's
+// default as current; a model with none has no options.
+func TestCodexModelsCatalog(t *testing.T) {
+	a := newAdapter(t, newFixture(t, "codex-cli 0.157.1"))
+	ms, err := a.Models(context.Background())
+	if err != nil || len(ms) != 2 {
+		t.Fatalf("Models = %+v, %v", ms, err)
+	}
+	m := ms[0]
+	if m.ID != "gpt-5.5" || m.Name != "GPT-5.5" || !m.Default || m.Provider != "codex" || !slices.Equal(m.Input, []string{"text", "image"}) {
+		t.Fatalf("model = %+v", m)
+	}
+	if len(m.Options) != 1 {
+		t.Fatalf("options = %+v", m.Options)
+	}
+	d := m.Options[0]
+	var ids []string
+	for _, c := range d.Choices {
+		ids = append(ids, c.ID+"/"+c.Label+"/"+fmt.Sprint(c.Default))
+	}
+	if d.ID != loomharness.OptionEffort || d.Type != loomharness.OptionSelect || d.Current != "medium" ||
+		!slices.Equal(ids, []string{"low/Low/false", "medium/Medium/true", "xhigh/Extra High/false"}) || d.Choices[0].Description != "Fast" {
+		t.Fatalf("effort = %+v (%q)", d, ids)
+	}
+	if ms[1].Default || len(ms[1].Options) != 0 || !slices.Equal(ms[1].Input, []string{"text", "image"}) {
+		t.Fatalf("mini = %+v", ms[1])
+	}
+}
+
+func deref(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
 // TestCodexRefusesOtherServerRequests: a server request that is not an ask
 // (here a dynamic tool call Loom never registered) is answered with an
 // error, never left hanging.
@@ -651,6 +733,9 @@ func TestCodexReply(t *testing.T) {
 				}
 				if c.r.Always && !errors.Is(err, errors.ErrUnsupported) {
 					t.Fatalf("Always not offered: %v, want ErrUnsupported", err)
+				}
+				if !errors.Is(err, loomharness.ErrNotSent) { // refused before any write
+					t.Fatalf("refused Reply: %v, want ErrNotSent", err)
 				}
 				err = s.Reply(ctx, "srv-1", deny) // the ask stays open: it can still be denied
 			}
@@ -764,5 +849,202 @@ func TestCodexSlowCleanupDoesNotBlockOpen(t *testing.T) {
 	r := <-failing
 	if r.err == nil || r.ref != (loomharness.NativeRef{}) || len(loadStore(root).Threads) != 0 {
 		t.Fatalf("failing Open: %+v %v, threads %v; want the zero ref and nothing left", r.ref, r.err, loadStore(root).Threads)
+	}
+}
+
+// TestCodexIdleUnloadAndRestart: Unload (and Close) leaves an active turn and its
+// pending approval alone; it frees the opened record of a thread with a first
+// message, which Open then finds by name, and keeps that of one without, so
+// Open stays idempotent; the next Prompt works. Once nothing runs and no ask
+// is open (the idle timer's guard), Restart replaces the running root's
+// app-server and starts none for a root that was not running.
+func TestCodexIdleUnloadAndRestart(t *testing.T) {
+	f := newFixture(t, "codex-cli 0.157.1")
+	a, ctx := newAdapter(t, f), context.Background()
+	root := a.Root("")
+	saveStore(root, fakeStore{Next: 10, Threads: map[string]fakeThread{"t-1": {Active: true}}})
+	conn, err := a.Conn(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	feed, err := a.Feed(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = feed.Close() }()
+	if err := conn.Call(ctx, "ask", map[string]any{"threadId": "t-1", "method": "item/fileChange/requestApproval", "async": true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if e := next(t, feed); e.Type != loomharness.EventAskOpened || e.AskID != "srv-1" {
+		t.Fatalf("event %+v, want ask.opened srv-1", e)
+	}
+	busy := a.Session(loomharness.NativeRef{Root: root, NativeID: "t-1"})
+	if err := busy.Unload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := busy.Status(ctx); err != nil || !st.Running {
+		t.Fatalf("Unload touched the active turn: %+v %v", st, err)
+	}
+
+	fresh, errF := a.Open(ctx, spec("fresh", "/work", ""))
+	used, errU := a.Open(ctx, spec("used", "/work", ""))
+	if errF != nil || errU != nil {
+		t.Fatal(errF, errU)
+	}
+	st := loadStore(root) // used's first user message materializes it
+	th := st.Threads[used.NativeID]
+	th.Listed = true
+	st.Threads[used.NativeID] = th
+	saveStore(root, st)
+	if err := os.WriteFile(filepath.Join(root, "turns-"+used.NativeID+".json"), []byte(`{"data":[{"id":"u1","status":"completed","items":[]}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a.openMu.Lock()
+	opened := maps.Clone(a.opened) // both records; an Open that finds a thread by name records nothing
+	a.openMu.Unlock()
+	for _, free := range []string{"Unload", "Close"} { // Close frees what Unload frees
+		a.openMu.Lock()
+		a.opened = maps.Clone(opened)
+		a.openMu.Unlock()
+		for _, ref := range []loomharness.NativeRef{fresh, used} {
+			s := a.Session(ref)
+			if err := map[string]func(context.Context) error{"Unload": s.Unload, "Close": s.Close}[free](ctx); err != nil {
+				t.Fatal(free, err)
+			}
+		}
+		a.openMu.Lock()
+		kept := slices.Collect(maps.Values(a.opened))
+		a.openMu.Unlock()
+		if !slices.Equal(kept, []string{fresh.NativeID}) {
+			t.Fatalf("opened records after %s %v, want only %s", free, kept, fresh.NativeID)
+		}
+		for _, c := range []struct {
+			key string
+			ref loomharness.NativeRef
+		}{{"fresh", fresh}, {"used", used}} {
+			if again, err := a.Open(ctx, spec(c.key, "/work", "")); err != nil || again != c.ref {
+				t.Fatalf("Open %s after %s: %+v %v, want %+v", c.key, free, again, err, c.ref)
+			}
+		}
+	}
+	if n := len(loadStore(root).Threads); n != 3 {
+		t.Fatalf("%d threads after re-Open, want 3", n)
+	}
+	if err := a.Session(used).Prompt(ctx, loomharness.Input{Key: "k", Text: "hi"}); err != nil {
+		t.Fatalf("Prompt after Unload: %v", err)
+	}
+
+	if err := busy.Reply(ctx, "srv-1", loomharness.Reply{Allow: true}); err != nil {
+		t.Fatalf("the approval did not stay open across Unload: %v", err)
+	}
+	st = loadStore(root) // the turn ends: now nothing runs and no ask is open
+	st.Threads["t-1"] = fakeThread{}
+	saveStore(root, st)
+	if s, err := busy.Status(ctx); err != nil || s.Running {
+		t.Fatalf("still running: %+v %v", s, err)
+	}
+	a.mu.Lock()
+	open := len(a.asks[root])
+	a.mu.Unlock()
+	if open != 0 {
+		t.Fatalf("%d asks still open before Restart", open)
+	}
+	var before, after int
+	_ = conn.Call(ctx, "pid", nil, &before)
+	if err := a.Restart(ctx); err != nil {
+		t.Fatal(err)
+	}
+	c, err := a.Conn(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = c.Call(ctx, "pid", nil, &after)
+	if before == 0 || after == before {
+		t.Fatalf("Restart kept the app-server: pid %d, then %d", before, after)
+	}
+	if n := len(f.spawns(t)); n != 4 { // pid and CODEX_HOME per start: two starts of one root
+		t.Fatalf("spawns %v: Restart started a root that was not running", f.spawns(t))
+	}
+	if err := a.Session(used).Prompt(ctx, loomharness.Input{Key: "k2", Text: "again"}); err != nil {
+		t.Fatalf("Prompt after Restart: %v", err)
+	}
+}
+
+// TestCodexToolItemsCarryNameInputOutput: each tool item type maps to the
+// same tool shape; a started item has no output, and a non-zero exit, an
+// MCP error or an unsuccessful dynamic call is a failure.
+func TestCodexToolItemsCarryNameInputOutput(t *testing.T) {
+	for _, c := range []struct {
+		item    string
+		started bool
+		want    loomharness.Tool
+	}{
+		{`{"type":"commandExecution","id":"c1","command":"ls","status":"inProgress","commandActions":[],"cwd":"/r"}`, true,
+			loomharness.Tool{Name: "command", Input: `{"command":"ls"}`}},
+		{`{"type":"commandExecution","id":"c1","command":"ls","status":"completed","aggregatedOutput":"a.go","exitCode":0,"commandActions":[],"cwd":"/r"}`, false,
+			loomharness.Tool{Name: "command", Input: `{"command":"ls"}`, Output: "a.go"}},
+		{`{"type":"commandExecution","id":"c2","command":"false","status":"failed","aggregatedOutput":"","exitCode":1,"commandActions":[],"cwd":"/r"}`, false,
+			loomharness.Tool{Name: "command", Input: `{"command":"false"}`, Failed: true}},
+		{`{"type":"fileChange","id":"f1","status":"completed","changes":[{"path":"a.go","kind":{"type":"update"},"diff":"@@ -1 +1 @@"}]}`, false,
+			loomharness.Tool{Name: "edit", Input: `{"files":["a.go"]}`, Output: "@@ -1 +1 @@"}},
+		{`{"type":"mcpToolCall","id":"m1","server":"loom","tool":"agent_list","arguments":{"all":true},"status":"failed","error":{"message":"denied"}}`, false,
+			loomharness.Tool{Name: "loom/agent_list", Input: `{"all":true}`, Output: "denied", Failed: true}},
+		{`{"type":"dynamicToolCall","id":"d1","tool":"x","arguments":{},"status":"completed","success":true,"contentItems":[{"type":"inputText","text":"ok"}]}`, false,
+			loomharness.Tool{Name: "x", Input: `{}`, Output: "ok"}},
+		{`{"type":"webSearch","id":"w1","query":"loom"}`, false,
+			loomharness.Tool{Name: "web_search", Input: `{"query":"loom"}`}},
+	} {
+		e, ok := itemEvent(loomharness.Event{}, protocol.ThreadItem(c.item), c.started, true)
+		if !ok || e.ItemKind != "tool" || e.Tool == nil || *e.Tool != c.want {
+			t.Errorf("%s: %v %+v, want %+v", c.item, ok, e.Tool, c.want)
+		}
+	}
+}
+
+// TestCodexAsksAndFailuresCarryText: an approval's Text is what it asks
+// about (the command and its cwd, or a file change's diff from its started
+// item), a question carries its questions in T3 Code's shape, Answers
+// answers each question by id, and a failed turn carries its error, live
+// and in history.
+func TestCodexAsksAndFailuresCarryText(t *testing.T) {
+	a := NewAdapter(Config{})
+	feed, err := a.Feed(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = feed.Close() }()
+	ask := func(id, method, params string) Message {
+		return Message{ID: protocol.RequestId(`"` + id + `"`), Method: method, Params: json.RawMessage(params), ThreadID: "t-1"}
+	}
+	a.receive("r", ask("c1", "item/commandExecution/requestApproval", `{"threadId":"t-1","turnId":"u","itemId":"i1","command":"rm -rf build","cwd":"/w","reason":"clean"}`))
+	if e := next(t, feed); e.Type != loomharness.EventAskOpened || e.Text != "rm -rf build\nin /w\nclean" {
+		t.Fatalf("command ask = %+v", e)
+	}
+	a.receive("r", Message{Method: "item/started", ThreadID: "t-1", Params: json.RawMessage(`{"threadId":"t-1","turnId":"u","item":{"type":"fileChange","id":"f1","status":"inProgress","changes":[{"path":"a.go","kind":{"type":"update"},"diff":"@@ -1 +1 @@\n-a\n+b"}]}}`)})
+	if e := next(t, feed); e.Type != loomharness.EventItemStarted {
+		t.Fatalf("item = %+v", e)
+	}
+	a.receive("r", ask("f", "item/fileChange/requestApproval", `{"threadId":"t-1","turnId":"u","itemId":"f1","reason":"edit a.go"}`))
+	if e := next(t, feed); e.Type != loomharness.EventAskOpened || e.Text != "edit a.go\n@@ -1 +1 @@\n-a\n+b" {
+		t.Fatalf("file ask = %q", e.Text)
+	}
+	a.receive("r", ask("q", "item/tool/requestUserInput", `{"threadId":"t-1","turnId":"u","itemId":"q1","isBlocking":true,"questions":[{"id":"color","header":"Color","question":"Which color?","options":[{"label":"Red","description":"warm"},{"label":"Blue","description":""}]},{"id":"name","header":"Name","question":"Name it"}]}`))
+	want := []loomharness.Question{
+		{ID: "color", Header: "Color", Question: "Which color?", Options: []loomharness.Choice{{Label: "Red", Description: "warm"}, {Label: "Blue"}}},
+		{ID: "name", Header: "Name", Question: "Name it"},
+	}
+	if e := next(t, feed); e.ItemKind != "question" || e.Text != "Which color?" || !reflect.DeepEqual(e.Questions, want) {
+		t.Fatalf("question = %+v", e)
+	}
+	q := ask("q", "item/tool/requestUserInput", `{"threadId":"t-1","questions":[{"id":"color","question":"?"},{"id":"name","question":"?"}]}`)
+	got, err := answer(q, loomharness.Reply{Answers: map[string][]string{"color": {"Red"}, "name": {"Loom"}}})
+	if b, _ := json.Marshal(got); err != nil || string(b) != `{"answers":{"color":{"answers":["Red"]},"name":{"answers":["Loom"]}}}` {
+		t.Fatalf("answers = %s %v", b, err)
+	}
+
+	failed := `{"threadId":"t-1","turn":{"id":"u","items":[],"status":"failed","error":{"message":"model not found","additionalDetails":"gpt-x"}}}`
+	a.receive("r", Message{Method: "turn/completed", ThreadID: "t-1", Params: json.RawMessage(failed)})
+	if e := next(t, feed); e.Type != loomharness.EventTurnCompleted || e.StopReason != "failed" || e.Error != "model not found\ngpt-x" {
+		t.Fatalf("turn = %+v", e)
 	}
 }

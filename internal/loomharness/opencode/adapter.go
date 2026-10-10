@@ -29,6 +29,11 @@ type Config struct {
 	// <root>/<repo>/<key>). Loom keeps its presets in Worktrees/.opencode/agent,
 	// where every OpenCode service finds them for sessions below it.
 	Worktrees string
+	// Bridge is the `loom agent mcp-bridge` command. Open and Resume register
+	// it, with the agent's Launch.Env, as the "loom" MCP server of the
+	// session's location through OpenCode's runtime MCP API (bridge); nothing
+	// is written to disk. nil refuses an agent with bridge settings.
+	Bridge []string
 }
 
 // Supervisor timings; variables so tests can shorten them.
@@ -96,7 +101,7 @@ func New(cfg Config) *Adapter {
 	if cfg.Worktrees != "" {
 		a.presets = filepath.Clean(cfg.Worktrees)
 	}
-	a.defined = a.definesPreset
+	a.defined, a.bridgeCmd = a.definesPreset, cfg.Bridge
 	return a
 }
 
@@ -106,25 +111,6 @@ func (a *Adapter) Name() string { return "opencode" }
 // Session returns the port session for one recorded ref.
 func (a *Adapter) Session(ref loomharness.NativeRef) loomharness.Session {
 	return a.Client.Session(ref)
-}
-
-// Models lists the models the server offers as "provider/model" ids.
-func (a *Adapter) Models(ctx context.Context) ([]loomharness.Model, error) {
-	var r struct {
-		Data []struct {
-			ID         string `json:"id"`
-			ProviderID string `json:"providerID"`
-			Name       string `json:"name"`
-		} `json:"data"`
-	}
-	if err := a.call(ctx, "GET", "/api/model", nil, &r); err != nil {
-		return nil, err
-	}
-	out := make([]loomharness.Model, len(r.Data))
-	for i, m := range r.Data {
-		out[i] = loomharness.Model{ID: m.ProviderID + "/" + m.ID, Name: m.Name}
-	}
-	return out, nil
 }
 
 // Health checks the installed version (refused below the minimum) and
@@ -462,26 +448,50 @@ func (a *Adapter) syncPresets() error {
 		}
 	}
 	for name, content := range want {
-		file := filepath.Join(dir, name)
-		if old, err := os.ReadFile(file); err == nil && bytes.Equal(old, content) { //nolint:gosec // G304: Loom's own preset file under the configured worktrees root.
-			continue
-		}
-		tmp, err := os.CreateTemp(dir, ".loom-preset-*")
-		if err != nil {
-			return fmt.Errorf("opencode presets: %w", err)
-		}
-		_, werr := tmp.Write(content)
-		cerr := tmp.Close()
-		if err := errors.Join(werr, cerr); err != nil {
-			_ = os.Remove(tmp.Name())
-			return fmt.Errorf("opencode presets: %w", err)
-		}
-		if err := os.Rename(tmp.Name(), file); err != nil {
-			_ = os.Remove(tmp.Name())
+		if err := replaceFile(filepath.Join(dir, name), content); err != nil {
 			return fmt.Errorf("opencode presets: %w", err)
 		}
 	}
 	return nil
+}
+
+// replaceFile atomically replaces file with content (mode 0600), only when
+// its content changes, so services reload only on a real change.
+func replaceFile(file string, content []byte) error {
+	if old, err := os.ReadFile(file); err == nil && bytes.Equal(old, content) { //nolint:gosec // G304: Loom's own file under the configured worktrees root.
+		return nil
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(file), ".loom-preset-*")
+	if err != nil {
+		return err
+	}
+	_, werr := tmp.Write(content)
+	cerr := tmp.Close()
+	if err := errors.Join(werr, cerr); err != nil {
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	if err := os.Rename(tmp.Name(), file); err != nil {
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	return nil
+}
+
+// Unbridge removes the "loom" MCP server Open or Resume registered for dir,
+// so an archived or deleted agent's bridge, and its token, do not outlive
+// it in OpenCode. Registrations live only in the memory of a running
+// service, so with none running there is nothing to remove, and none is
+// started for it.
+func (a *Adapter) Unbridge(ctx context.Context, dir string) error {
+	a.mu.Lock()
+	r, ok := a.registered()
+	a.mu.Unlock()
+	if !ok || !alive(r.PID) {
+		a.settled.Delete(dir)
+		return nil
+	}
+	return a.unbridge(ctx, dir)
 }
 
 // answers reports whether the server at base is up and is process pid.

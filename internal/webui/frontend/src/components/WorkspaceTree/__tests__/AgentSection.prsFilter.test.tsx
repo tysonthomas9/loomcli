@@ -30,6 +30,10 @@ vi.mock("@/hooks", async () => {
   };
 });
 
+vi.mock("../AgentList", () => ({
+  AgentList: () => <nav aria-label="Agent API agents" />,
+}));
+
 vi.mock("@/hooks/ui", () => ({
   useToast: () => ({ showToast: mocks.showToast }),
 }));
@@ -122,6 +126,7 @@ describe("AgentSection PR view filter", () => {
     expect(
       screen.getByRole("button", { name: "+ Add agent" }),
     ).toBeInTheDocument();
+    expect(screen.getByLabelText("Agent API agents")).toBeInTheDocument();
   });
 
   it("keeps only pr-reviewer agents and hides Add agent on the PRs view", () => {
@@ -138,5 +143,6 @@ describe("AgentSection PR view filter", () => {
     expect(
       screen.queryByRole("button", { name: "+ Add agent" }),
     ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Agent API agents")).toBeNull();
   });
 });

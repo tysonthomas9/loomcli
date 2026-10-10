@@ -518,6 +518,7 @@ vi.mock("@/hooks", async () => {
   };
 });
 
+import { ExtraBrowserAgent } from "../browserAgents";
 import { WorkspaceFileBrowser } from "../WorkspaceFileBrowser";
 
 function entry(name: string, isDir = false): FileEntry {
@@ -2350,6 +2351,128 @@ describe("WorkspaceFileBrowser", () => {
     expect(screen.getByLabelText("Search files")).toBeVisible();
     expect(screen.queryByLabelText("Replace with")).toBeNull();
     expect(screen.queryByRole("button", { name: "Preview" })).toBeNull();
+  });
+
+  it("lets editors write to an Agent API agent's worktree", async () => {
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        { kind: "agent", agent: "agt_1", repo: "loomcli", exists: true },
+      ],
+    });
+    render(
+      <ExtraBrowserAgent.Provider
+        value={{
+          name: "agt_1",
+          repos: ["loomcli"],
+          repo_groups: [],
+          cross_repo: false,
+        }}
+      >
+        <WorkspaceFileBrowser mode="agent" agentName="agt_1" />
+      </ExtraBrowserAgent.Provider>,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: /agt_1.*loomcli/ }),
+    );
+    fireEvent.click(await screen.findByLabelText("main.ts"));
+    expect(await screen.findByTestId("mock-codemirror")).toHaveAttribute(
+      "data-readonly",
+      "false",
+    );
+    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
+
+    fireEvent.contextMenu(screen.getByLabelText("main.ts"));
+    for (const name of [
+      "Copy Path",
+      "Delete",
+      "Rename",
+      "New File",
+      "New Folder",
+    ]) {
+      expect(screen.getByRole("menuitem", { name })).toBeVisible();
+    }
+  });
+
+  it("re-reads an agent's changes when its hidden Files pane is shown (GT1)", async () => {
+    storeWorkingCompareMode();
+    const checkout = {
+      kind: "agent" as const,
+      agent: "agt_1",
+      repo: "loomcli",
+      exists: true,
+      change_count: 0,
+    };
+    mocks.listFileCheckouts.mockResolvedValue({ checkouts: [checkout] });
+    const agent = {
+      name: "agt_1",
+      repos: ["loomcli"],
+      repo_groups: [],
+      cross_repo: false,
+    };
+    const view = render(
+      <ExtraBrowserAgent.Provider value={agent}>
+        <WorkspaceFileBrowser mode="agent" agentName="agt_1" isActive={false} />
+      </ExtraBrowserAgent.Provider>,
+    );
+    expect(
+      await screen.findByRole("tab", { name: /Changes\s+0/ }),
+    ).toBeInTheDocument();
+
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [{ ...checkout, change_count: 2 }],
+    });
+    view.rerender(
+      <ExtraBrowserAgent.Provider value={agent}>
+        <WorkspaceFileBrowser mode="agent" agentName="agt_1" isActive />
+      </ExtraBrowserAgent.Provider>,
+    );
+    expect(
+      await screen.findByRole("tab", { name: /Changes\s+2/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("counts and groups an Agent API agent's uncommitted changes (GT1)", async () => {
+    storeWorkingCompareMode();
+    mocks.listFileCheckouts.mockResolvedValue({
+      checkouts: [
+        {
+          kind: "agent",
+          agent: "agt_1",
+          repo: "loomcli",
+          exists: true,
+          change_count: 2,
+        },
+      ],
+    });
+    mocks.gitStatusScoped.mockResolvedValue({
+      status: { "README.md": " M", "notes.txt": "??" },
+      partial: false,
+      limit_hit: false,
+      errors: [],
+    });
+    render(
+      <ExtraBrowserAgent.Provider
+        value={{
+          name: "agt_1",
+          repos: ["loomcli"],
+          repo_groups: [],
+          cross_repo: false,
+        }}
+      >
+        <WorkspaceFileBrowser mode="agent" agentName="agt_1" />
+      </ExtraBrowserAgent.Provider>,
+    );
+
+    fireEvent.click(await screen.findByRole("tab", { name: /Changes\s+2/ }));
+    expect(
+      await screen.findByRole("tab", { name: /Working tree/ }),
+    ).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByText("agt_1 · loomcli · 2")).toBeInTheDocument();
+    expect(mocks.gitStatusScoped).toHaveBeenCalledWith("ws-1", {
+      scope: "agent",
+      target: "agt_1",
+      repo: "loomcli",
+    });
   });
 
   it("shows capability loading and fail-closed retry states", async () => {

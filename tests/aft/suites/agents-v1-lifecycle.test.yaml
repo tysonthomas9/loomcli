@@ -1,0 +1,234 @@
+# Agent API lifecycle of an OpenCode lead on the real OpenCode build, with the
+# model scripted by 2.0d's fake model (see agents-v1-lead).
+suite: agents-v1-lifecycle
+classification: { area: agents, feature: agent-api-lifecycle, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: |
+  set -e
+  curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LIFE" >/dev/null || true
+  repo="$AFT_WORK_DIR/agv1-life-repo"
+  mkdir -p "$repo"
+  git -C "$repo" init -q -b main
+  echo "agents-v1 lifecycle ${RUN_ID:-local}" > "$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" -c user.email=e2e@x -c user.name=e2e commit -q -m init
+  printf '{"name":"e2e-agv1-life","type":"empty","repos":["%s"]}' "$repo" |
+    curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @- >/dev/null
+teardown: |
+  set +e
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LIFE" >/dev/null
+
+tests:
+  - name: an archived OpenCode lead refuses messages until it is unarchived
+    intent: The chat shows an archived lead's state and refuses a send; after unarchive the lead is idle and replies again
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-LIFE/v1/agents
+          headers: { Idempotency-Key: "agv1-archive-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-archive-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-life-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1ArchiveId
+        intent: "Create an OpenCode lead through the Agent API"
+      - run: |
+          set -e
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" \
+            -d '{"steps":[{"text":"AGV1-BEFORE-ARCHIVE"},{"text":"AGV1-AFTER-UNARCHIVE"}]}' >/dev/null
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-LIFE/chat/$(cat "$AFT_WORK_DIR/agv1ArchiveId")"
+        intent: "Script two replies and open the lead's chat"
+      - fill: { label: Message, value: "before archive" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-BEFORE-ARCHIVE') &&
+            (document.querySelector('section[aria-label="Agent chat"] header')?.textContent || '').includes('idle')
+        budget: 90000
+        intent: "Wait until the first reply arrives and the lead is idle"
+      - api:
+          method: POST
+          path: "/api/workspaces/E2E-AGV1-LIFE/v1/agents/${var:agv1ArchiveId}/archive"
+          headers: { Idempotency-Key: "agv1-archive-1-${RUN_ID:-local}" }
+          body: { reason: done }
+        intent: "Archive the idle lead"
+      - reload: true
+      - wait:
+          fn: >-
+            (document.querySelector('section[aria-label="Agent chat"] header')?.textContent || '').includes('archived')
+        intent: "Wait until the chat shows the lead as archived"
+      - fill: { label: Message, value: "while archived" }
+      - press: Enter
+      - wait: { selector: "section[aria-label='Agent chat'] [role=alert]" }
+      - api:
+          method: POST
+          path: "/api/workspaces/E2E-AGV1-LIFE/v1/agents/${var:agv1ArchiveId}/messages"
+          headers: { Idempotency-Key: "agv1-archived-send-${RUN_ID:-local}" }
+          body: { text: "while archived" }
+          status: 409
+          assert:
+            - path: code
+              equals: agent_archived
+        intent: "Check that a send to the archived lead fails with agent_archived"
+      - api:
+          method: POST
+          path: "/api/workspaces/E2E-AGV1-LIFE/v1/agents/${var:agv1ArchiveId}/unarchive"
+          headers: { Idempotency-Key: "agv1-unarchive-1-${RUN_ID:-local}" }
+        intent: "Unarchive the lead"
+      - reload: true
+      - wait:
+          fn: >-
+            (document.querySelector('section[aria-label="Agent chat"] header')?.textContent || '').includes('idle') &&
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-BEFORE-ARCHIVE')
+        intent: "Wait until the unarchived lead is idle with its history intact"
+      - fill: { label: Message, value: "after unarchive" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-AFTER-UNARCHIVE')
+        budget: 90000
+        intent: "Wait until the unarchived lead replies"
+      - run: |
+          set -e
+          curl -sf "$AFT_FAKE_MODEL_URL/__requests" > "$AFT_WORK_DIR/agv1-archive-requests.json"
+          python3 - "$AFT_WORK_DIR/agv1-archive-requests.json" <<'PY'
+          import json, sys
+          body = json.dumps(json.load(open(sys.argv[1]))["requests"])
+          assert "after unarchive" in body, "the message after unarchive never reached the model"
+          assert "while archived" not in body, "a message sent while archived reached the model"
+          PY
+        intent: "Check that only the messages sent while unarchived reached the model"
+
+  - name: the retention sweep expires an archived lead's history
+    intent: Once serve's R29 sweep passes an archived lead's (AFT-shortened) retention, its chat no longer shows the old history and Unarchive and ListEvents report history_expired
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-LIFE/v1/agents
+          headers: { Idempotency-Key: "agv1-expiry-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-expiry-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-life-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1ExpiryId
+        intent: "Create an OpenCode lead through the Agent API"
+      - run: |
+          set -e
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" \
+            -d '{"steps":[{"text":"AGV1-BEFORE-EXPIRY"}]}' >/dev/null
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-LIFE/chat/$(cat "$AFT_WORK_DIR/agv1ExpiryId")"
+        intent: "Script one reply and open the lead's chat"
+      - fill: { label: Message, value: "before expiry" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-BEFORE-EXPIRY') &&
+            (document.querySelector('section[aria-label="Agent chat"] header')?.textContent || '').includes('idle')
+        budget: 90000
+        intent: "Wait until the reply arrives and the lead is idle"
+      - api:
+          method: POST
+          path: "/api/workspaces/E2E-AGV1-LIFE/v1/agents/${var:agv1ExpiryId}/archive"
+          headers: { Idempotency-Key: "agv1-expiry-archive-${RUN_ID:-local}" }
+          body: { reason: done }
+        intent: "Archive the lead, which starts its retention clock"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1ExpiryId")"
+          for _ in $(seq 1 60); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LIFE/v1/agents/$id" |
+              python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("history_purged_at") else 1)' && exit 0
+            sleep 2
+          done
+          echo "the sweep did not expire the lead's history" >&2
+          exit 1
+        intent: "Wait (retention 60s, sweep every 20s) until serve's own sweep marks the history purged"
+      - reload: true
+      - wait:
+          fn: >-
+            (document.querySelector('section[aria-label="Agent chat"] header')?.textContent || '').includes('archived') &&
+            !(document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-BEFORE-EXPIRY')
+        intent: "Wait until the reloaded chat shows the lead archived with its old history gone"
+      - api:
+          method: POST
+          path: "/api/workspaces/E2E-AGV1-LIFE/v1/agents/${var:agv1ExpiryId}/unarchive"
+          headers: { Idempotency-Key: "agv1-expiry-unarchive-${RUN_ID:-local}" }
+          status: 410
+          assert:
+            - path: code
+              equals: history_expired
+        intent: "Check that Unarchive reports history_expired"
+      - api:
+          method: GET
+          path: "/api/workspaces/E2E-AGV1-LIFE/v1/agents/${var:agv1ExpiryId}/events"
+          status: 410
+          assert:
+            - path: code
+              equals: history_expired
+        intent: "Check that ListEvents reports history_expired"
+
+  - name: a failed native purge shows an incomplete expiry until the retry succeeds
+    intent: While OpenCode is unavailable the sweep's native delete fails, the chat shows History expiry incomplete and the history is kept; once OpenCode is back the next sweep purges it and the marker goes
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-LIFE/v1/agents
+          headers: { Idempotency-Key: "agv1-incomplete-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-incomplete-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-life-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1IncompleteId
+        intent: "Create an OpenCode lead, which opens its native session"
+      - api:
+          method: POST
+          path: "/api/workspaces/E2E-AGV1-LIFE/v1/agents/${var:agv1IncompleteId}/archive"
+          headers: { Idempotency-Key: "agv1-incomplete-archive-${RUN_ID:-local}" }
+          body: { reason: done }
+        intent: "Archive the lead, which starts its retention clock"
+      - run: |
+          set -e
+          # A real outage, through OpenCode's own registration: an older
+          # service (pid 1 is always alive) is registered in AFT's sandbox,
+          # which Loom refuses and never replaces (R22), and the AFT service
+          # is stopped. Loom's native delete then fails.
+          svc="$AFT_OPENCODE_SERVICE"
+          cp "$svc" "$AFT_WORK_DIR/agv1-opencode-service.json"
+          pid="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$svc")"
+          printf '{"id":"aft-old","version":"1.0.0","url":"http://127.0.0.1:9","pid":1,"password":"x"}' > "$svc"
+          kill "$pid"
+        intent: "Make OpenCode unavailable by registering an older service Loom refuses and stopping the AFT service"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1IncompleteId")"
+          for _ in $(seq 1 50); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LIFE/v1/agents/$id" |
+              python3 -c 'import json,sys; a=json.load(sys.stdin); sys.exit(0 if a.get("history_purge_failed_at") and not a.get("history_purged_at") else 1)' && exit 0
+            sleep 2
+          done
+          echo "the sweep did not record a failed purge" >&2
+          exit 1
+        intent: "Wait until serve's sweep records the failed native purge"
+      - run: |
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-LIFE/chat/$(cat "$AFT_WORK_DIR/agv1IncompleteId")"
+        intent: "Open the lead's chat"
+      - wait:
+          fn: >-
+            (document.querySelector('section[aria-label="Agent chat"] header')?.textContent || '').includes('History expiry incomplete')
+        intent: "Wait until the chat header shows History expiry incomplete"
+      - run: |
+          set -e
+          cp "$AFT_WORK_DIR/agv1-opencode-service.json" "$AFT_OPENCODE_SERVICE"
+          id="$(cat "$AFT_WORK_DIR/agv1IncompleteId")"
+          for _ in $(seq 1 50); do
+            curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-LIFE/v1/agents/$id" |
+              python3 -c 'import json,sys; a=json.load(sys.stdin); sys.exit(0 if a.get("history_purged_at") and not a.get("history_purge_failed_at") else 1)' && exit 0
+            sleep 2
+          done
+          echo "the retry did not purge the history" >&2
+          exit 1
+        intent: "Restore the registration (the stopped service; Loom starts a new one) and wait until a later sweep purges the history"
+      - reload: true
+      - wait:
+          fn: >-
+            (() => { const h = document.querySelector('section[aria-label="Agent chat"] header')?.textContent || '';
+              return h.includes('archived') && !h.includes('History expiry incomplete'); })()
+        intent: "Wait until the reloaded chat shows the lead archived with no incomplete-expiry marker"

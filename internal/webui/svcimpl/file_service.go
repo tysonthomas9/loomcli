@@ -231,14 +231,16 @@ func (s *fileServiceImpl) resolveAgentScopeRoot(wsID, target, repo string) (stri
 	if err != nil {
 		return "", err
 	}
-	if len(ws.Agents) > 0 && !agentTargetExists(ws, target) {
-		return "", service.ErrNotFound(fmt.Sprintf("agent %q not found", target))
-	}
+	// An Agent API agent is not in the workspace's agent list.
+	listed := len(ws.Agents) == 0 || agentTargetExists(ws, target)
 	var wt *ops.AgentWorktree
 	if repo != "" {
 		wt, err = s.fileOps.ResolveAgentWorktreeForRepo(wsID, target, repo)
 	} else {
 		wt, err = s.fileOps.ResolveAgentWorktree(wsID, target)
+	}
+	if !listed && (err != nil || !wt.AgentAPI) {
+		return "", service.ErrNotFound(fmt.Sprintf("agent %q not found", target))
 	}
 	if err != nil {
 		if errors.Is(err, ops.ErrAgentRepoNotAllowed) {

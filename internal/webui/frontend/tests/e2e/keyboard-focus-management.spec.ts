@@ -13,18 +13,63 @@ test.describe("Keyboard: Focus management", () => {
     page, mockApi,
   }) => {
     await bootApp(page, mockApi);
+    // The active workspace button mounts after the header; wait for it (no
+    // click) so the rail's keep-in-view effect has run before the first Tab.
+    await expect(
+      page
+        .getByRole("region", { name: "Workspace selector" })
+        .getByRole("button", { name: /^Switch to / })
+        .first(),
+    ).toBeVisible();
 
-    // Move focus to body to start clean
-    await page.evaluate(function () {
-      document.body.focus();
-    });
-
-    // Tab from body — first focusable should be the skip link
+    // Fresh load, no clicks: the first Tab must land on the skip link
     await page.keyboard.press("Tab");
 
     var skipLink = page.locator('a[href="#main-content"]');
     await expect(skipLink).toBeFocused();
     await expect(skipLink).toHaveText("Skip to main content");
+  });
+
+  test("Skip link stays hidden until reached by keyboard", async ({
+    page, mockApi,
+  }) => {
+    await bootApp(page, mockApi);
+    const skipLink = page.locator('a[href="#main-content"]');
+    const main = page.locator("#main-content");
+    await expect(
+      page
+        .getByRole("region", { name: "Workspace selector" })
+        .getByRole("button", { name: /^Switch to / })
+        .first(),
+    ).toBeVisible();
+
+    // Fresh load, no clicks: hidden, and the first Tab focuses and shows it.
+    await expect(skipLink).not.toBeInViewport();
+    await page.keyboard.press("Tab");
+    await expect(skipLink).toBeFocused();
+    await expect(skipLink).toBeInViewport();
+
+    // Activating it moves focus into the main content: the next Tab lands
+    // inside <main>, not on the header controls after the link.
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/#main-content$/);
+    await page.keyboard.press("Tab");
+    expect(
+      await page.evaluate(function () {
+        const m = document.getElementById("main-content");
+        return !!m && m !== document.activeElement && m.contains(document.activeElement);
+      }),
+    ).toBe(true);
+
+    // After a mouse click, focusing the link without the keyboard keeps it hidden.
+    const box = await main.boundingBox();
+    if (!box) throw new Error("main content has no bounding box");
+    await page.mouse.click(box.x + box.width - 5, box.y + box.height - 5);
+    await expect(skipLink).not.toBeInViewport();
+    await skipLink.focus();
+    await expect(skipLink).toBeFocused();
+    await expect(skipLink).not.toBeInViewport();
+    await skipLink.blur();
   });
 
   test("CreateIssueModal: Tab cycles within modal fields", async ({

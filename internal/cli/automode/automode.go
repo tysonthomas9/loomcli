@@ -71,7 +71,7 @@ type AutoModeState struct {
 func SetupSignalHandler() chan struct{} {
 	shutdown := make(chan struct{})
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	cmdstore.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
 	go func() {
 		sig := <-sigChan

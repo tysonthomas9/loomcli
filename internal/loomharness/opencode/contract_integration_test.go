@@ -348,16 +348,45 @@ func TestContract(t *testing.T) {
 		}
 	})
 
+	t.Run("Catalog", func(t *testing.T) {
+		models, err := a.Models(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		byID := map[string]loomharness.Model{}
+		for _, m := range models {
+			byID[m.ID] = m
+		}
+		m, m2 := byID["fake/m"], byID["fake/m2"]
+		// OpenCode gives an openai-compatible model the low, medium and high
+		// variants unless the config lists its own (m2).
+		if !m.Default || m2.Default || m.Provider != "fake" || m.ProviderName != "Fake" || m.ContextLimit != 100000 ||
+			!slices.Contains(m.Input, "text") || len(m.Options) != 1 || len(m.Options[0].Choices) != 3 {
+			t.Fatalf("fake/m = %+v, fake/m2 = %+v", m, m2)
+		}
+		if len(m2.Options) != 1 || m2.Options[0].ID != loomharness.OptionEffort || len(m2.Options[0].Choices) != 2 ||
+			m2.Options[0].Choices[0].ID != "low" || m2.Options[0].Choices[1].Label != "High" {
+			t.Fatalf("fake/m2 effort = %+v", m2.Options)
+		}
+	})
+
 	t.Run("SetModelAndMove", func(t *testing.T) {
-		if err := s.SetModel(ctx, "fake/m2"); err != nil {
+		if err := s.SetModel(ctx, "fake/m2", []loomharness.Option{{ID: loomharness.OptionEffort, Value: "high"}}); err != nil {
 			t.Fatal(err)
 		}
 		if err := s.Move(ctx, moved); err != nil {
 			t.Fatal(err)
 		}
 		info := sessionInfo(t, a, ref)
-		if info.Model.ID != "m2" || info.Location.Directory != moved {
-			t.Fatalf("session = %+v; want model m2 in %s", info, moved)
+		if info.Model.ID != "m2" || info.Model.Variant != "high" || info.Location.Directory != moved {
+			t.Fatalf("session = %+v; want model m2 (high) in %s", info, moved)
+		}
+		// Options alone, as set again after a resume, keep the session's model.
+		if err := s.SetModel(ctx, "", []loomharness.Option{{ID: loomharness.OptionEffort, Value: "low"}}); err != nil {
+			t.Fatal(err)
+		}
+		if info := sessionInfo(t, a, ref); info.Model.ID != "m2" || info.Model.Variant != "low" {
+			t.Fatalf("session = %+v; want model m2 kept, at low", info)
 		}
 	})
 
@@ -687,7 +716,7 @@ func realOpenCode(t *testing.T) string {
 func fakeModelConfig(url string) string {
 	return fmt.Sprintf(`{"provider":{"fake":{"name":"Fake","npm":"@ai-sdk/openai-compatible",
 		"options":{"baseURL":%q,"apiKey":"x"},
-		"models":{"m":{"name":"M","limit":{"context":100000,"output":4000}},"m2":{"name":"M2","limit":{"context":100000,"output":4000}}}}},
+		"models":{"m":{"name":"M","limit":{"context":100000,"output":4000}},"m2":{"name":"M2","limit":{"context":100000,"output":4000},"variants":{"low":{},"high":{}}}}}},
 		"model":"fake/m"}`, url+"/v1")
 }
 
@@ -868,7 +897,8 @@ func allEvents(t *testing.T, s loomharness.Session, limit int) []loomharness.Eve
 
 type sessionView struct {
 	Model struct {
-		ID string `json:"id"`
+		ID      string `json:"id"`
+		Variant string `json:"variant"`
 	} `json:"model"`
 	Location struct {
 		Directory string `json:"directory"`

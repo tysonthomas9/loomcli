@@ -5,7 +5,9 @@
  */
 
 import { IssueDetailPanel, ToastContainer } from "@/components";
-import { WorkspaceTree } from "@/components/WorkspaceTree";
+import { AgentChat } from "@/components/AgentChat";
+import { AgentList, WorkspaceTree } from "@/components/WorkspaceTree";
+import { NavigationType, UNSAFE_LocationContext } from "react-router-dom";
 import { SplitDetailSummary } from "@/components/IssueDetailPanel";
 import { SessionNamePrompt } from "@/components/TerminalView/layout";
 import { HelpPopover } from "@/components/TerminalView/controls";
@@ -15,6 +17,7 @@ import {
   StoreContext,
   NO_STORE_CONTEXT,
   WorkspaceProvider,
+  useAgentRoster,
 } from "@/hooks";
 import {
   createAgentStore,
@@ -595,5 +598,64 @@ export function SplitDetailSummaryFixture(): JSX.Element {
         <SplitDetailSummary issue={issue} />
       </div>
     </WorkspaceProvider>
+  );
+}
+
+/** The sidebar's live roster, which a lead's chat reads its children from. */
+function RosterFixture({ ws }: { ws: string }): null {
+  useAgentRoster(ws);
+  return null;
+}
+
+/**
+ * AgentChat for one agent, read from ?ws=&agent= (defaults w1 and a1), in a
+ * ?w=&h= box (default 480×640); ?roster=1 also runs the sidebar's roster,
+ * and ?sidebar=1 shows the sidebar's Agent API rows beside the chat
+ * (?open=1: as if at the agent's /ws/:ws/chat/:id route).
+ * The e2e spec mocks the Agent API routes.
+ */
+export function AgentChatFixture(): JSX.Element {
+  const params = new URLSearchParams(window.location.search);
+  const ws = params.get("ws") ?? "w1";
+  const agent = params.get("agent") ?? "a1";
+  const list = <AgentList workspaceId={ws} />;
+  return (
+    <div
+      style={{
+        width: Number(params.get("w") ?? 480),
+        height: Number(params.get("h") ?? 640),
+        padding: 8,
+      }}
+    >
+      {params.get("roster") === "1" && <RosterFixture ws={ws} />}
+      {params.get("sidebar") === "1" ? (
+        <div style={{ display: "flex", height: "100%" }}>
+          <div style={{ width: 220, flexShrink: 0 }}>
+            {params.get("open") === "1" ? (
+              <UNSAFE_LocationContext.Provider
+                value={{
+                  location: {
+                    pathname: `/ws/${ws}/chat/${agent}`,
+                    search: "",
+                    hash: "",
+                    state: null,
+                    key: "open",
+                    unstable_mask: undefined,
+                  },
+                  navigationType: NavigationType.Pop,
+                }}
+              >
+                {list}
+              </UNSAFE_LocationContext.Provider>
+            ) : (
+              list
+            )}
+          </div>
+          <AgentChat workspaceId={ws} agentId={params.get("agent") ?? "a1"} />
+        </div>
+      ) : (
+        <AgentChat workspaceId={ws} agentId={params.get("agent") ?? "a1"} />
+      )}
+    </div>
   );
 }

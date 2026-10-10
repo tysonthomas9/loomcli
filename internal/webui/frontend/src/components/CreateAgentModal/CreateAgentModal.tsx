@@ -1,12 +1,18 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import { AetherModal, aetherModalStyles } from "@/components/AetherModal";
+import type { Agent } from "@/api/agentsv1";
 import type {
   InteractivePromptInfo,
   RepoInfo,
   WorkspaceAgentInfo,
 } from "@/api/workspace";
-import { useCreateWorkspaceAgent, useInteractivePrompts } from "@/hooks/agents";
+import {
+  useCreateLead,
+  useCreateWorkspaceAgent,
+  useInteractivePrompts,
+  useLeadHarnesses,
+} from "@/hooks/agents";
 import { useBackends } from "@/hooks/workspace";
 import { ApiError } from "@/types/common";
 import {
@@ -66,7 +72,7 @@ const BACKGROUND_TEMPLATES: {
 
 const CUSTOM_PROMPT_TEMPLATE = {
   title: "Custom prompt",
-  description: "Define a terminal teammate with your own inline instructions.",
+  description: "A lead that follows your own inline instructions.",
   glyph: "✦",
   placeholder: "reviewer",
   testId: "create-agent-template-custom-prompt",
@@ -76,7 +82,7 @@ const CUSTOM_PROMPT_TEMPLATE = {
 function interactivePromptCard(prompt: InteractivePromptInfo) {
   if (prompt.id === "lead") {
     return {
-      description: "Orchestrates work interactively in a terminal.",
+      description: "Orchestrates work in a chat and delegates to task agents.",
       glyph: "L",
       placeholder: "lead",
       testId: "create-agent-template-lead",
@@ -122,6 +128,8 @@ export interface CreateAgentModalProps {
   defaultKind?: AgentKind;
   onClose: () => void;
   onSuccess: (agent: WorkspaceAgentInfo) => void;
+  /** A lead, or a lead with a custom persona, made through the Agent API. */
+  onLeadCreated?: (agent: Agent) => void;
 }
 
 export function CreateAgentModal({
@@ -134,6 +142,7 @@ export function CreateAgentModal({
   defaultKind,
   onClose,
   onSuccess,
+  onLeadCreated,
 }: CreateAgentModalProps): JSX.Element | null {
   const resolvedDefaultBackend = defaultBackend?.trim() || "codex";
   const resolvedDefaultName = defaultName?.trim() ?? "";
@@ -160,7 +169,9 @@ export function CreateAgentModal({
   const wasOpenRef = useRef(false);
   const nameRef = useRef<HTMLInputElement>(null);
   const createAgent = useCreateWorkspaceAgent(workspaceId);
+  const createLead = useCreateLead(workspaceId);
   const { backends } = useBackends();
+  const leadHarnesses = useLeadHarnesses(workspaceId);
   const { prompts: fetchedInteractivePrompts, error: promptLoadError } =
     useInteractivePrompts(workspaceId);
 
@@ -223,13 +234,24 @@ export function CreateAgentModal({
       prev.includes(repo) ? prev.filter((r) => r !== repo) : [...prev, repo],
     );
 
+  const isLead =
+    selectedKind === "interactive" &&
+    (selectedBuiltinPromptID === "lead" ||
+      selectedBuiltinPromptID === CUSTOM_PROMPT_ID);
+  // A lead runs only on a harness this server has; until that list loads,
+  // the chosen backend stands and the server explains a refusal.
+  const leadOnly = isLead && leadHarnesses.length > 0;
+  const harness =
+    leadOnly && !leadHarnesses.includes(backend) ? leadHarnesses[0] : backend;
+
   const backendOptions = useMemo(() => {
+    if (leadOnly) return leadHarnesses.map((h) => ({ value: h, label: h }));
     const opts = backends.map((b) => ({ value: b.name, label: b.displayName }));
     if (backend && !opts.some((o) => o.value === backend)) {
       opts.unshift({ value: backend, label: backend });
     }
     return opts.length > 0 ? opts : [{ value: backend, label: backend }];
-  }, [backend, backends]);
+  }, [backend, backends, leadOnly, leadHarnesses]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -272,10 +294,10 @@ export function CreateAgentModal({
     (selectedBuiltinPromptID === CUSTOM_PROMPT_ID
       ? customPrompt.trim() !== ""
       : selectedBuiltinPromptID.trim() !== "");
-  const canSubmit =
-    validateStoredAgentName(name) === null &&
-    hasPromptSelection &&
-    !isSubmitting;
+  const nameError = validateStoredAgentName(name);
+  // An empty name just disables Create; a typed but invalid one says why.
+  const showNameError = name.trim() !== "" && nameError !== null;
+  const canSubmit = nameError === null && hasPromptSelection && !isSubmitting;
 
   const selectBackground = (role: BackgroundRole): void => {
     setSelectedKind("background");
@@ -292,7 +314,6 @@ export function CreateAgentModal({
     setError(null);
     const trimmedName = normalizeStoredAgentName(name);
     const trimmedBackend = backend.trim();
-    const nameError = validateStoredAgentName(name);
     if (nameError) {
       setError(nameError);
       return;
@@ -300,6 +321,28 @@ export function CreateAgentModal({
 
     setIsSubmitting(true);
     try {
+      // Lead and Custom prompt (a lead with a persona override) go through
+      // the Agent API and open its chat; the other templates are unchanged.
+      if (isLead) {
+        const repo = repos.find((r) => r.name === selectedRepos[0]);
+        if (!repo) {
+          setError("Pick a repo for the lead to work in.");
+          return;
+        }
+        const baseRef = repo.default_branch;
+        const agent = await createLead({
+          preset: "lead",
+          name: trimmedName,
+          repo: repo.path, // the Agent API takes the clone path, not the name
+          ...(baseRef ? { base_ref: baseRef } : {}),
+          ...(harness ? { overrides: { harness } } : {}),
+          ...(selectedBuiltinPromptID === CUSTOM_PROMPT_ID
+            ? { persona: { text: customPrompt.trim() } }
+            : {}),
+        });
+        onLeadCreated?.(agent);
+        return;
+      }
       let roleName: string;
       let interactiveFields: {
         kind?: "interactive";
@@ -365,9 +408,13 @@ export function CreateAgentModal({
     }
   };
 
-  const repoHint = crossRepo
-    ? "No repo selected — the agent gets workspace-wide scope."
-    : "Pick every repo this agent works in. Leave all unselected for workspace scope.";
+  // A lead always works in one repo; only the other templates may run with
+  // workspace scope.
+  const repoHint = isLead
+    ? "Pick the repo this lead works in."
+    : crossRepo
+      ? "No repo selected — the agent gets workspace-wide scope."
+      : "Pick every repo this agent works in. Leave all unselected for workspace scope.";
 
   return (
     <AetherModal
@@ -517,8 +564,21 @@ export function CreateAgentModal({
                 onChange={(event) => setName(event.target.value)}
                 placeholder={namePlaceholder}
                 disabled={isSubmitting}
+                aria-invalid={showNameError}
+                aria-describedby={
+                  showNameError ? "agent-name-error" : undefined
+                }
                 data-testid="create-agent-name"
               />
+              {showNameError && (
+                <p
+                  id="agent-name-error"
+                  className={styles.fieldError}
+                  data-testid="create-agent-name-error"
+                >
+                  {nameError}
+                </p>
+              )}
             </div>
 
             <div className={styles.fieldGroup}>
@@ -528,7 +588,7 @@ export function CreateAgentModal({
               <select
                 id="agent-backend"
                 className={styles.select}
-                value={backend}
+                value={harness}
                 onChange={(event) => setBackend(event.target.value)}
                 disabled={isSubmitting}
                 data-testid="create-agent-backend"
@@ -573,7 +633,9 @@ export function CreateAgentModal({
               >
                 {selectedKind === "background"
                   ? "No repos in this workspace yet — background agents need at least one repo; interactive agents run with workspace scope."
-                  : "No repos yet — add one from the sidebar first. This agent will run with workspace scope."}
+                  : isLead
+                    ? "No repos yet — add one from the sidebar first. A lead needs a repo to work in."
+                    : "No repos yet — add one from the sidebar first. This agent will run with workspace scope."}
               </p>
             ) : (
               <div

@@ -1,0 +1,7 @@
+# Sleeps allowed in internal/loomagent tests (TestNoSleepInTests), one per
+# line as "<file relative to internal/loomagent> <enclosing func>", then why.
+# A test that needs a timeout to pass is wrong: drain the loops
+# (Service.Drain) or await the persisted event instead. Only a test that
+# waits on real processes, which nothing in-process can drain, belongs here.
+
+client/real_test.go eventually  # polls the real OpenCode build and model over HTTP (LOOM_REAL_OPENCODE=1 only)

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 	"github.com/tysonthomas9/loomcli/internal/loomharness/fake"
@@ -63,7 +64,9 @@ func (e *createEnv) service(cfg ServiceConfig) *Service {
 			return loomharness.Launch{Root: "/root/opencode"}, nil
 		}
 	}
-	return New(cfg)
+	s := New(cfg)
+	useTestClock(s) // nothing in a test waits on real time
+	return s
 }
 
 func (e *createEnv) events(t *testing.T, id, kind string) int {
@@ -82,7 +85,7 @@ func (e *createEnv) events(t *testing.T, id, kind string) int {
 }
 
 func leadReq(id string) CreateRequest {
-	return CreateRequest{Envelope: Envelope{RequestID: id}, Preset: "lead", Name: "alpha", Repo: "/repo",
+	return CreateRequest{Envelope: Envelope{RequestID: id}, Preset: "lead", Name: "alpha", Repo: "/repo", BaseRef: "main",
 		Overrides: Overrides{Harness: "opencode"}}
 }
 
@@ -117,7 +120,7 @@ func TestCreateSpecJSONConfigRoundTrip(t *testing.T) {
 	e := newCreateEnv(t)
 	s := e.service(ServiceConfig{})
 	budget := 2.5
-	req := CreateRequest{Envelope: Envelope{RequestID: "r1"}, Preset: "lead@1", Name: "alpha", Repo: "/repo",
+	req := CreateRequest{Envelope: Envelope{RequestID: "r1"}, Preset: "lead@1", Name: "alpha", Repo: "/repo", BaseRef: "main",
 		Overrides: Overrides{Harness: "opencode", Model: "fake-model", Effort: "high", MaxBudgetUSD: &budget},
 		Persona:   &Persona{Text: "custom persona"}}
 	got, err := s.Create(ctx, req)
@@ -151,7 +154,7 @@ func TestCreateSpecJSONConfigRoundTrip(t *testing.T) {
 		t.Fatalf("replay = %v, %v; want %s", again.AgentID, err, got.AgentID)
 	}
 	check(got.AgentID)
-	if spec := e.h.specs[0]; !reflect.DeepEqual(spec.Rules, want.Rules) || spec.Preset.Persona != "custom persona" {
+	if spec := e.h.specs[0]; !reflect.DeepEqual(spec.Rules, append(slices.Clone(want.Rules), subagentDeny)) || spec.Preset.Persona != "custom persona" {
 		t.Fatalf("Open got %+v", spec)
 	}
 }
@@ -361,12 +364,12 @@ func TestCreateUsesWorkspaceDefaultBackend(t *testing.T) {
 	if err != nil || a.Harness != "opencode" || deref(a.Model) != "fake-model" || e.h.specs[0].Model != "fake-model" {
 		t.Fatalf("omitted = %s/%s, %v", a.Harness, deref(a.Model), err)
 	}
-	// Explicit values win: a model the default does not name is refused by
-	// the catalog check rather than replaced.
+	// Explicit values win: a model the default does not name is kept, not
+	// replaced (unverified when the catalog lacks it, MCS1).
 	req = leadReq("r2")
 	req.Name, req.Overrides = "b", Overrides{Harness: "opencode", Model: "other"}
-	if _, err := s.Create(ctx, req); !isCode(err, CodePresetInvalid) {
-		t.Fatalf("explicit model = %v, want the catalog check", err)
+	if b, err := s.Create(ctx, req); err != nil || deref(b.Model) != "other" || !b.ModelUnverified {
+		t.Fatalf("explicit model = %s unverified=%v, %v; want other kept", deref(b.Model), b.ModelUnverified, err)
 	}
 	// An explicit harness other than the default does not take its model.
 	other := e.service(ServiceConfig{DefaultBackend: func(context.Context) (Backend, error) {
@@ -414,7 +417,7 @@ func TestCreateBridgeCapsFromHostOnly(t *testing.T) {
 		e := newCreateEnv(t)
 		s := e.service(ServiceConfig{Bridge: func(context.Context, Preset) (BridgeCaps, error) { return caps, nil }})
 		for j, preset := range []string{"daemon-worker", "pr-review-webhook"} {
-			req := CreateRequest{Envelope: Envelope{RequestID: preset}, Preset: preset, Name: preset, Repo: "/repo",
+			req := CreateRequest{Envelope: Envelope{RequestID: preset}, Preset: preset, Name: preset, Repo: "/repo", BaseRef: "main",
 				Overrides: Overrides{Harness: "opencode"}}
 			if preset == "daemon-worker" {
 				req.Overrides = ro
@@ -545,7 +548,12 @@ func specOf(t *testing.T, e *createEnv, id string) Config {
 	return cfg
 }
 
+// hasPublishDenies reports whether rules end with the gh and git push denies,
+// before any subagent deny (which policy appends last).
 func hasPublishDenies(rules []loomharness.PermissionRule) bool {
+	if n := len(rules); n > 0 && rules[n-1] == subagentDeny {
+		rules = rules[:n-1]
+	}
 	return len(rules) >= 2 && slices.Equal(rules[len(rules)-2:], publishDenies)
 }
 
@@ -675,7 +683,7 @@ func TestHarnessResumeInstallsCurrentPolicy(t *testing.T) {
 	e := newCreateEnv(t)
 	fh := e.h.Harness.(*fake.Harness)
 	s := e.service(ServiceConfig{Bridge: hook})
-	req := CreateRequest{Envelope: Envelope{RequestID: "r1"}, Preset: "daemon-worker", Name: "w", Repo: "/repo",
+	req := CreateRequest{Envelope: Envelope{RequestID: "r1"}, Preset: "daemon-worker", Name: "w", Repo: "/repo", BaseRef: "main",
 		Overrides: Overrides{Harness: "opencode", ReadOnly: true, DeniedTools: []string{"edit"}}}
 	a, err := s.Create(ctx, req)
 	if err != nil {
@@ -737,5 +745,171 @@ func TestHarnessResumeInstallsCurrentPolicy(t *testing.T) {
 	owned, _ := e.st.NativeSessions(ctx, a.AgentID)
 	if *after.HarnessSessionID != ref.NativeID || *after.HarnessSessionRoot != ref.Root || after.SpecVersion != row.SpecVersion || len(owned) != 1 {
 		t.Fatalf("resume changed identity: %+v, owned %+v", after, owned)
+	}
+}
+
+// TestCreateRefusesSharedBridgeFolder: OpenCode runs one MCP bridge per
+// folder, so a worktree that a live agent already has is refused with
+// worktree_taken when either agent has bridge tools, before any session
+// opens; agents without tools may share, and a deleted agent's folder is
+// free.
+func TestCreateRefusesSharedBridgeFolder(t *testing.T) {
+	ctx := context.Background()
+	worker := func(id string) CreateRequest { // a preset with no bridge tools
+		return CreateRequest{Envelope: Envelope{RequestID: id}, Preset: "daemon-worker", Name: id, Repo: "/repo", BaseRef: "main",
+			Overrides: Overrides{Harness: "opencode"}}
+	}
+	for name, c := range map[string]struct {
+		first, second CreateRequest
+		deleteFirst   bool
+		want          Code
+	}{
+		"lead then lead":         {leadReq("l1"), CreateRequest{Envelope: Envelope{RequestID: "l2"}, Preset: "lead", Name: "beta", Repo: "/repo", BaseRef: "main", Overrides: Overrides{Harness: "opencode"}}, false, CodeWorktreeTaken},
+		"lead then worker":       {leadReq("l1"), worker("w1"), false, CodeWorktreeTaken},
+		"worker then lead":       {worker("w1"), leadReq("l1"), false, CodeWorktreeTaken},
+		"worker then worker":     {worker("w1"), worker("w2"), false, ""},
+		"deleted lead then lead": {leadReq("l1"), CreateRequest{Envelope: Envelope{RequestID: "l2"}, Preset: "lead", Name: "beta", Repo: "/repo", BaseRef: "main", Overrides: Overrides{Harness: "opencode"}}, true, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newCreateEnv(t)
+			e.ws.path = "/wt/shared"
+			s := e.service(ServiceConfig{})
+			first, err := s.Create(ctx, c.first)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.deleteFirst {
+				if err := s.store.Tombstone(ctx, first.AgentID, time.Now()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			opened := len(e.h.specs)
+			_, err = s.Create(ctx, c.second)
+			if c.want == "" {
+				if err != nil {
+					t.Fatalf("second Create: %v", err)
+				}
+				return
+			}
+			wantCode(t, err, c.want)
+			if len(e.h.specs) != opened {
+				t.Fatal("a session opened in a folder that belongs to another agent")
+			}
+		})
+	}
+}
+
+// TestCreateUnwiredHarnessLeavesNoAgent: a harness this server does not run
+// is refused before the row is saved, with a message naming the ones it runs,
+// so a retry on a wired harness can reuse the name.
+func TestCreateUnwiredHarnessLeavesNoAgent(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	req := leadReq("r1")
+	req.Overrides.Harness = "codex"
+	_, err := s.Create(ctx, req)
+	if got := wantCode(t, err, CodeHarnessUnavailable); got.Message != "codex is not available on this server; use opencode" {
+		t.Fatalf("message = %q", got.Message)
+	}
+	if _, err := s.Create(ctx, leadReq("r2")); err != nil {
+		t.Fatalf("retry on opencode = %v", err)
+	}
+	_, err = s.Create(ctx, leadReq("r3"))
+	if got := wantCode(t, err, CodeAgentNameTaken); got.Message != `an agent named "alpha" already exists` {
+		t.Fatalf("message = %q", got.Message)
+	}
+}
+
+// CR1: a lead with no base_ref and no parent branch to start from is refused
+// before any side effect, not after its row is written.
+func TestCreateNeedsBaseRefBeforeRow(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	req := leadReq("r1")
+	req.BaseRef = ""
+	got := wantCode(t, mustFail(s.Create(ctx, req)), CodePresetInvalid)
+	if !strings.Contains(got.Message, "base_ref") {
+		t.Fatalf("message = %q", got.Message)
+	}
+	rows, _, _ := e.st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true})
+	if len(rows) != 0 || len(e.ws.ensured) != 0 || len(e.h.specs) != 0 {
+		t.Fatalf("side effects: rows %d, ensures %d, opens %d", len(rows), len(e.ws.ensured), len(e.h.specs))
+	}
+}
+
+// CR1: a Create that fails after its row is written shows an Attention at
+// once, rather than sitting in creating with nothing to say why; an unknown
+// failure is retried (create_retrying), never terminal (OR4a).
+func TestCreateFailureAfterRowShowsAttention(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{Launch: func(context.Context, loomstore.Agent, string) (loomharness.Launch, error) {
+		return loomharness.Launch{}, errors.New("launch broke")
+	}})
+	if _, err := s.Create(ctx, leadReq("r1")); err == nil {
+		t.Fatal("Create succeeded")
+	}
+	rows, _, _ := e.st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true})
+	if len(rows) != 1 || deref(rows[0].AttentionReason) != AttentionCreateRetrying {
+		t.Fatalf("rows = %d, Attention %q; want one retrying", len(rows), deref(rows[0].AttentionReason))
+	}
+	a, err := e.service(ServiceConfig{}).Create(ctx, leadReq("r1")) // a retry finishes it and clears the Attention
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, _ := e.st.GetAgent(ctx, a.AgentID)
+	if row.State != StateIdle || row.AttentionReason != nil {
+		t.Fatalf("after retry: state %s attention %v", row.State, deref(row.AttentionReason))
+	}
+}
+
+func mustFail(_ AgentInfo, err error) error { return err }
+
+// A reconcile that saw a Create in flight (its row not yet past step 1) and
+// failed to finish it must not flag the agent once that Create has finished:
+// create_incomplete is raised only on an agent still creating.
+func TestLateCreateIncompleteSkipsFinishedAgent(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	a, err := s.Create(ctx, leadReq("r1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.failed(ctx, a.AgentID, AttentionCreateIncomplete, errors.New("loomagent: was not fully inserted; retry its Create"))
+	if row, _ := e.st.GetAgent(ctx, a.AgentID); row.AttentionReason != nil {
+		t.Fatalf("Attention = %q on a created agent", *row.AttentionReason)
+	}
+}
+
+// The other order: a Create Attention is raised while a Create is in
+// flight (row inserted, before finishCreate); the Create then finishes and
+// clears it, leaving no stale Attention on the idle agent. (A first message
+// that cannot be stored, or a request cancelled after the row is written,
+// is TestReconcileQueueFirstFailure and TestReconcileCreateCancelledAfterRow.)
+func TestCreateClearsCreateIncompleteRaisedInFlight(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	createCrash = func(p string) {
+		if p != "inserted" {
+			return
+		}
+		id := onlyRow(t, e).AgentID
+		s.createFailed(ctx, id, errors.New("an earlier attempt failed"))
+		if r, _ := e.st.GetAgent(ctx, id); deref(r.AttentionReason) != AttentionCreateRetrying {
+			t.Errorf("in flight: Attention = %v; want create_retrying raised", deref(r.AttentionReason))
+		}
+	}
+	t.Cleanup(func() { createCrash = func(string) {} })
+	a, err := s.Create(ctx, leadReq("r1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, _ := e.st.GetAgent(ctx, a.AgentID)
+	if row.State != StateIdle || row.AttentionReason != nil {
+		t.Fatalf("after Create: state %s Attention %v; want idle with none", row.State, deref(row.AttentionReason))
 	}
 }

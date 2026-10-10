@@ -54,3 +54,79 @@
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;
 }
+
+/* An Agent API agent (RAIL1): its own colour, as the fleet pills are drawn,
+   with the expanded row's status dot. */
+.apiAgent {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  display: flex;
+  text-decoration: none;
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.apiAgent[aria-current="page"] {
+  border: 2px solid var(--color-accent, #c96442);
+  box-shadow: 0 0 0 2px rgba(201, 100, 66, 0.18);
+}
+
+.apiAgent:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.apiAvatar {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.dot {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  /* The sidebar's own background, so the dot reads in both themes. */
+  border: 2px solid var(--color-chrome);
+  background: var(--color-status-idle, #9ca3af);
+  pointer-events: none;
+}
+
+.errorHint {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-status-error, #ef4444);
+  padding: var(--space-2) 0;
+}
+
+.apiAgent[data-dot="working"] .dot {
+  background: var(--color-status-working, #facc15);
+}
+
+.apiAgent[data-dot="waiting"] .dot {
+  background: var(--color-warning, #f59e0b);
+}
+
+.apiAgent[data-dot="done"] .dot {
+  background: var(--color-status-done, #22c55e);
+}
+
+.apiAgent[data-dot="failed"] .dot {
+  background: var(--color-status-error, #ef4444);
+}

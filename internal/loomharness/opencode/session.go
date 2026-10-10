@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"path/filepath"
 	"slices"
@@ -24,6 +25,9 @@ func (c *Client) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharne
 		"id":       ref.NativeID,
 		"location": map[string]string{"directory": spec.Dir},
 		"metadata": spec.Metadata,
+	}
+	if err := c.bridge(ctx, spec.Dir, spec.Launch.Env); err != nil {
+		return loomharness.NativeRef{}, err
 	}
 	if spec.Preset.Name != "" {
 		agent := "loom-" + spec.Preset.Name
@@ -163,12 +167,14 @@ var agentWait = 5 * time.Second
 // nativeActions maps Loom's permission actions to the actions OpenCode
 // b30c4d0 asserts: packages/core/src/tool/plugin/shell.ts asserts "shell";
 // edit.ts, write.ts and patch.ts assert "edit"; file-access.ts asserts
-// "read" and grep.ts and glob.ts assert "grep" and "glob", which only read.
+// "read" and grep.ts and glob.ts assert "grep" and "glob", which only read;
+// subagent.ts asserts "subagent" on the agent it starts.
 var nativeActions = map[string][]string{
-	"*":    {"*"},
-	"read": {"read", "grep", "glob"},
-	"edit": {"edit"},
-	"bash": {"shell"},
+	"*":        {"*"},
+	"read":     {"read", "grep", "glob"},
+	"edit":     {"edit"},
+	"bash":     {"shell"},
+	"subagent": {"subagent"},
 }
 
 // nativeRules renders Loom rules as OpenCode rules, keeping their order
@@ -244,12 +250,17 @@ func (s *Session) Resume(ctx context.Context, l loomharness.Launch, rules []loom
 	if err := s.c.call(ctx, "GET", s.path(""), nil, &info); err != nil {
 		return loomharness.NativeRef{}, err
 	}
+	if err := s.c.bridge(ctx, info.Data.Location.Directory, l.Env); err != nil {
+		return loomharness.NativeRef{}, err
+	}
 	if agent := info.Data.Agent; strings.HasPrefix(agent, "loom-") {
 		if err := s.c.hasAgent(ctx, agent, info.Data.Location.Directory); err != nil {
 			return loomharness.NativeRef{}, err
 		}
 	}
-	s.c.dropGrants(s.ref.NativeID)
+	if !s.c.samePolicy(s.ref.NativeID, native) {
+		s.c.dropGrants(s.ref.NativeID)
+	}
 	if err := s.install(ctx, native); err != nil {
 		return loomharness.NativeRef{}, err
 	}
@@ -268,9 +279,12 @@ func (s *Session) Resume(ctx context.Context, l loomharness.Launch, rules []loom
 // (session/projector.ts:584-590, committed with the event in bus.ts:380-402)
 // and re-reads that row at every permission check (permission.ts:158-175),
 // so they also survive a server restart. The session's Always grants
-// (grant) go in after rules, then rules' deny rules again: OpenCode applies
-// the last matching rule (core/src/permission.ts:87-97), so a grant beats
-// Loom's asks and Loom's denies still beat a grant.
+// (grant) go in after rules, then rules' explicit deny rules again: OpenCode
+// applies the last matching rule (core/src/permission.ts:87-97), so a grant
+// beats Loom's asks and Loom's explicit denies still beat a grant. A deny
+// before every allow and ask rule is a default those rules already override
+// (pr-review-interactive's leading "* *" deny); applied again it would deny
+// every action, so it is not.
 func (s *Session) install(ctx context.Context, rules []map[string]string) error {
 	s.c.rulesMu.Lock()
 	grants := s.c.grants[s.ref.NativeID]
@@ -278,8 +292,11 @@ func (s *Session) install(ctx context.Context, rules []map[string]string) error 
 	native := rules
 	if len(grants) > 0 {
 		native = append(slices.Clone(rules), grants...)
+		explicit := false
 		for _, r := range rules {
-			if r["effect"] == "deny" {
+			if r["effect"] != "deny" {
+				explicit = true
+			} else if explicit {
 				native = append(native, r)
 			}
 		}
@@ -293,12 +310,27 @@ func (s *Session) install(ctx context.Context, rules []map[string]string) error 
 	return nil
 }
 
-// dropGrants ends a session's Always grants: they last until Loom opens or
-// resumes the session again, like codex's and Claude's session grants.
+// dropGrants ends a session's Always grants: they last until Loom opens the
+// session again or resumes it under a changed policy, or quarantines it, and
+// live in this process only, like codex's and Claude's session grants.
 func (c *Client) dropGrants(id string) {
 	c.rulesMu.Lock()
 	defer c.rulesMu.Unlock()
 	delete(c.grants, id)
+}
+
+// samePolicy reports whether this process installed rules as session id's
+// policy and the session is not quarantined: Loom resumes the session before
+// every hand-over, so such a Resume is the same session going on, and keeps
+// its Always grants.
+func (c *Client) samePolicy(id string, rules []map[string]string) bool {
+	c.rulesMu.Lock()
+	defer c.rulesMu.Unlock()
+	if _, held := c.held[id]; held {
+		return false
+	}
+	prev, ok := c.rules[id]
+	return ok && slices.EqualFunc(prev, rules, maps.Equal)
 }
 
 // grant makes an "always allow" reply to permission ask id last for this
@@ -521,7 +553,10 @@ func (s *Session) Messages(ctx context.Context, after string, limit int) (loomha
 			e.TurnID = turn
 			out.Events = append(out.Events, e)
 		}
-		if m.Type == "idle" {
+		if m.declined() { // no idle marker follows: end the turn as the feed does
+			out.Events = append(out.Events, loomharness.Event{Type: loomharness.EventTurnCompleted, Session: ref, TurnID: turn, StopReason: "declined", Time: m.created()})
+		}
+		if m.Type == "idle" || m.declined() {
 			turn = ""
 		}
 	}
@@ -547,27 +582,47 @@ func parseCursor(after string) (native, turn string, known bool) {
 }
 
 // pendingAsks lists the session's pending permission and form asks as
-// ask.opened events; a form, from the form list, is a question.
+// ask.opened events, with what each asks as the live feed gives it; a form,
+// from the form list, is a question.
 func (s *Session) pendingAsks(ctx context.Context, ref loomharness.NativeRef, turn string) ([]loomharness.Event, error) {
+	var perms struct {
+		Data []struct {
+			ID        string   `json:"id"`
+			Action    string   `json:"action"`
+			Resources []string `json:"resources"`
+			Message   string   `json:"message"`
+			Metadata  struct {
+				Files []fileDiff `json:"files"`
+			} `json:"metadata"`
+		} `json:"data"`
+	}
+	var forms struct {
+		Data []form `json:"data"`
+	}
+	if err := s.c.call(ctx, "GET", s.path("/permission"), nil, &perms); err != nil {
+		return nil, fmt.Errorf("list pending asks: %w", err)
+	}
+	if err := s.c.call(ctx, "GET", s.path("/form"), nil, &forms); err != nil {
+		return nil, fmt.Errorf("list pending asks: %w", err)
+	}
 	var out []loomharness.Event
-	for _, list := range []struct{ path, kind string }{{"/permission", ""}, {"/form", "question"}} {
-		var r struct {
-			Data []struct {
-				ID string `json:"id"`
-			} `json:"data"`
+	for _, p := range perms.Data {
+		out = append(out, loomharness.Event{Type: loomharness.EventAskOpened, Session: ref, AskID: p.ID, TurnID: turn,
+			Text: permissionAbout(p.Action, p.Message, p.Resources, p.Metadata.Files)})
+	}
+	for _, f := range forms.Data {
+		e := loomharness.Event{Type: loomharness.EventAskOpened, Session: ref, AskID: f.ID, ItemKind: "question", TurnID: turn, Questions: f.questions()}
+		if len(e.Questions) > 0 {
+			e.Text = e.Questions[0].Question
 		}
-		if err := s.c.call(ctx, "GET", s.path(list.path), nil, &r); err != nil {
-			return nil, fmt.Errorf("list pending asks: %w", err)
-		}
-		for _, a := range r.Data {
-			out = append(out, loomharness.Event{Type: loomharness.EventAskOpened, Session: ref, AskID: a.ID, ItemKind: list.kind, TurnID: turn})
-		}
+		out = append(out, e)
 	}
 	return out, nil
 }
 
 // turnOf finds the turn holding stored message anchor: the first message
-// that maps to an event after the newest idle marker before anchor, and its
+// that maps to an event after the newest idle marker (or declined step,
+// which ends its turn with none) before anchor, and its
 // InputKey when that message is a user input. found is false when anchor is
 // itself the turn's first such message, or is not stored.
 func (s *Session) turnOf(ctx context.Context, anchor string) (id, key string, found bool, err error) {
@@ -582,7 +637,7 @@ func (s *Session) turnOf(ctx context.Context, anchor string) (id, key string, fo
 			return "", "", false, err
 		}
 		for _, m := range page.Data {
-			if m.Type == "idle" {
+			if m.Type == "idle" || m.declined() {
 				return id, key, found, nil
 			}
 			if m.opens() {
@@ -655,7 +710,7 @@ func (s *Session) Interrupt(ctx context.Context) (bool, error) {
 }
 
 // Reply answers a permission ask (per_ id) or a question form (frm_ id). A
-// form gets r.Answer in its first field. An allowed Always installs a
+// form gets r.Answers by field key, or else r.Answer in its first field. An allowed Always installs a
 // session grant (grant) before allowing this ask once; a question has no
 // Always, so one asked with Always is refused and left open.
 func (s *Session) Reply(ctx context.Context, askID string, r loomharness.Reply) error {
@@ -669,20 +724,25 @@ func (s *Session) Reply(ctx context.Context, askID string, r loomharness.Reply) 
 		if r.Always {
 			return &Error{Code: "bad_request", Message: "opencode: question " + askID + " has no always reply"}
 		}
-		var form struct {
-			Data struct {
-				Fields []struct {
-					Key string `json:"key"`
-				} `json:"fields"`
-			} `json:"data"`
+		var f struct {
+			Data form `json:"data"`
 		}
-		if err := s.c.call(ctx, "GET", s.path("/form/"+id), nil, &form); err != nil {
+		if err := s.c.call(ctx, "GET", s.path("/form/"+id), nil, &f); err != nil {
 			return err
 		}
-		if len(form.Data.Fields) == 0 {
+		fields := f.Data.Fields
+		if len(fields) == 0 {
 			return &Error{Code: "bad_request", Message: "form " + askID + " has no fields"}
 		}
-		answer := map[string]string{form.Data.Fields[0].Key: r.Answer}
+		answer := map[string]any{}
+		if r.Answers == nil {
+			answer[fields[0].Key] = fields[0].value([]string{r.Answer})
+		}
+		for _, fl := range fields {
+			if a, ok := r.Answers[fl.Key]; ok {
+				answer[fl.Key] = fl.value(a)
+			}
+		}
 		return s.c.call(ctx, "POST", s.path("/form/"+id+"/reply"), map[string]any{"answer": answer}, nil)
 	}
 	body := map[string]string{"decision": "reject"}
@@ -700,18 +760,70 @@ func (s *Session) Reply(ctx context.Context, askID string, r loomharness.Reply) 
 	return s.c.call(ctx, "POST", s.path("/permission/"+id+"/reply"), body, nil)
 }
 
-// SetModel sets the session's "provider/model" from the next turn.
-func (s *Session) SetModel(ctx context.Context, model string) error {
+// SetModel sets the session's "provider/model" from the next turn, with the
+// effort option as the model's variant (none is the model's default). An
+// empty model keeps the session's model, or the service default if it has
+// none, so options alone can be set again after a resume.
+func (s *Session) SetModel(ctx context.Context, model string, opts []loomharness.Option) error {
+	if model == "" {
+		var err error
+		if model, err = s.model(ctx); err != nil {
+			return err
+		}
+	}
 	provider, id, ok := strings.Cut(model, "/")
 	if !ok {
 		return &Error{Code: "bad_request", Message: "model " + model + " is not provider/model"}
 	}
-	return s.c.call(ctx, "POST", s.path("/model"), map[string]any{"model": map[string]string{"providerID": provider, "id": id}}, nil)
+	ref := map[string]string{"providerID": provider, "id": id}
+	if v := loomharness.OptionValue(opts, loomharness.OptionEffort); v != "" {
+		ref["variant"] = v
+	}
+	return s.c.call(ctx, "POST", s.path("/model"), map[string]any{"model": ref}, nil)
 }
 
-// Unload is a no-op: OpenCode frees idle session memory only on a server
-// restart (design v2 §4.15).
-func (s *Session) Unload(context.Context) error { return nil }
+// model is the session's "provider/model", else the service default.
+func (s *Session) model(ctx context.Context) (string, error) {
+	var info struct{ Data struct{ Model *wireModel } }
+	if err := s.c.call(ctx, "GET", s.path(""), nil, &info); err != nil {
+		return "", err
+	}
+	if m := info.Data.Model; m != nil && m.ProviderID != "" && m.ID != "" {
+		return m.ProviderID + "/" + m.ID, nil
+	}
+	var def struct{ Data *wireModel }
+	if err := s.c.call(ctx, "GET", "/api/model/default", nil, &def); err != nil {
+		return "", err
+	}
+	if def.Data == nil || def.Data.ProviderID == "" || def.Data.ID == "" {
+		return "", &Error{Code: "bad_request", Message: "the session has no model and the service no default"}
+	}
+	return def.Data.ProviderID + "/" + def.Data.ID, nil
+}
+
+// Unload removes the session's bridge registration, which Resume makes
+// again; OpenCode frees idle session memory only on a server restart (design
+// v2 §4.15). An archived agent is unloaded once idle, so its bridge, whose
+// token the Agent API already refuses, does not outlive it there.
+func (s *Session) Unload(ctx context.Context) error {
+	if len(s.c.bridgeCmd) == 0 {
+		return nil
+	}
+	var info struct {
+		Data struct {
+			Location struct {
+				Directory string `json:"directory"`
+			} `json:"location"`
+		} `json:"data"`
+	}
+	if err := s.c.call(ctx, "GET", s.path(""), nil, &info); err != nil {
+		return err
+	}
+	if info.Data.Location.Directory == "" {
+		return nil
+	}
+	return s.c.unbridge(ctx, info.Data.Location.Directory)
+}
 
 // Close stops the session's active turn. It never deletes the native
 // session, which stays recorded for Purge (R29).
@@ -738,6 +850,8 @@ type message struct {
 	Outcome  string          `json:"outcome"`
 	Finish   string          `json:"finish"` // assistant: set when its step ended
 	Error    json.RawMessage `json:"error"`  // assistant: set when its step failed
+	Cost     float64         `json:"cost"`   // assistant: its step's cost
+	Tokens   tokens          `json:"tokens"` // assistant: its step's tokens
 	Metadata struct {
 		Notice string `json:"notice"`
 	} `json:"metadata"`
@@ -745,8 +859,12 @@ type message struct {
 		Type  string `json:"type"` // text | reasoning | tool
 		ID    string `json:"id"`
 		Text  string `json:"text"`
+		Name  string `json:"name"` // tool
 		State struct {
-			Status string `json:"status"` // tool: streaming | running | completed | error
+			Status  string          `json:"status"` // tool: streaming | running | completed | error
+			Input   json.RawMessage `json:"input"`
+			Content toolContent     `json:"content"`
+			Error   *toolError      `json:"error"`
 		} `json:"state"`
 	} `json:"content"`
 }
@@ -773,6 +891,21 @@ func (m message) opens() bool {
 		return m.Metadata.Notice == "restart"
 	case "assistant":
 		return len(m.Content) > 0 || m.usage()
+	}
+	return false
+}
+
+// declinedCall is the error OpenCode b30c4d0 gives a tool call whose
+// permission was rejected (core/src/session/runner/step.ts).
+const declinedCall = "The user declined this tool call"
+
+// declined: the step's tool call was declined, which ends the turn with no
+// idle marker (see mapper).
+func (m message) declined() bool {
+	for _, c := range m.Content {
+		if c.Type == "tool" && c.State.Error != nil && c.State.Error.Message == declinedCall {
+			return true
+		}
 	}
 	return false
 }
@@ -835,7 +968,9 @@ func (m message) events(ref loomharness.NativeRef) []loomharness.Event {
 				if c.State.Status != "completed" && c.State.Status != "error" {
 					continue
 				}
+				out, failed := toolOutput(c.State.Content, c.State.Error)
 				item.ItemKind, item.ItemID, item.Text = "tool", toolItem(m.ID, c.ID), ""
+				item.Tool = &loomharness.Tool{Name: c.Name, Input: toolInput(c.State.Input), Output: out, Failed: failed}
 			default:
 				continue
 			}
@@ -843,7 +978,7 @@ func (m message) events(ref loomharness.NativeRef) []loomharness.Event {
 		}
 		if m.usage() {
 			u := e
-			u.Type, u.ItemID = loomharness.EventUsage, m.ID
+			u.Type, u.ItemID, u.Usage = loomharness.EventUsage, m.ID, m.Tokens.usage(m.Cost)
 			out = append(out, u)
 		}
 		return out

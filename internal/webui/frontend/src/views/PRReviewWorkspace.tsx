@@ -578,6 +578,12 @@ export function PRReviewWorkspace({
           defaultName={`review-${issue.id.toLowerCase()}`}
           defaultRoleName="task"
           onClose={() => setCreateOpen(false)}
+          onLeadCreated={(agent) => {
+            setCreateOpen(false);
+            navigate(
+              `/ws/${encodeURIComponent(workspaceId)}/chat/${encodeURIComponent(agent.agent_id)}`,
+            );
+          }}
           onSuccess={(agent) => {
             setCreateOpen(false);
             void assignReviewer(agent.name);

@@ -56,6 +56,8 @@ type ProcessSpec struct {
 	Launch    loomharness.Launch // the agent's profile root and env (LaunchFor)
 	Dir       string             // the agent's worktree
 	Model     string
+	Effort    string // --effort; empty is the CLI's default
+	Persona   string // the preset persona, --append-system-prompt on every launch
 }
 
 // SessionID reserves the Claude session UUID for an Open key. It is derived,
@@ -192,6 +194,28 @@ func (p *Process) launch(ctx context.Context, line []byte) error {
 	}
 }
 
+// args is the launch command line: a fresh --session-id or a --resume, then
+// the model, effort, persona and the configured extra flags.
+func (p *Process) args(resume bool) []string {
+	args := []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json",
+		"--verbose", "--include-partial-messages", "--replay-user-messages"}
+	if resume {
+		args = append(args, "--resume", p.spec.SessionID)
+	} else {
+		args = append(args, "--session-id", p.spec.SessionID)
+	}
+	if p.spec.Model != "" {
+		args = append(args, "--model", p.spec.Model)
+	}
+	if p.spec.Effort != "" {
+		args = append(args, "--effort", p.spec.Effort)
+	}
+	if p.spec.Persona != "" {
+		args = append(args, "--append-system-prompt", p.spec.Persona)
+	}
+	return append(args, p.cfg.Args...)
+}
+
 // start checks the version, then starts the process and its reader.
 func (p *Process) start(ctx context.Context, resume bool) error {
 	env := p.env()
@@ -208,17 +232,7 @@ func (p *Process) start(ctx context.Context, resume bool) error {
 	if err != nil {
 		return err
 	}
-	args := []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json",
-		"--verbose", "--include-partial-messages", "--replay-user-messages"}
-	if resume {
-		args = append(args, "--resume", p.spec.SessionID)
-	} else {
-		args = append(args, "--session-id", p.spec.SessionID)
-	}
-	if p.spec.Model != "" {
-		args = append(args, "--model", p.spec.Model)
-	}
-	cmd := exec.Command(p.cfg.Bin, append(args, p.cfg.Args...)...) //nolint:gosec // G204: the configured claude binary.
+	cmd := exec.Command(p.cfg.Bin, p.args(resume)...) //nolint:gosec // G204: the configured claude binary.
 	cmd.Dir, cmd.Env = p.spec.Dir, env
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stderr := &tail{}

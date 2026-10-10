@@ -1,6 +1,9 @@
 package loomagent
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 // Workspace is the port loomagent uses for an agent's working copy (Spec R32,
 // design v2 §8.1.7). The host composition root supplies the implementation;
@@ -8,7 +11,13 @@ import "context"
 type Workspace interface {
 	// Ensure makes the working copy for s, or reuses it when s owns it.
 	Ensure(ctx context.Context, s WorkspaceSpec) (WorkingCopy, error)
+	// CheckBase reports whether ref resolves in repo as Ensure would resolve
+	// a new working copy's BaseRef; it makes nothing.
+	CheckBase(ctx context.Context, repo, ref string) error
 	// Status reports uncommitted paths and the branch and head for task results.
+	// A path that holds something s does not own (another branch checked
+	// out, not a worktree root) fails with ErrWorkspaceNotOwned, which a
+	// retry does not clear.
 	Status(ctx context.Context, s WorkspaceSpec) (WorkspaceStatus, error)
 	// Remove deletes the working copy for s and keeps its branch. It refuses
 	// uncommitted work unless s.Confirm equals the current Status fingerprint.
@@ -16,6 +25,11 @@ type Workspace interface {
 	// Publish pushes the agent's branch and opens or updates its one PR.
 	Publish(ctx context.Context, req PublishRequest) (PublishResult, error)
 }
+
+// ErrWorkspaceNotOwned is the Status failure for a working copy path that
+// holds something its spec does not own, such as a worktree the agent moved
+// to another branch. It lasts until someone fixes the path by hand.
+var ErrWorkspaceNotOwned = errors.New("loomagent: working copy not owned by its spec")
 
 // WorkspaceSpec names the working copy an agent needs.
 type WorkspaceSpec struct {

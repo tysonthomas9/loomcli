@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -30,6 +31,13 @@ type Client struct {
 	shellEnv func() ([]string, error)    // environment for session shell commands; nil leaves OpenCode's default
 	presets  string                      // the worktrees root whose .opencode/agent holds Loom's presets; "" refuses preset sessions
 	defined  func(agent string) bool     // whether Loom currently defines the loom-* agent; nil skips the check
+	// bridgeCmd is the `loom agent mcp-bridge` command; nil refuses an agent
+	// with bridge settings
+	bridgeCmd []string
+	// settled holds, per dir, the bridge config whose loom MCP server Loom
+	// saw connected and settled (catalogSettle) since it last saw it not
+	// connected
+	settled sync.Map
 
 	rulesMu sync.Mutex
 	rules   map[string][]map[string]string // native session id -> the rules Loom last installed
@@ -145,6 +153,10 @@ func (e *Error) Unwrap() error {
 		return loomharness.ErrUnavailable
 	case "session_missing":
 		return loomharness.ErrSessionNotFound
+	case "bad_request":
+		if e.Status != http.StatusRequestTimeout && e.Status != http.StatusTooManyRequests { // those pass
+			return loomharness.ErrBadRequest
+		}
 	}
 	return nil
 }
@@ -199,7 +211,7 @@ func (c *Client) call(ctx context.Context, method, path string, in, out any) err
 func (c *Client) do(ctx context.Context, method, path string, in any) (*http.Response, error) {
 	if c.ready != nil {
 		if err := c.ready(ctx); err != nil {
-			return nil, fmt.Errorf("opencode %s %s: %w", method, path, err)
+			return nil, fmt.Errorf("opencode %s %s: %w: %w", method, path, loomharness.ErrNotSent, err)
 		}
 	}
 	base, password := c.endpoint()
@@ -223,6 +235,9 @@ func (c *Client) do(ctx context.Context, method, path string, in any) (*http.Res
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
+		}
+		if op := (*net.OpError)(nil); errors.As(err, &op) && op.Op == "dial" { // no connection: nothing sent
+			err = fmt.Errorf("%w: %w", loomharness.ErrNotSent, err)
 		}
 		return nil, fmt.Errorf("opencode %s %s: %w: %w", method, path, loomharness.ErrUnavailable, err)
 	}

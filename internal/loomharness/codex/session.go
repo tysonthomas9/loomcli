@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -14,7 +15,11 @@ import (
 )
 
 // Session returns the protocol methods for one recorded thread.
-func (a *Adapter) Session(ref loomharness.NativeRef) *Session { return &Session{a: a, ref: ref} }
+func (a *Adapter) Session(ref loomharness.NativeRef) loomharness.Session { return a.session(ref) }
+
+func (a *Adapter) session(ref loomharness.NativeRef) *Session { return &Session{a: a, ref: ref} }
+
+var _ loomharness.Harness = (*Adapter)(nil)
 
 // Session is one codex thread on its recorded root's app-server. It holds
 // no agent state: the running turn is read from codex.
@@ -53,9 +58,26 @@ func (s *Session) Prompt(ctx context.Context, in loomharness.Input) error {
 		return fmt.Errorf("codex thread %s: %w", s.ref.NativeID, loomharness.ErrBusy)
 	}
 	text, _ := json.Marshal(map[string]string{"type": "text", "text": in.Text})
-	return s.call(ctx, "turn/start", protocol.TurnStartParams{
-		ThreadId: s.ref.NativeID, Input: []protocol.UserInput{text}, ClientUserMessageId: &in.Key,
-	}, nil)
+	params := protocol.TurnStartParams{ThreadId: s.ref.NativeID, Input: []protocol.UserInput{text}, ClientUserMessageId: &in.Key}
+	s.a.mu.Lock()
+	o := s.a.next[s.ref]
+	s.a.mu.Unlock()
+	if o.model != "" {
+		params.Model = &o.model
+	}
+	params.Effort = o.effort
+	if o.dir != "" {
+		params.Cwd = &o.dir
+	}
+	if err := s.call(ctx, "turn/start", params, nil); err != nil {
+		return err
+	}
+	s.a.mu.Lock()
+	if s.a.next[s.ref] == o { // codex keeps both for later turns
+		delete(s.a.next, s.ref)
+	}
+	s.a.mu.Unlock()
+	return nil
 }
 
 // Interrupt stops the running turn; false means none was running.
@@ -154,7 +176,7 @@ func (s *Session) Messages(ctx context.Context, after string, limit int) (loomha
 			if t.CompletedAt != nil {
 				done.Time = time.Unix(*t.CompletedAt, 0)
 			}
-			done.Type, done.StopReason = loomharness.EventTurnCompleted, stopReason(t.Status)
+			done.Type, done.StopReason, done.Error = loomharness.EventTurnCompleted, stopReason(t.Status), turnError(t.Error)
 			out.Events = append(out.Events, done)
 		}
 	}
@@ -188,6 +210,56 @@ func (s *Session) turns(ctx context.Context, p protocol.ThreadTurnsListParams) (
 	return r, err
 }
 
+// Unload frees what Loom holds for an idle thread: the record that it opened
+// it, once the thread has a first message and Open can find it by name
+// again (a thread with none keeps it, so Open stays idempotent). The thread
+// lives in its root's shared app-server, where thread/unsubscribe left it
+// loaded and did not lower memory, so Restart frees that (design §4.15).
+// Unload never touches a running turn, a waiting message or an open ask.
+func (s *Session) Unload(ctx context.Context) error {
+	one := int64(1)
+	page, err := s.turns(ctx, protocol.ThreadTurnsListParams{Limit: &one, ItemsView: json.RawMessage(`"notLoaded"`)})
+	if err == nil && len(page.Data) > 0 {
+		s.a.forget(s.ref)
+	}
+	return err
+}
+
+// Close frees what Unload frees and stops nothing else: the app-server is
+// shared, and the thread and its history are kept.
+func (s *Session) Close(ctx context.Context) error { return s.Unload(ctx) }
+
+// Resume (4.2b) must install the rules first; until then it fails and
+// nothing runs.
+func (s *Session) Resume(context.Context, loomharness.Launch, []loomharness.PermissionRule) (loomharness.NativeRef, error) {
+	return loomharness.NativeRef{}, fmt.Errorf("codex: Resume is not available until 4.2b installs rules first: %w", loomharness.ErrUnavailable)
+}
+
+// SetModel takes effect from the next turn: the next Prompt's turn/start
+// sets the model and the effort option, and codex keeps both for later turns.
+func (s *Session) SetModel(_ context.Context, model string, opts []loomharness.Option) error {
+	s.a.mu.Lock()
+	defer s.a.mu.Unlock()
+	o := s.a.next[s.ref]
+	o.model, o.effort = model, loomharness.OptionValue(opts, loomharness.OptionEffort)
+	s.a.next[s.ref] = o
+	return nil
+}
+
+// Move takes effect from the next turn, as SetModel does, with dir as the
+// thread's cwd. The NativeRef is unchanged.
+func (s *Session) Move(_ context.Context, dir string) error {
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		return fmt.Errorf("codex: move to %s: not a directory", dir)
+	}
+	s.a.mu.Lock()
+	defer s.a.mu.Unlock()
+	o := s.a.next[s.ref]
+	o.dir = dir
+	s.a.next[s.ref] = o
+	return nil
+}
+
 // Reply answers an open ask on this thread with codex's own decision. An
 // approval allowed Always is codex's session-wide grant: acceptForSession
 // (codex's session approval cache) or a permissions grant scoped "session";
@@ -201,18 +273,18 @@ func (s *Session) Reply(_ context.Context, askID string, r loomharness.Reply) er
 	ask, ok := s.a.asks[s.ref.Root][askID]
 	s.a.mu.Unlock()
 	if !ok || ask.ThreadID != s.ref.NativeID {
-		return fmt.Errorf("codex: ask %s is not open on thread %s", askID, s.ref.NativeID)
+		return fmt.Errorf("codex: ask %s is not open on thread %s: %w", askID, s.ref.NativeID, loomharness.ErrNotSent)
 	}
 	result, err := answer(ask, r)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", loomharness.ErrNotSent, err) // refused before any write
 	}
 	s.a.mu.Lock()
 	_, ok = s.a.asks[s.ref.Root][askID]
 	delete(s.a.asks[s.ref.Root], askID) // answered once; serverRequest/resolved follows
 	s.a.mu.Unlock()
 	if !ok {
-		return fmt.Errorf("codex: ask %s was answered or lost meanwhile", askID)
+		return fmt.Errorf("codex: ask %s was answered or lost meanwhile: %w", askID, loomharness.ErrNotSent)
 	}
 	return ask.Respond(result)
 }
@@ -253,6 +325,11 @@ func answer(ask Message, r loomharness.Reply) (any, error) {
 		out := protocol.ToolRequestUserInputResponse{Answers: map[string]protocol.ToolRequestUserInputAnswer{}}
 		if r.Answer != "" {
 			out.Answers[p.Questions[0].Id] = protocol.ToolRequestUserInputAnswer{Answers: []string{r.Answer}}
+		}
+		for _, q := range p.Questions {
+			if a, ok := r.Answers[q.Id]; ok {
+				out.Answers[q.Id] = protocol.ToolRequestUserInputAnswer{Answers: a}
+			}
 		}
 		return out, nil
 	case "mcpServer/elicitation/request":

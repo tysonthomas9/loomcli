@@ -24,7 +24,9 @@ import (
 
 // GitOpsImpl implements ops.GitOps using the cli package git functions.
 type GitOpsImpl struct {
-	store store.Store
+	store        store.Store
+	agentAPI     AgentAPIWorktree
+	agentAPIList AgentAPIWorktrees
 }
 
 // NewGitOps creates a new GitOps implementation.
@@ -74,7 +76,8 @@ func scopeResolverToWorkspace(resolver *cli.Resolver, workspaceID string) error 
 	return resolver.SetWorkspace(wsName)
 }
 
-func (g *GitOpsImpl) ResolveAgentWorktree(workspaceID, name string) (*ops.AgentWorktree, error) {
+// resolveAgentWorktree resolves a v5 agent name to its worktree.
+func (g *GitOpsImpl) resolveAgentWorktree(workspaceID, name string) (*ops.AgentWorktree, error) {
 	if g != nil && g.store != nil {
 		return g.resolveAgentWorktreeFromStore(context.Background(), workspaceID, name)
 	}
@@ -98,12 +101,12 @@ func (g *GitOpsImpl) ResolveAgentWorktree(workspaceID, name string) (*ops.AgentW
 	return &aw, nil
 }
 
-// ResolveAgentWorktreeForRepo resolves one explicit agent+repo checkout under
-// <ws>/worktrees/<repo>/<agent>.
-func (g *GitOpsImpl) ResolveAgentWorktreeForRepo(workspaceID, name, repoName string) (*ops.AgentWorktree, error) {
+// resolveAgentWorktreeForRepo resolves one explicit v5 agent+repo checkout
+// under <ws>/worktrees/<repo>/<agent>.
+func (g *GitOpsImpl) resolveAgentWorktreeForRepo(workspaceID, name, repoName string) (*ops.AgentWorktree, error) {
 	repoName = strings.TrimSpace(repoName)
 	if repoName == "" {
-		return g.ResolveAgentWorktree(workspaceID, name)
+		return g.resolveAgentWorktree(workspaceID, name)
 	}
 	if g != nil && g.store != nil {
 		ws, err := g.loadStoreWorkspace(context.Background(), workspaceID, name)

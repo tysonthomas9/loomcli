@@ -8,7 +8,11 @@ export type {
   UseAgentDiffStatReturn,
 } from "./useAgentDiffStat";
 
-export { useCreateWorkspaceAgent } from "./useCreateWorkspaceAgent";
+export {
+  useCreateLead,
+  useCreateWorkspaceAgent,
+  useLeadHarnesses,
+} from "./useCreateWorkspaceAgent";
 
 export { useInteractivePrompts } from "./useInteractivePrompts";
 export type { UseInteractivePromptsReturn } from "./useInteractivePrompts";
@@ -44,3 +48,38 @@ export type {
   ClaimHoldRunningAgent,
   UseClaimHoldReturn,
 } from "./useClaimHold";
+
+export { useAgentChat, useArchiveAgent, useDeleteAgent } from "./useAgentChat";
+export type { DeleteRefusal, UseAgentChatReturn } from "./useAgentChat";
+export { latestTurnError, ownSender, senderAgent } from "./agentChatModel";
+export type {
+  ChatItem,
+  Delivery,
+  StartedChild,
+  TaskCompleted,
+  ToolCall,
+  ToolStatus,
+} from "./agentChatModel";
+export {
+  useAgentRoster,
+  useRoster,
+  useRosterActivity,
+  useRosterAgent,
+} from "./useAgentRoster";
+export {
+  elapsed,
+  startedAgo,
+  trayCounts,
+  trayLabel,
+  trayRows,
+  trayWaves,
+} from "./agentTray";
+export type { TrayCounts, TrayRow, TrayStatus, TrayWave } from "./agentTray";
+export { applyActivity, childrenByParent } from "./agentRoster";
+export type { Activities, Activity } from "./agentRoster";
+export {
+  AGENT_COLOR_COUNT,
+  agentColor,
+  agentColorIndex,
+  agentInitials,
+} from "./agentColor";

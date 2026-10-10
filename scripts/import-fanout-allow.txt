@@ -14,3 +14,6 @@ internal/cli 19
 # wiring and the domain skill path policy to svcimpl's file index.
 internal/webui/app 19
 internal/webui/svcimpl 19
+# Serve mounts the Agent API through its one wiring module (agentwire, 1.7),
+# so serve itself never imports loomagent, loomstore or a harness adapter.
+internal/cli/serve 19

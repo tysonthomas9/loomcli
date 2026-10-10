@@ -20,6 +20,8 @@ const xtermMocks = vi.hoisted(() => {
     options: Record<string, unknown>;
     textarea: HTMLTextAreaElement | undefined;
     write = vi.fn();
+    input = vi.fn();
+    parser = { registerCsiHandler: vi.fn() };
     focus = vi.fn();
     scrollToBottom = vi.fn();
     scrollToLine = vi.fn();

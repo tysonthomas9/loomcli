@@ -29,7 +29,6 @@ import {
 import {
   useToast,
   useWorkspaceContext,
-  useEventContext,
   FileDocumentRegistryProvider,
   FileCapabilitiesProvider,
   FileBrowserStoreProvider,
@@ -73,6 +72,8 @@ import {
   DeleteConfirmDialog,
   MoveToDialog,
 } from "./FileExplorerDialogs";
+import { useBrowserAgents } from "./browserAgents";
+import { useRefreshTriggers } from "./useRefreshTriggers";
 import { SkillsBrowserOverlays } from "./skills";
 import { CapabilityNotices, CheckoutRepairOverlays } from "./overlays";
 import { FileExplorerEditorGroup } from "./FileExplorerEditorGroup";
@@ -157,10 +158,10 @@ function FileBrowserInner({
   agentName,
   isActive = true,
 }: FileBrowserProps) {
-  const { workspaceId, agents, repos, workspace } = useWorkspaceContext();
+  const { workspaceId, repos, workspace } = useWorkspaceContext();
+  const agents = useBrowserAgents();
   const caps = modeCapabilities(mode);
   const hasCheckouts = caps.checkouts;
-  const eventContext = useEventContext();
   const { showToast } = useToast();
   const store = useFileBrowserStoreInstance();
   const documentRegistry = useFileDocumentRegistry();
@@ -269,7 +270,6 @@ function FileBrowserInner({
   >({});
   const inlineCommitKeyRef = useRef<string | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const reconnectAttemptsRef = useRef(eventContext.reconnectAttempts);
   const lastLoadedChangeGroupsRef = useRef<Map<string, ChangeCheckoutGroup>>(
     new Map(),
   );
@@ -760,42 +760,13 @@ function FileBrowserInner({
     void refreshBranchDiffs();
   }, [refreshBranchDiffs, refreshGitStatus]);
 
-  useEffect(() => {
-    const handleFocus = () => {
-      void refreshCheckouts();
-      void refreshGitStatus();
-      void refreshBranchDiffs();
-      invalidateSkillsCatalog();
-    };
-    window.addEventListener("focus", handleFocus);
-    return () => window.removeEventListener("focus", handleFocus);
-  }, [
-    refreshBranchDiffs,
+  useRefreshTriggers({
+    isActive,
     refreshCheckouts,
     refreshGitStatus,
-    invalidateSkillsCatalog,
-  ]);
-
-  useEffect(() => {
-    const previous = reconnectAttemptsRef.current;
-    reconnectAttemptsRef.current = eventContext.reconnectAttempts;
-    if (
-      eventContext.reconnectAttempts > 0 ||
-      (previous > 0 && eventContext.state === "connected")
-    ) {
-      void refreshCheckouts();
-      void refreshGitStatus();
-      void refreshBranchDiffs();
-      invalidateSkillsCatalog();
-    }
-  }, [
-    eventContext.reconnectAttempts,
-    eventContext.state,
     refreshBranchDiffs,
-    refreshCheckouts,
-    refreshGitStatus,
     invalidateSkillsCatalog,
-  ]);
+  });
 
   useEffect(() => {
     if (!isActive) return;

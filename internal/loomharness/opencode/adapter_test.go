@@ -116,7 +116,15 @@ func fakeOpenCode(mode string) int {
 		_ = json.NewEncoder(w).Encode(map[string]any{"pid": os.Getpid()})
 	})
 	mux.HandleFunc("GET /api/model", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"data":[{"id":"m","providerID":"fake","name":"M"}]}`))
+		_, _ = w.Write([]byte(`{"data":[{"id":"m","providerID":"fake","name":"M"},` +
+			`{"id":"gpt","providerID":"openai","name":"GPT","capabilities":{"input":["text","image","pdf","audio"]},` +
+			`"limit":{"context":400000,"output":128000},"variants":[{"id":"low"},{"id":"medium"},{"id":"x-high"}]}]}`))
+	})
+	mux.HandleFunc("GET /api/model/default", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"data":{"id":"m","providerID":"fake","name":"M"}}`))
+	})
+	mux.HandleFunc("GET /api/provider", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[{"id":"openai","name":"OpenAI"}]}`))
 	})
 	go func() { _ = http.Serve(l, mux) }() //nolint:gosec // G114: test-only fake server.
 	version := os.Getenv("LOOM_FAKE_SERVICE_VERSION")
@@ -256,7 +264,7 @@ func TestAdapterStartsServiceWhenNoneRuns(t *testing.T) {
 		t.Fatal("service started before first use")
 	}
 	models, err := a.Models(ctx)
-	if err != nil || len(models) != 1 || models[0].ID != "fake/m" {
+	if err != nil || len(models) != 2 || models[0].ID != "fake/m" {
 		t.Fatalf("Models = %v, %v", models, err)
 	}
 	reg, ok := a.registered()
@@ -563,5 +571,34 @@ func TestAdapterAcceptsNewerVersion(t *testing.T) {
 	t.Cleanup(b.Stop)
 	if _, err := b.Models(ctx); err != nil || serverPID(b) != user.PID {
 		t.Fatalf("Models with a 2.0.20 service = %v (in use %d); want it reused", err, serverPID(b))
+	}
+}
+
+// TestModelsCatalog: /api/model maps to the catalog shape: the service
+// default is marked, provider names come from /api/provider (the id when
+// absent), input types keep text, image and pdf, and a model's variants are
+// its effort option with T3's per-provider default.
+func TestModelsCatalog(t *testing.T) {
+	a, _ := fakeAdapter(t, "serve", "opencode v2.0.19", loomharness.PresetConfig{Name: "lead", Persona: "be the lead"})
+	models, err := a.Models(context.Background())
+	if err != nil || len(models) != 2 {
+		t.Fatalf("Models = %+v, %v", models, err)
+	}
+	m, gpt := models[0], models[1]
+	if !m.Default || m.ProviderName != "fake" || len(m.Options) != 0 || len(m.Input) != 0 {
+		t.Fatalf("fake/m = %+v", m)
+	}
+	if gpt.ID != "openai/gpt" || gpt.Default || gpt.Provider != "openai" || gpt.ProviderName != "OpenAI" ||
+		gpt.ContextLimit != 400000 || !slices.Equal(gpt.Input, []string{"text", "image", "pdf"}) || len(gpt.Options) != 1 {
+		t.Fatalf("openai/gpt = %+v", gpt)
+	}
+	d := gpt.Options[0]
+	var got []string
+	for _, c := range d.Choices {
+		got = append(got, fmt.Sprintf("%s/%s/%v", c.ID, c.Label, c.Default))
+	}
+	if d.ID != loomharness.OptionEffort || d.Type != loomharness.OptionSelect || d.Current != "medium" ||
+		!slices.Equal(got, []string{"low/Low/false", "medium/Medium/true", "x-high/X High/false"}) {
+		t.Fatalf("effort = %+v %q", d, got)
 	}
 }

@@ -1,0 +1,478 @@
+/* The Lead chat's agent tray (DF1 round 2 mockups R1–R8): pinned on the
+   composer's top edge like the ask drawer, inset and tucked under the card. */
+.tray {
+  position: relative;
+  z-index: 0;
+  margin: 0 1rem calc(-1rem - 1px);
+  border: 1px solid var(--chat-outline);
+  border-bottom: 0;
+  border-radius: 14px 14px 0 0;
+  background: var(--color-bg-card);
+  font-size: 0.8125rem;
+}
+
+.tray[data-tucked="false"] {
+  margin-bottom: 0;
+  border-bottom: 1px solid var(--chat-outline);
+  border-radius: 14px;
+}
+
+.tray[data-narrow="true"] {
+  margin-right: 0.25rem;
+  margin-left: 0.25rem;
+}
+
+.tray[data-narrow="true"] .header {
+  gap: 6px;
+  padding-right: 8px;
+  padding-left: 8px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 12px calc(8px + 1rem + 1px);
+  border: 0;
+  border-radius: 14px 14px 0 0;
+  background: transparent;
+  color: var(--color-text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tray[data-tucked="false"] .header {
+  padding-bottom: 8px;
+}
+
+.tray[data-open="true"] .header {
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--chat-outline);
+}
+
+.header:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.avatars {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-left: -6px;
+  border: 2px solid var(--color-bg-card);
+  border-radius: var(--radius-full);
+  background: var(--chat-message-surface);
+  color: var(--color-text-muted);
+  font-size: 0.625rem;
+  font-weight: 600;
+}
+
+.avatar.badge {
+  border-color: var(--color-bg-card);
+  background: var(--agent-color);
+  color: #fff;
+}
+
+.avatar:first-child {
+  margin-left: 0;
+}
+
+.summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.count {
+  font-weight: 600;
+}
+
+.counts {
+  color: var(--color-text-muted);
+}
+
+.newChip,
+.chip,
+.tag {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  margin-left: 6px;
+  padding: 0 7px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+  color: var(--color-primary);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.chip[data-chip="attempt"] {
+  background: color-mix(in srgb, var(--color-status-working) 16%, transparent);
+  color: var(--color-text-primary);
+}
+
+.tag[data-delivery="delivered"] {
+  background: transparent;
+  color: var(--color-text-muted);
+  padding: 0;
+}
+
+.clock {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.chevron {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  transition: transform 0.15s;
+}
+
+.tray[data-open="true"] .chevron {
+  transform: rotate(180deg);
+}
+
+.listWrap {
+  position: relative;
+  padding-bottom: calc(1rem + 1px);
+}
+
+.tray[data-tucked="false"] .listWrap {
+  padding-bottom: 0;
+}
+
+.list {
+  max-height: 232px;
+  margin: 0;
+  padding: 4px 12px 8px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 2px;
+  color: var(--color-text-muted);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.divider::after {
+  flex: 1;
+  height: 1px;
+  background: var(--chat-outline);
+  content: "";
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto auto;
+  column-gap: 8px;
+  align-items: center;
+  padding: 6px 0;
+}
+
+.status {
+  display: inline-flex;
+  justify-content: center;
+}
+
+.ok {
+  color: var(--color-success);
+}
+
+.fail {
+  color: var(--color-danger);
+}
+
+.spin {
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--chat-outline);
+  border-top-color: var(--color-status-working);
+  border-radius: var(--radius-full);
+  animation: traySpin 0.9s linear infinite;
+}
+
+@keyframes traySpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.name {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+
+.dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background: var(--color-primary);
+}
+
+.meta {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+}
+
+.time {
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.open {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--chat-outline);
+  border-radius: 6px;
+  color: var(--color-text-primary);
+  font-size: 0.75rem;
+  text-decoration: none;
+}
+
+.open:hover {
+  background: var(--chat-message-surface);
+}
+
+.result {
+  grid-column: 2 / -1;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.more {
+  position: absolute;
+  right: 0;
+  bottom: calc(1rem + 1px);
+  left: 0;
+  padding: 10px 0 2px;
+  background: linear-gradient(transparent, var(--color-bg-card) 60%);
+  color: var(--color-text-muted);
+  font-size: 0.6875rem;
+  text-align: center;
+  pointer-events: none;
+}
+
+.tray[data-tucked="false"] .more {
+  bottom: 0;
+}
+
+/* Timeline markers: one quiet line per started wave and per result. */
+.marker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  padding: 0 4px;
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+}
+
+/* An agent's initials on its stable colour (CL1); see AgentBadge. */
+.badge {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  border-radius: var(--radius-full);
+  background: var(--agent-color);
+  color: #fff;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+/* A started child in the Started marker: avatar and name, a link. */
+.childChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-text-primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.childChip:hover {
+  text-decoration: underline;
+}
+
+/* The Started marker's folded agent_create calls: "2 tool calls ›". */
+.calls {
+  margin-left: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 0.71875rem;
+  cursor: pointer;
+}
+
+.calls:hover {
+  color: var(--color-text-primary);
+}
+
+.callsChevron {
+  display: inline-block;
+  transition: transform 0.15s ease;
+}
+
+.calls[aria-expanded="true"] .callsChevron {
+  transform: rotate(90deg);
+}
+
+/*
+ * A child's result as the E1 light card (CL1): no fill at rest, a faint
+ * outline and a 2px bar in the agent's colour at 55%; on hover a light fill
+ * and the bar at full colour. The whole card is one link.
+ */
+.card {
+  display: grid;
+  grid-template-columns: 18px auto 1fr auto auto;
+  align-items: center;
+  gap: 1px 10px;
+  padding: 7px 12px;
+  border: 1px solid
+    color-mix(in srgb, var(--color-text-primary) 6%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--agent-color) 55%, transparent);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.card:hover {
+  border-color: color-mix(in srgb, var(--color-text-primary) 9%, transparent);
+  border-left-color: var(--agent-color);
+  background: color-mix(in srgb, var(--color-bg-card) 55%, transparent);
+}
+
+.card .badge {
+  opacity: 0.85;
+}
+
+.cardName {
+  color: var(--color-text-primary);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.cardState {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.cardOk {
+  color: color-mix(
+    in srgb,
+    var(--color-success) 80%,
+    var(--color-text-primary)
+  );
+}
+
+.cardFail {
+  color: var(--color-danger);
+}
+
+.cardTime {
+  grid-column: 4;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.cardGo {
+  grid-column: 5;
+  font-size: 0.875rem;
+}
+
+.cardResult {
+  grid-column: 2 / 6;
+  overflow: hidden;
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardResult[data-failed="true"] {
+  color: var(--color-danger);
+}
+
+/* A message another agent sent on purpose: a named card, accent edge. */
+.fromAgent {
+  max-width: 80%;
+  padding: 10px 14px;
+  border: 1px solid var(--chat-outline);
+  border-left: 3px solid var(--color-primary);
+  border-radius: 12px;
+  background: var(--color-bg-card);
+  font-size: 0.875rem;
+}
+
+.fromAgent[data-waiting="true"] {
+  border-style: dashed;
+  border-left-style: solid;
+}
+
+.fromTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+}
+
+.fromTitle strong {
+  color: var(--color-text-primary);
+}

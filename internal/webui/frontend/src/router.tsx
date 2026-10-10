@@ -16,6 +16,7 @@
  *     /files                               → FilesPage (lazy)
  *     /skills                              → SkillsPage (lazy)
  *     /issues/:issueId                     → KanbanPage + issue slide-over
+ *     /chat/:agentId                       → AgentChatPage (Agent API chat, any harness)
  *   /test/*                                → TestFixtures (dev only, preserved)
  *   *                                      → NotFound (404 page)
  */
@@ -43,6 +44,7 @@ const devRoutes = import.meta.env.DEV
             PasteConfirmFixture,
             WorkspaceTreeFixture,
             SplitDetailSummaryFixture,
+            AgentChatFixture,
           } = await import("@/TestFixtures");
           return {
             Component: () => {
@@ -63,6 +65,8 @@ const devRoutes = import.meta.env.DEV
                 fixture = <WorkspaceTreeFixture />;
               else if (path === "/test/split-detail-summary")
                 fixture = <SplitDetailSummaryFixture />;
+              else if (path === "/test/agent-chat")
+                fixture = <AgentChatFixture />;
               else return <NotFound />;
               return (
                 <ErrorBoundary>
@@ -183,6 +187,13 @@ const viewRoutes = [
     lazy: () =>
       import("@/views/KanbanPage").then((m) => ({
         Component: m.KanbanPage,
+      })),
+  },
+  {
+    path: "chat/:agentId",
+    lazy: () =>
+      import("@/views/AgentChatPage").then((m) => ({
+        Component: m.AgentChatPage,
       })),
   },
   {

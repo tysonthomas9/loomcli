@@ -18,13 +18,18 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 )
 
-// Step is one scripted step of a turn. Set exactly one of Delta, Ask or Crash.
+// Step is one scripted step of a turn. Set exactly one of Delta, Ask, Crash, Usage or Fail.
 type Step struct {
-	Delta    string // emits a delta on the turn's message item
-	Ask      string // opens an ask with this ID; the turn waits for Reply
-	Question bool   // the Ask is a question, not an approval
-	Crash    bool   // the harness process dies here, mid-turn
-	Gap      bool   // the live Feed misses this step's event (it gets feed.gap); Messages still has it
+	Delta     string                 // emits a delta on the turn's message item
+	Ask       string                 // opens an ask with this ID; the turn waits for Reply
+	Question  bool                   // the Ask is a question, not an approval
+	About     string                 // what the Ask asks about (its ask.opened Text)
+	Questions []loomharness.Question // the Ask's questions
+	Fail      string                 // ends the turn failed with this error
+	Crash     bool                   // the harness process dies here, mid-turn
+	Gap       bool                   // the live Feed misses this step's event (it gets feed.gap); Messages still has it
+	Usage     *loomharness.Usage     // emits a usage event with these counts
+	Tool      *loomharness.Tool      // emits a tool call's item.started (name and input) and item.completed
 }
 
 // Turn is one scripted turn.
@@ -62,6 +67,9 @@ type session struct {
 	ref           loomharness.NativeRef
 	key           string
 	model, dir    string
+	opts          []loomharness.Option
+	opened        string      // the model Open set, which a restart keeps
+	turnModels    []Selection // the model and options each turn started with
 	seq           int64
 	turns         int
 	history       []loomharness.Event
@@ -103,8 +111,29 @@ func (h *Harness) Script(key string, turns ...Turn) {
 
 func (h *Harness) Name() string { return "fake" }
 
+// Models offers fake-model, whose effort is low, medium (the default) or high.
 func (h *Harness) Models(context.Context) ([]loomharness.Model, error) {
-	return []loomharness.Model{{ID: "fake-model", Name: "Fake model"}}, nil
+	return []loomharness.Model{{ID: "fake-model", Name: "Fake model", Provider: "fake", ProviderName: "Fake",
+		ContextLimit: 1000, Input: []string{"text"}, Default: true,
+		Options: []loomharness.OptionDescriptor{{ID: loomharness.OptionEffort, Label: "Effort", Type: loomharness.OptionSelect,
+			Current: "medium", Choices: []loomharness.OptionChoice{{ID: "low", Label: "Low"},
+				{ID: "medium", Label: "Medium", Default: true}, {ID: "high", Label: "High"}}}}}}, nil
+}
+
+// Selection is the model and options a turn started with.
+type Selection struct {
+	Model   string
+	Options []loomharness.Option
+}
+
+// Turns returns the model and options each turn on ref started with, oldest first.
+func (h *Harness) Turns(ref loomharness.NativeRef) []Selection {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if s, ok := h.sessions[ref]; ok {
+		return slices.Clone(s.turnModels)
+	}
+	return nil
 }
 
 func (h *Harness) Health(context.Context) (loomharness.Health, error) {
@@ -131,7 +160,7 @@ func (h *Harness) Open(_ context.Context, spec loomharness.OpenSpec) (loomharnes
 	h.nextID++
 	ref := loomharness.NativeRef{Root: spec.Launch.Root, NativeID: "fake_ses_" + strconv.Itoa(h.nextID)}
 	h.byKey[spec.Key] = ref
-	h.sessions[ref] = &session{ref: ref, key: spec.Key, model: spec.Model, dir: spec.Dir, inputs: map[string]loomharness.Landed{},
+	h.sessions[ref] = &session{ref: ref, key: spec.Key, model: spec.Model, opened: spec.Model, dir: spec.Dir, inputs: map[string]loomharness.Landed{},
 		rules: slices.Clone(spec.Rules)}
 	return ref, h.open
 }
@@ -227,6 +256,9 @@ func (h *Harness) crash() {
 		if s.running {
 			s.crashed = true
 		}
+		// What SetModel set lives only in the runtime, as in codex and
+		// Claude: the session is back on its opened model with no options.
+		s.model, s.opts = s.opened, nil
 	}
 	for f := range h.feeds {
 		f.closeLocked()
@@ -270,23 +302,34 @@ func (h *Harness) run(s *session) {
 			if st.Question {
 				kind = "question"
 			}
-			h.emit(s, loomharness.Event{Type: loomharness.EventAskOpened, AskID: st.Ask, ItemKind: kind}, !st.Gap)
+			h.emit(s, loomharness.Event{Type: loomharness.EventAskOpened, AskID: st.Ask, ItemKind: kind, Text: st.About, Questions: st.Questions}, !st.Gap)
 			return
+		case st.Fail != "":
+			h.endTurn(s, "failed", st.Fail)
+			return
+		case st.Usage != nil:
+			h.emit(s, loomharness.Event{Type: loomharness.EventUsage, Usage: *st.Usage}, !st.Gap)
+		case st.Tool != nil:
+			id := s.turnID + "/tool/" + strconv.Itoa(s.step)
+			started := loomharness.Tool{Name: st.Tool.Name, Input: st.Tool.Input}
+			done := *st.Tool
+			h.emit(s, loomharness.Event{Type: loomharness.EventItemStarted, ItemID: id, ItemKind: "tool", Tool: &started}, !st.Gap)
+			h.emit(s, loomharness.Event{Type: loomharness.EventItemCompleted, ItemID: id, ItemKind: "tool", Tool: &done}, !st.Gap)
 		default:
 			h.emit(s, loomharness.Event{Type: loomharness.EventDelta, ItemID: s.turnID + "/msg", ItemKind: "message", Text: st.Delta}, !st.Gap)
 		}
 	}
-	h.endTurn(s, "completed")
+	h.endTurn(s, "completed", "")
 }
 
-func (h *Harness) endTurn(s *session, reason string) {
+func (h *Harness) endTurn(s *session, reason, errText string) {
 	if s.ask != "" {
 		h.emit(s, loomharness.Event{Type: loomharness.EventAskLost, AskID: s.ask}, true)
 		s.ask = ""
 	}
 	s.running, s.crashed = false, false
 	s.lastInterrupt = reason == "cancelled"
-	h.emit(s, loomharness.Event{Type: loomharness.EventTurnCompleted, StopReason: reason}, true)
+	h.emit(s, loomharness.Event{Type: loomharness.EventTurnCompleted, StopReason: reason, Error: errText}, true)
 }
 
 // lookup returns the live session for ref, under h.mu.
@@ -358,7 +401,7 @@ func (x *sessionHandle) Resume(_ context.Context, l loomharness.Launch, rules []
 			x.h.emit(s, loomharness.Event{Type: loomharness.EventTurnResumed}, true)
 			x.h.run(s)
 		} else {
-			x.h.endTurn(s, "cancelled")
+			x.h.endTurn(s, "cancelled", "")
 		}
 	}
 	return s.ref, nil
@@ -393,6 +436,7 @@ func (x *sessionHandle) Prompt(_ context.Context, in loomharness.Input) error {
 		return nil
 	}
 	s.turns++
+	s.turnModels = append(s.turnModels, Selection{s.model, slices.Clone(s.opts)})
 	s.turn, s.turnID, s.step = t, s.ref.NativeID+"/turn_"+strconv.Itoa(s.turns), 0
 	s.running, s.lastInterrupt = true, false
 	s.inputs[in.Key] = loomharness.LandedFound
@@ -412,7 +456,7 @@ func (x *sessionHandle) Interrupt(context.Context) (bool, error) {
 	if err != nil || !s.running || s.crashed {
 		return false, err
 	}
-	x.h.endTurn(s, "cancelled")
+	x.h.endTurn(s, "cancelled", "")
 	return true, nil
 }
 
@@ -492,15 +536,18 @@ func (x *sessionHandle) Status(context.Context) (loomharness.Status, error) {
 	return st, nil
 }
 
-func (x *sessionHandle) SetModel(_ context.Context, model string) error {
-	return x.idle(func(s *session) { s.model = model }, false)
+func (x *sessionHandle) SetModel(_ context.Context, model string, opts []loomharness.Option) error {
+	return x.idle(func(s *session) { s.model, s.opts = model, slices.Clone(opts) }, false)
 }
 
 func (x *sessionHandle) Move(_ context.Context, dir string) error {
 	return x.idle(func(s *session) { s.dir = dir }, true)
 }
 
-func (x *sessionHandle) Unload(context.Context) error { return x.idle(func(*session) {}, true) }
+// Unload frees an idle session's runtime as Close does; Resume reopens it.
+func (x *sessionHandle) Unload(context.Context) error {
+	return x.idle(func(s *session) { s.closed = true }, true)
+}
 
 // Close stops the session's runtime and keeps its history. A running turn
 // dies as in a crash. Until Resume, only HasInput, Messages and Status work.

@@ -167,6 +167,8 @@ vi.mock("@/hooks/workspace", async () => {
 
 // AgentSection's module import triggers a vitest-4 mock-allocation blowup;
 // stub it to a lightweight shim that still renders the add-agent entrypoint.
+// The collapsed rail's Agent API agents need a router and the Agent API.
+vi.mock("../ApiAgentRailItems", () => ({ ApiAgentRailItems: () => null }));
 vi.mock("../AgentSection", () => ({
   AgentSection: ({ onAddClick }: { onAddClick?: () => void }) =>
     onAddClick ? (

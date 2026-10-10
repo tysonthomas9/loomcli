@@ -6,7 +6,14 @@
 //   {tool_calls: [{name, arguments}]}      stream tool calls (arguments: object)
 //   {bash: "cmd"}                          a call to OpenCode 2.x's shell tool; under
 //                                          a bash "ask" rule OpenCode stops for approval
-// With the queue empty a turn gets the text "ok". OpenCode's title requests
+//   {error: "message"}                     answer HTTP 400 with an OpenAI error, so the
+//                                          turn fails with that message
+// A step with next: "tool" answers only a request whose last message is a
+// tool result (a turn's follow-up after its tool call), and next: "prompt"
+// only one whose last message is not (a new prompt); a request takes the
+// first step it may. So a lead's follow-up and its child's first prompt,
+// which race for the shared queue, each take their own step. With no step
+// it may take, a turn gets the text "ok". OpenCode's title requests
 // (system prompt "You are a title generator") get "Title" and take no step.
 //
 // Control plane:
@@ -33,6 +40,10 @@ export function createFakeModel() {
   }
 
   function reply(res, step) {
+    if (step.error !== undefined) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ error: { message: String(step.error), type: "invalid_request_error", code: null } }));
+    }
     if (step.bash !== undefined) {
       step = { tool_calls: [{ name: "shell", arguments: { command: step.bash } }] };
     }
@@ -65,7 +76,9 @@ export function createFakeModel() {
         requests.push(body);
         const system = (body.messages ?? []).filter((m) => m.role === "system").map((m) => JSON.stringify(m.content)).join("\n");
         if (system.includes("You are a title generator")) return reply(res, { text: "Title" });
-        return reply(res, steps.shift() ?? { text: "ok" });
+        const kind = (body.messages ?? []).at(-1)?.role === "tool" ? "tool" : "prompt";
+        const i = steps.findIndex((s) => !s.next || s.next === kind);
+        return reply(res, i < 0 ? { text: "ok" } : steps.splice(i, 1)[0]);
       }
       json(404, { error: `no route ${req.method} ${path}` });
     });

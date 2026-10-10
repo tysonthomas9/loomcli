@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -35,21 +37,27 @@ type store struct {
 	envFail  bool
 	bareRuns int // prompts accepted while the session had no environment
 	patchErr bool
-	delErr   bool                // DELETE /api/session/{id} fails
-	patchLie int                 // the next n session PATCHes commit, then answer 500
-	hangLie  bool                // a PATCH that commits (patchLie) never answers instead
-	stops    int                 // POST /interrupt calls
-	lateRuns int                 // prompts accepted after an interrupt
-	stopErr  bool                // POST /interrupt answers 500
-	stopHang bool                // POST /interrupt never answers
-	postErr  bool                // POST /api/session creates the session, then fails
-	race     *openRace           // pairs two concurrent session GETs, counts creates
-	perms    map[string]permReq  // pending permission asks by id, readable and answerable
-	replies  map[string]string   // permission ask id -> the decision Loom sent
-	agents   map[string]bool     // agent ids the service offers
-	agentDir []string            // location[directory] of each agent lookup
-	loading  bool                // the location lists no agents yet
-	asks     map[string][]string // pending per_/frm_ ask ids, per session
+	delErr   bool                      // DELETE /api/session/{id} fails
+	patchLie int                       // the next n session PATCHes commit, then answer 500
+	hangLie  bool                      // a PATCH that commits (patchLie) never answers instead
+	stops    int                       // POST /interrupt calls
+	lateRuns int                       // prompts accepted after an interrupt
+	stopErr  bool                      // POST /interrupt answers 500
+	stopHang bool                      // POST /interrupt never answers
+	postErr  bool                      // POST /api/session creates the session, then fails
+	race     *openRace                 // pairs two concurrent session GETs, counts creates
+	perms    map[string]permReq        // pending permission asks by id, readable and answerable
+	replies  map[string]string         // permission ask id -> the decision Loom sent
+	agents   map[string]bool           // agent ids the service offers
+	agentDir []string                  // location[directory] of each agent lookup
+	loading  bool                      // the location lists no agents yet
+	asks     map[string][]string       // pending per_/frm_ ask ids, per session
+	forms    map[string]form           // pending forms by id, as GET form/{id} and the form list give them
+	answers  map[string]map[string]any // form id -> the answer Loom sent
+	mcp      string                    // a registered loom MCP server's /api/mcp status; "" is connected
+	bridges  map[string]map[string]any // location dir -> the loom MCP config PUT there
+	puts     int                       // PUT /api/experimental/mcp/loom calls
+	mcpDown  bool                      // DELETE /api/experimental/mcp/loom fails
 }
 
 func newStore() *store {
@@ -92,6 +100,58 @@ func fakeServer(t *testing.T, st *store) *Client {
 			return
 		}
 		reply(w, 200, map[string]any{"data": body})
+	})
+	mux.HandleFunc("GET /api/mcp", func(w http.ResponseWriter, r *http.Request) {
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		dir := r.URL.Query().Get("location[directory]")
+		_, ok := st.bridges[dir]
+		if _, err := os.Stat(dir); !ok && os.IsNotExist(err) {
+			w.WriteHeader(500) // as DELETE: OpenCode 2.0.19 cannot load a location whose directory is gone
+			return
+		}
+		data := []map[string]any{}
+		if ok {
+			status := st.mcp
+			if status == "" {
+				status = "connected"
+			}
+			data = append(data, map[string]any{"name": "loom", "status": map[string]string{"status": status}})
+		}
+		reply(w, 200, map[string]any{"data": data})
+	})
+	mux.HandleFunc("PUT /api/experimental/mcp/loom", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Config map[string]any `json:"config"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Config["type"] != "local" || body.Config["command"] == nil {
+			reply(w, 400, map[string]string{"_tag": "BadRequest", "message": "bad config"})
+			return
+		}
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		if st.bridges == nil {
+			st.bridges = map[string]map[string]any{}
+		}
+		st.bridges[r.URL.Query().Get("location[directory]")] = body.Config
+		st.puts++
+		w.WriteHeader(204)
+	})
+	mux.HandleFunc("DELETE /api/experimental/mcp/loom", func(w http.ResponseWriter, r *http.Request) {
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		dir := r.URL.Query().Get("location[directory]")
+		_, ok := st.bridges[dir]
+		if _, err := os.Stat(dir); st.mcpDown || (!ok && os.IsNotExist(err)) {
+			w.WriteHeader(500) // OpenCode 2.0.19 cannot load a location whose directory is gone
+			return
+		}
+		if !ok {
+			reply(w, 404, map[string]string{"_tag": "McpServerNotFoundError", "message": "loom"})
+			return
+		}
+		delete(st.bridges, dir)
+		w.WriteHeader(204)
 	})
 	mux.HandleFunc("GET /api/agent", func(w http.ResponseWriter, r *http.Request) {
 		st.mu.Lock()
@@ -278,9 +338,18 @@ func fakeServer(t *testing.T, st *store) *Client {
 		return func(w http.ResponseWriter, r *http.Request) {
 			st.mu.Lock()
 			defer st.mu.Unlock()
-			out := []map[string]string{}
+			out := []any{}
 			for _, id := range st.asks[r.PathValue("id")] {
-				if strings.HasPrefix(id, prefix) {
+				switch p, isPerm := st.perms[id]; {
+				case !strings.HasPrefix(id, prefix):
+				case isPerm:
+					out = append(out, struct {
+						ID string `json:"id"`
+						permReq
+					}{id, p})
+				case st.forms[id].ID != "":
+					out = append(out, st.forms[id])
+				default:
 					out = append(out, map[string]string{"id": id})
 				}
 			}
@@ -327,6 +396,22 @@ func fakeServer(t *testing.T, st *store) *Client {
 		w.WriteHeader(204)
 	})
 	mux.HandleFunc("GET /api/session/{id}/form", pending("frm_"))
+	mux.HandleFunc("GET /api/session/{id}/form/{fid}", func(w http.ResponseWriter, r *http.Request) {
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		reply(w, 200, map[string]any{"data": st.forms[r.PathValue("fid")]})
+	})
+	mux.HandleFunc("POST /api/session/{id}/form/{fid}/reply", func(w http.ResponseWriter, r *http.Request) {
+		var body struct{ Answer map[string]any }
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		if st.answers == nil {
+			st.answers = map[string]map[string]any{}
+		}
+		st.answers[r.PathValue("fid")] = body.Answer
+		w.WriteHeader(204)
+	})
 	mux.HandleFunc("GET /api/event", func(w http.ResponseWriter, r *http.Request) {
 		st.mu.Lock()
 		var lines []string
@@ -581,12 +666,23 @@ func TestProtocolErrorTranslation(t *testing.T) {
 	}
 }
 
+// A 400 is a bad request no retry fixes (ErrBadRequest); a 408 or 429,
+// also code bad_request, is temporary and is not.
+func TestProtocolBadRequestSentinel(t *testing.T) {
+	for status, want := range map[int]bool{400: true, 408: false, 429: false} {
+		if got := errors.Is(translate(status, []byte(`{}`)), loomharness.ErrBadRequest); got != want {
+			t.Errorf("%d: ErrBadRequest = %v; want %v", status, got, want)
+		}
+	}
+}
+
 func TestProtocolPolicyTranslation(t *testing.T) {
 	got, err := nativeRules([]loomharness.PermissionRule{
 		{Action: "*", Resource: "*", Effect: "deny"},
 		{Action: "read", Resource: "*", Effect: "allow"},
 		{Action: "bash", Resource: "gh *", Effect: "deny"},
 		{Action: "edit", Resource: "*", Effect: "ask"},
+		{Action: "subagent", Resource: "*", Effect: "deny"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -595,7 +691,7 @@ func TestProtocolPolicyTranslation(t *testing.T) {
 	for _, r := range got {
 		flat = append(flat, r["action"]+":"+r["resource"]+":"+r["effect"])
 	}
-	want := []string{"*:*:deny", "read:*:allow", "grep:*:allow", "glob:*:allow", "shell:gh *:deny", "edit:*:ask"}
+	want := []string{"*:*:deny", "read:*:allow", "grep:*:allow", "glob:*:allow", "shell:gh *:deny", "edit:*:ask", "subagent:*:deny"}
 	if strings.Join(flat, ",") != strings.Join(want, ",") {
 		t.Fatalf("native rules = %v; want %v (order kept)", flat, want)
 	}
@@ -1097,6 +1193,9 @@ type permReq struct {
 	Action    string   `json:"action"`
 	Resources []string `json:"resources"`
 	Save      []string `json:"save,omitempty"`
+	Metadata  struct {
+		Files []fileDiff `json:"files,omitempty"`
+	} `json:"metadata"`
 }
 
 // effect is what OpenCode decides for action on resource under the session's
@@ -1125,7 +1224,8 @@ func (st *store) effect(sid, action, resource string) string {
 // the ask "once" (never OpenCode's project-wide "always") and adds a grant
 // for the ask's save patterns to that session's rules only. A later matching
 // request in the session is allowed, Loom's deny rules still win, another
-// session is unaffected, every Prompt keeps the grant and Resume ends it.
+// session is unaffected, every Prompt keeps the grant and a Resume of the
+// quarantined session ends it.
 // Always on a question or on an ask with no save patterns is an explicit
 // error and leaves the ask open, as does a failed grant install (with its
 // restore failing too, the session then refuses prompts until Resume).
@@ -1199,6 +1299,122 @@ func TestProtocolReplyAlwaysIsSessionScoped(t *testing.T) {
 		t.Fatal(err)
 	}
 	check("after Resume", a.NativeID, "git log", "ask")
+}
+
+// TestProtocolAlwaysGrantOutlivesTheTurn: Loom resumes the session before
+// every hand-over (each new message), so an Always grant stays through a
+// Resume that installs the same rules, and only a Resume under a changed
+// policy drops it.
+func TestProtocolAlwaysGrantOutlivesTheTurn(t *testing.T) {
+	ctx := context.Background()
+	st := newStore()
+	c := fakeServer(t, st)
+	rules := []loomharness.PermissionRule{{Action: "bash", Resource: "*", Effect: "ask"}}
+	a, err := c.Open(ctx, loomharness.OpenSpec{Key: "agent-a", Dir: "/repo", Rules: rules})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := c.Session(a)
+	st.perms["per_1"] = permReq{Session: a.NativeID, Action: "shell", Resources: []string{"wc -l a"}, Save: []string{"wc *"}}
+	if err := s.Reply(ctx, "per_1", loomharness.Reply{Allow: true, Always: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Resume(ctx, loomharness.Launch{}, rules); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.effect(a.NativeID, "shell", "wc -l b"); got != "allow" {
+		t.Fatalf("after a Resume with the same rules: wc -l b = %s; want allow (the grant lasts the session)", got)
+	}
+	changed := append(slices.Clone(rules), loomharness.PermissionRule{Action: "bash", Resource: "rm *", Effect: "deny"})
+	if _, err := s.Resume(ctx, loomharness.Launch{}, changed); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.effect(a.NativeID, "shell", "wc -l b"); got != "ask" {
+		t.Fatalf("after a Resume with changed rules: wc -l b = %s; want ask (a new policy drops the grant)", got)
+	}
+}
+
+// TestProtocolAlwaysGrantUnderADefaultDeny: pr-review-interactive's rules
+// start with a catch-all deny that the later allow and ask rules override.
+// An Always grant beats the ask, and only deny rules after an allow or ask
+// rule (explicit denies) are applied again after it: the leading default
+// deny is not, or it would deny every action and OpenCode would drop the
+// shell tool.
+func TestProtocolAlwaysGrantUnderADefaultDeny(t *testing.T) {
+	ctx := context.Background()
+	st := newStore()
+	c := fakeServer(t, st)
+	rules := []loomharness.PermissionRule{
+		{Action: "*", Resource: "*", Effect: "deny"},
+		{Action: "read", Resource: "*", Effect: "allow"},
+		{Action: "bash", Resource: "*", Effect: "ask"},
+		{Action: "bash", Resource: "wc -c*", Effect: "deny"},
+	}
+	a, err := c.Open(ctx, loomharness.OpenSpec{Key: "agent-a", Dir: "/repo", Rules: rules})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := c.Session(a)
+	st.perms["per_1"] = permReq{Session: a.NativeID, Action: "shell", Resources: []string{"wc -l a"}, Save: []string{"wc *"}}
+	if err := s.Reply(ctx, "per_1", loomharness.Reply{Allow: true, Always: true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ action, resource, want string }{
+		{"shell", "wc -l b", "allow"}, // the grant
+		{"shell", "wc -c b", "deny"},  // an explicit deny still wins
+		{"shell", "rm x", "ask"},      // the rest of shell still asks
+		{"read", "README.md", "allow"},
+		{"edit", "README.md", "deny"}, // the default deny still covers what nothing allows
+	} {
+		if got := st.effect(a.NativeID, c.action, c.resource); got != c.want {
+			t.Errorf("%s %s after Always = %s; want %s", c.action, c.resource, got, c.want)
+		}
+	}
+}
+
+// TestProtocolAlwaysGrantKeepsTheSubagentDeny (SA1): a lead's policy ends
+// with a subagent deny after its allow rules, an explicit deny, so it is
+// applied again after the session's Always grants: no grant, even one on
+// the subagent action itself, re-enables OpenCode's subagent tool, before
+// or after a Resume that keeps the grants.
+func TestProtocolAlwaysGrantKeepsTheSubagentDeny(t *testing.T) {
+	ctx := context.Background()
+	st := newStore()
+	c := fakeServer(t, st)
+	rules := []loomharness.PermissionRule{
+		{Action: "read", Resource: "*", Effect: "allow"},
+		{Action: "edit", Resource: "*", Effect: "allow"},
+		{Action: "bash", Resource: "*", Effect: "allow"},
+		{Action: "subagent", Resource: "*", Effect: "deny"},
+	}
+	a, err := c.Open(ctx, loomharness.OpenSpec{Key: "agent-a", Dir: "/repo", Rules: rules})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := c.Session(a)
+	st.perms["per_1"] = permReq{Session: a.NativeID, Action: "external_directory", Resources: []string{"/tmp/x"}, Save: []string{"/tmp/*"}}
+	st.perms["per_2"] = permReq{Session: a.NativeID, Action: "subagent", Resources: []string{"general"}, Save: []string{"*"}}
+	for _, id := range []string{"per_1", "per_2"} {
+		if err := s.Reply(ctx, id, loomharness.Reply{Allow: true, Always: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	check := func(when string) {
+		t.Helper()
+		if got := st.effect(a.NativeID, "external_directory", "/tmp/y"); got != "allow" {
+			t.Fatalf("%s: external_directory /tmp/y = %s; want allow (the grant holds)", when, got)
+		}
+		for _, agent := range []string{"general", "explore"} {
+			if got := st.effect(a.NativeID, "subagent", agent); got != "deny" {
+				t.Fatalf("%s: subagent %s = %s; want deny (the lead's deny beats every grant)", when, agent, got)
+			}
+		}
+	}
+	check("after Always")
+	if _, err := s.Resume(ctx, loomharness.Launch{}, rules); err != nil {
+		t.Fatal(err)
+	}
+	check("after a Resume with the same rules")
 }
 
 // TestProtocolAlwaysGrantRollsBack (codex, 11588cd1e and 863aa26b5): a
@@ -1378,5 +1594,51 @@ func TestProtocolPromptRacesQuarantine(t *testing.T) {
 	}
 	if err := s.Prompt(ctx, loomharness.Input{Key: PromptID("agent-a", "r2"), Text: "hi"}); err == nil || !strings.Contains(err.Error(), "quarantined") {
 		t.Fatalf("Prompt after the quarantine = %v; want quarantined", err)
+	}
+}
+
+// TestProtocolAsksCarryWhatTheyAsk: a pending permission's ask.opened says
+// what it asks about (its action and resources, then any patch) and a
+// pending form's carries its fields as questions; a Reply with Answers
+// sends each field its value by key, an option's label as its value and a
+// multiselect as a list.
+func TestProtocolAsksCarryWhatTheyAsk(t *testing.T) {
+	ctx := context.Background()
+	st := newStore()
+	c := fakeServer(t, st)
+	ref, _ := c.Open(ctx, loomharness.OpenSpec{Key: "agent-1", Launch: loomharness.Launch{Root: "/root"}, Dir: "/repo"})
+	p := permReq{Session: ref.NativeID, Action: "edit", Resources: []string{"a.go"}}
+	p.Metadata.Files = []fileDiff{{File: "a.go", Patch: "-a\n+b"}}
+	st.perms["per_1"] = p
+	f := form{ID: "frm_1", SessionID: ref.NativeID, Title: "Questions", Fields: []formField{
+		{Key: "q0", Type: "string", Title: "Color", Description: "Which color?"},
+		{Key: "q1", Type: "multiselect", Title: "Sizes", Description: "Which sizes?"},
+	}}
+	f.Fields[0].Options = append(f.Fields[0].Options, struct {
+		Value       string `json:"value"`
+		Label       string `json:"label"`
+		Description string `json:"description"`
+	}{"red", "Red", "warm"})
+	st.forms = map[string]form{"frm_1": f}
+	st.asks = map[string][]string{ref.NativeID: {"per_1", "frm_1"}}
+	page, err := c.Session(ref).Messages(ctx, "", 0)
+	if err != nil || len(page.Events) != 2 {
+		t.Fatalf("Messages = %+v, %v", page, err)
+	}
+	if e := page.Events[0]; e.AskID != "per_1" || e.Text != "edit a.go\n-a\n+b" {
+		t.Fatalf("permission ask = %+v", e)
+	}
+	want := []loomharness.Question{
+		{ID: "q0", Header: "Color", Question: "Which color?", Options: []loomharness.Choice{{Label: "Red", Description: "warm"}}},
+		{ID: "q1", Header: "Sizes", Question: "Which sizes?", MultiSelect: true},
+	}
+	if e := page.Events[1]; e.ItemKind != "question" || e.Text != "Which color?" || !reflect.DeepEqual(e.Questions, want) {
+		t.Fatalf("form ask = %+v", e)
+	}
+	if err := c.Session(ref).Reply(ctx, "frm_1", loomharness.Reply{Answers: map[string][]string{"q0": {"Red"}, "q1": {"S", "M"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.answers["frm_1"]; !reflect.DeepEqual(got, map[string]any{"q0": "red", "q1": []any{"S", "M"}}) {
+		t.Fatalf("answer sent = %v", got)
 	}
 }

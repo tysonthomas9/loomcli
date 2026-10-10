@@ -260,3 +260,12 @@ func TestFilteredEnv_ReturnsFilteredOsEnviron(t *testing.T) {
 		t.Error("FilteredEnv() does not contain LOOM_TEST_ENVFILTER, expected it to be present")
 	}
 }
+
+// OpenCode records its managed service in $XDG_STATE_HOME/opencode/service.json;
+// dropping XDG_STATE_HOME made a terminal opencode miss it and start a second one.
+func TestFilterEnv_KeepsXDGStateAndCache(t *testing.T) {
+	input := []string{"XDG_STATE_HOME=/s", "XDG_CACHE_HOME=/c"}
+	if got := FilterEnv(input); !slices.Equal(got, input) {
+		t.Errorf("FilterEnv() = %v, want %v", got, input)
+	}
+}

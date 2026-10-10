@@ -33,7 +33,7 @@ import type {
 } from "@/components/TerminalView";
 import { useAgentStoreInstance } from "@/hooks";
 import { wsUrl } from "@/hooks/api";
-import { type LoomAgentStatus, parseLoomStatus } from "@/types";
+import { isAgentActive, type LoomAgentStatus, parseLoomStatus } from "@/types";
 import { isInteractiveAgent, isLeadRole } from "@/utils/agentRole";
 import {
   agentDisplayRoleLabel,
@@ -78,6 +78,10 @@ export function AgentDetailMain({
 }: AgentDetailMainProps): JSX.Element {
   const agentStore = useAgentStoreInstance();
   const agents = useStore(agentStore, (s) => s.agents);
+  // Before the first agent list arrives the agent's state is unknown, so the
+  // terminal waits: mounting it would ask the server for a session it may
+  // refuse (a stopped or daemon-run worker).
+  const agentsLoaded = useStore(agentStore, (s) => s.lastUpdated != null);
 
   const agent = useMemo<LoomAgentStatus | undefined>(
     () => agents.find((a) => a.name === agentName),
@@ -97,7 +101,8 @@ export function AgentDetailMain({
     () => setPendingAgentName(undefined),
     [],
   );
-  const terminalUnavailable = agent != null && isTerminalUnavailable(agent);
+  const terminalUnavailable =
+    agent != null && (isTerminalUnavailable(agent) || isDaemonWorker(agent));
   const ephemeralWorker = agent != null && isEphemeralWorker(agent);
   const shouldResolveLeadTerminal =
     agent != null && isInteractiveAgent(agent) && terminalUnavailable;
@@ -148,6 +153,8 @@ export function AgentDetailMain({
               "This agent does not have a live terminal session. Start the agent before attaching to its PTY."
             }
           />
+        ) : agent == null && !agentsLoaded ? (
+          <LoadingSkeleton.Terminal />
         ) : (
           <Suspense fallback={<LoadingSkeleton.Terminal />}>
             <TerminalView
@@ -174,10 +181,27 @@ function isTerminalUnavailable(agent: LoomAgentStatus): boolean {
   return state === "stopped" || state === "dead" || desiredState === "stopped";
 }
 
-function terminalUnavailableEmptyState(_agent: LoomAgentStatus): {
+// The daemon owns a supervised worker's runs, so there is no PTY to attach to
+// and the server refuses to launch one (it would duplicate the daemon's run).
+function isDaemonWorker(agent: LoomAgentStatus): boolean {
+  return agent.daemon_managed === true && !isInteractiveAgent(agent);
+}
+
+function terminalUnavailableEmptyState(agent: LoomAgentStatus): {
   message: string;
   detail: string;
 } {
+  if (
+    isDaemonWorker(agent) &&
+    !isTerminalUnavailable(agent) &&
+    (!!agent.current_task_id || isAgentActive(agent))
+  ) {
+    return {
+      message: "Running under the daemon",
+      detail:
+        "The daemon runs this worker without a terminal. Follow its progress in the task's Runs tab or the agent logs.",
+    };
+  }
   return {
     message: "Agent is stopped",
     detail:

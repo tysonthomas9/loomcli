@@ -72,6 +72,9 @@ func (f *feed) run(ctx context.Context, c *Client, body io.ReadCloser) {
 				break
 			}
 		}
+		// A turn may have ended unseen while the stream was down; one still
+		// running gets its id back from history (lookup) on its next event.
+		clear(m.turn)
 		if !f.send(ctx, loomharness.Event{Type: loomharness.EventFeedGap, Time: time.Now()}) {
 			return
 		}
@@ -140,6 +143,11 @@ func readSSE(r io.Reader, fn func([]byte) bool) {
 // (Session.turnOf); session.execution.started itself is not mapped. A
 // shutdown interrupt records no idle marker and the resumed execution
 // continues the same turn (session-message.ts:283-285), so it ends nothing.
+// A rejected permission is the exception: OpenCode then interrupts its own
+// step with no reason, so the execution also ends as a "shutdown" interrupt
+// with no idle marker (core/src/session/runner/step.ts, execution.ts
+// terminal), though nothing restarts and nothing runs. After a reject in
+// the session that interrupt ends the turn as declined.
 type mapper struct {
 	seq  map[string]int64
 	turn map[string]string // the open turn's id, per session
@@ -151,10 +159,15 @@ type mapper struct {
 	// history: its id and InputKey. Nil, or not found, uses the anchor.
 	lookup func(sid, anchor string) (id, key string, ok bool)
 	last   string // the native id of the event mapEvent last mapped
+	// tools holds a started tool call's name and input, by its item id,
+	// until the call ends: OpenCode's end event names neither.
+	tools map[string]loomharness.Tool
+	// declined marks a session whose open turn had a permission rejected.
+	declined map[string]bool
 }
 
 func newMapper(root func(string) string, lookup func(string, string) (string, string, bool)) *mapper {
-	return &mapper{seq: map[string]int64{}, turn: map[string]string{}, root: root, lookup: lookup}
+	return &mapper{seq: map[string]int64{}, turn: map[string]string{}, root: root, lookup: lookup, tools: map[string]loomharness.Tool{}, declined: map[string]bool{}}
 }
 
 // process maps one native event to the port events it releases, in order.
@@ -187,6 +200,7 @@ func (m *mapper) process(raw []byte) []loomharness.Event {
 	}
 	if e.Type == loomharness.EventTurnCompleted {
 		delete(m.turn, sid)
+		delete(m.declined, sid)
 	}
 	return append(out, e)
 }
@@ -227,24 +241,196 @@ type wireEvent struct {
 		Seq         int64  `json:"seq"`
 	} `json:"durable"`
 	Data struct {
-		SessionID          string `json:"sessionID"`
-		ParentID           string `json:"parentID"`
-		Reason             string `json:"reason"`
-		AssistantMessageID string `json:"assistantMessageID"`
-		Ordinal            int    `json:"ordinal"`
-		ID                 string `json:"id"`
-		InboxID            string `json:"inboxID"`
-		RequestID          string `json:"requestID"`
-		Text               string `json:"text"`
-		Delta              string `json:"delta"`
+		SessionID          string  `json:"sessionID"`
+		ParentID           string  `json:"parentID"`
+		Reason             string  `json:"reason"`
+		AssistantMessageID string  `json:"assistantMessageID"`
+		Ordinal            int     `json:"ordinal"`
+		ID                 string  `json:"id"`
+		InboxID            string  `json:"inboxID"`
+		RequestID          string  `json:"requestID"`
+		Text               string  `json:"text"`
+		Delta              string  `json:"delta"`
+		Cost               float64 `json:"cost"`   // session.step.ended
+		Tokens             tokens  `json:"tokens"` // session.step.ended
 		Metadata           struct {
-			Notice string `json:"notice"`
+			Notice string     `json:"notice"`
+			Files  []fileDiff `json:"files"` // permission.asked for an edit
 		} `json:"metadata"`
-		Form struct {
-			ID        string `json:"id"`
-			SessionID string `json:"sessionID"`
-		} `json:"form"` // form.created
+		Form      form            `json:"form"`      // form.created
+		Name      string          `json:"name"`      // session.tool.input.started
+		Input     json.RawMessage `json:"input"`     // session.tool.called
+		Content   toolContent     `json:"content"`   // session.tool.success and failed
+		Error     *toolError      `json:"error"`     // session.tool.failed and session.execution.failed
+		Action    string          `json:"action"`    // permission.asked
+		Resources []string        `json:"resources"` // permission.asked
+		Message   string          `json:"message"`   // permission.asked
+		Reply     string          `json:"reply"`     // permission.replied: once | always | reject
 	} `json:"data"`
+}
+
+// fileDiff is one file a permission ask would change (FileDiff.Info).
+type fileDiff struct {
+	File  string `json:"file"`
+	Patch string `json:"patch"`
+}
+
+// permissionAbout is what a permission ask asks about: its message, or its
+// action and resources (a command, a path), then any file patches.
+func permissionAbout(action, message string, resources []string, files []fileDiff) string {
+	about := message
+	if about == "" {
+		about = strings.TrimSpace(action + " " + strings.Join(resources, "\n"))
+	}
+	for _, f := range files {
+		about += "\n" + f.Patch
+	}
+	return about
+}
+
+// form is a form ask (Form.Info); OpenCode's question tool asks with one,
+// a field per question (keys q0, q1, ...).
+type form struct {
+	ID        string      `json:"id"`
+	SessionID string      `json:"sessionID"`
+	Title     string      `json:"title"`
+	Fields    []formField `json:"fields"`
+}
+
+type formField struct {
+	Key         string `json:"key"`
+	Type        string `json:"type"` // string | number | integer | boolean | multiselect | external
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Options     []struct {
+		Value       string `json:"value"`
+		Label       string `json:"label"`
+		Description string `json:"description"`
+	} `json:"options"`
+}
+
+// questions are the form's fields as questions: a field's title is the
+// header and its description the question.
+func (f form) questions() []loomharness.Question {
+	var out []loomharness.Question
+	for _, fl := range f.Fields {
+		q := loomharness.Question{ID: fl.Key, Header: fl.Title, Question: fl.Description, MultiSelect: fl.Type == "multiselect"}
+		if q.Question == "" {
+			q.Header, q.Question = f.Title, fl.Title
+		}
+		for _, o := range fl.Options {
+			q.Options = append(q.Options, loomharness.Choice{Label: o.Label, Description: o.Description})
+		}
+		out = append(out, q)
+	}
+	return out
+}
+
+// value is answers (option labels or text) as this field's form value.
+func (fl formField) value(answers []string) any {
+	vals := make([]string, 0, len(answers))
+	for _, a := range answers {
+		for _, o := range fl.Options {
+			if o.Label == a {
+				a = o.Value
+				break
+			}
+		}
+		vals = append(vals, a)
+	}
+	first := ""
+	if len(vals) > 0 {
+		first = vals[0]
+	}
+	switch fl.Type {
+	case "multiselect":
+		return vals
+	case "number", "integer":
+		if n, err := strconv.ParseFloat(first, 64); err == nil {
+			return n
+		}
+	case "boolean":
+		if b, err := strconv.ParseBool(first); err == nil {
+			return b
+		}
+	}
+	return first
+}
+
+// toolContent is a tool call's result parts; the chat shows their text.
+type toolContent []struct {
+	Type string `json:"type"` // text | file
+	Text string `json:"text"`
+	URI  string `json:"uri"`
+}
+
+func (c toolContent) text() string {
+	var out []string
+	for _, p := range c {
+		switch p.Type {
+		case "text":
+			out = append(out, p.Text)
+		case "file":
+			out = append(out, p.URI)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// toolError is a failed tool call's or execution's structured error.
+type toolError struct {
+	Type    string `json:"type"`
+	Message string `json:"message"`
+}
+
+// text is the error's message, or its type when it has none.
+func (e *toolError) text() string {
+	if e == nil {
+		return ""
+	}
+	if e.Message == "" {
+		return e.Type
+	}
+	return e.Message
+}
+
+// toolInput is a tool call's input object as text; "" when it has none.
+func toolInput(raw json.RawMessage) string {
+	switch string(raw) {
+	case "", "null", "{}":
+		return ""
+	}
+	return string(raw)
+}
+
+// toolOutput is an ended tool call's output text and whether it failed.
+func toolOutput(c toolContent, err *toolError) (string, bool) {
+	out := c.text()
+	if err == nil {
+		return out, false
+	}
+	if out == "" {
+		return err.Message, true
+	}
+	return err.Message + "\n" + out, true
+}
+
+// tokens is OpenCode's per-step TokenUsageInfo, on session.step.ended and
+// on the assistant message the step ended.
+type tokens struct {
+	Input     int64 `json:"input"`
+	Output    int64 `json:"output"`
+	Reasoning int64 `json:"reasoning"`
+	Cache     struct {
+		Read  int64 `json:"read"`
+		Write int64 `json:"write"`
+	} `json:"cache"`
+}
+
+// usage is the step's usage; OpenCode counts reasoning apart from output.
+func (t tokens) usage(cost float64) loomharness.Usage {
+	return loomharness.Usage{InputTokens: t.Input, OutputTokens: t.Output + t.Reasoning,
+		CacheReadTokens: t.Cache.Read, CacheWriteTokens: t.Cache.Write, CostUSD: cost}
 }
 
 func (m *mapper) mapEvent(raw []byte) (loomharness.Event, bool) {
@@ -294,27 +480,35 @@ func (m *mapper) fill(e *loomharness.Event, w wireEvent) bool {
 		e.Type, e.ItemKind, e.ItemID = loomharness.EventItemStarted, kind(part), partItem(d.AssistantMessageID, part, d.Ordinal)
 	case "session.text.ended", "session.reasoning.ended":
 		e.Type, e.ItemKind, e.ItemID, e.Text = loomharness.EventItemCompleted, kind(part), partItem(d.AssistantMessageID, part, d.Ordinal), d.Text
-	case "session.tool.called":
-		e.Type, e.ItemKind, e.ItemID = loomharness.EventItemStarted, "tool", toolItem(d.AssistantMessageID, d.ID)
-	case "session.tool.success", "session.tool.failed":
-		e.Type, e.ItemKind, e.ItemID = loomharness.EventItemCompleted, "tool", toolItem(d.AssistantMessageID, d.ID)
+	case "session.tool.input.started", "session.tool.called", "session.tool.success", "session.tool.failed":
+		return m.tool(e, w)
 	case "session.step.ended":
-		e.Type, e.ItemID = loomharness.EventUsage, d.AssistantMessageID
+		e.Type, e.ItemID, e.Usage = loomharness.EventUsage, d.AssistantMessageID, d.Tokens.usage(d.Cost)
 	case "session.execution.interrupted":
-		if d.Reason == "shutdown" {
-			return false // the turn goes on after the restart
-		}
 		e.Type, e.StopReason = loomharness.EventTurnCompleted, stopReason(lastDot(w.Type))
+		if d.Reason == "shutdown" {
+			e.StopReason = "declined"
+			return m.declined[sid] // else the turn goes on after the restart
+		}
 	case "session.execution.succeeded", "session.execution.failed":
 		e.Type, e.StopReason = loomharness.EventTurnCompleted, stopReason(lastDot(w.Type))
+		e.Error = d.Error.text()
 	case "permission.asked":
 		e.Type, e.AskID = loomharness.EventAskOpened, d.ID
+		e.Text = permissionAbout(d.Action, d.Message, d.Resources, d.Metadata.Files)
 	case "form.created":
 		e.Type, e.ItemKind, e.AskID = loomharness.EventAskOpened, "question", d.ID
+		e.Questions = d.Form.questions()
+		if len(e.Questions) > 0 {
+			e.Text = e.Questions[0].Question
+		}
 	case "form.replied", "form.cancelled":
 		e.Type, e.AskID = loomharness.EventAskResolved, d.ID
 	case "permission.replied":
 		e.Type, e.AskID = loomharness.EventAskResolved, d.RequestID
+		if d.Reply == "reject" && m.declined != nil {
+			m.declined[sid] = true
+		}
 	case "session.synthetic":
 		e.Type, e.ItemID, e.Text = loomharness.EventTurnResumed, messageID(w.ID), d.Text
 		return d.Metadata.Notice == "restart"
@@ -331,6 +525,37 @@ func lastDot(s string) string { return s[strings.LastIndex(s, ".")+1:] }
 
 // partItem is the ItemID of a text or reasoning part, the same in the live
 // feed and in Messages.
+// tool maps a tool call's events. Its input start names the tool and maps
+// to nothing; its call starts the item with its input; its success or
+// failure completes it with the output, or the error.
+func (m *mapper) tool(e *loomharness.Event, w wireEvent) bool {
+	d := w.Data
+	id := toolItem(d.AssistantMessageID, d.ID)
+	t := m.tools[id]
+	switch w.Type {
+	case "session.tool.input.started":
+		m.setTool(id, loomharness.Tool{Name: d.Name})
+		return false
+	case "session.tool.called":
+		t.Input = toolInput(d.Input)
+		m.setTool(id, t)
+		e.Type = loomharness.EventItemStarted
+	default:
+		delete(m.tools, id)
+		t.Output, t.Failed = toolOutput(d.Content, d.Error)
+		e.Type = loomharness.EventItemCompleted
+	}
+	e.ItemKind, e.ItemID, e.Tool = "tool", id, &t
+	return true
+}
+
+func (m *mapper) setTool(id string, t loomharness.Tool) {
+	if m.tools == nil {
+		m.tools = map[string]loomharness.Tool{}
+	}
+	m.tools[id] = t
+}
+
 func partItem(messageID, part string, ordinal int) string {
 	return messageID + "/" + part + "/" + strconv.Itoa(ordinal)
 }

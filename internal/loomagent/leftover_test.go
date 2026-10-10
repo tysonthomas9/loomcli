@@ -17,8 +17,9 @@ func exists(h *fake.Harness, ref loomharness.NativeRef) bool {
 
 // TestCreateOpenLeftoverPurgedAcrossRestart: Create's Open fails but leaves
 // a session behind. Its ref is recorded as owned and purge-pending; the
-// purge fails, and after a restart the dispatcher's start-up sweep purges it
-// and drops the mark. Ownership stays recorded (R29).
+// purge fails, and after a restart the dispatcher's start-up reconcile
+// purges it and drops the mark, then finishes the Create with a new
+// session. The leftover's ownership stays recorded (R29).
 func TestCreateOpenLeftoverPurgedAcrossRestart(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -29,7 +30,7 @@ func TestCreateOpenLeftoverPurgedAcrossRestart(t *testing.T) {
 	if _, err := e.service(ServiceConfig{}).Create(ctx, leadReq("r1")); err == nil {
 		t.Fatal("Create succeeded with a failing Open")
 	}
-	pending, err := e.st.PurgePending(ctx)
+	pending, err := e.st.PurgePending(ctx, "ws")
 	if err != nil || len(pending) != 1 {
 		t.Fatalf("purge-pending = %v, %v; want the leftover", pending, err)
 	}
@@ -41,17 +42,17 @@ func TestCreateOpenLeftoverPurgedAcrossRestart(t *testing.T) {
 	fh.FailOpen(nil, false)
 	fh.FailPurge(nil)
 	s := e.service(ServiceConfig{}) // restart
-	go s.RunDispatcher(ctx)
-	eventually(t, "the leftover purged", func() bool {
-		p, err := e.st.PurgePending(ctx)
+	runDispatcher(t, s)
+	drained(t, s, "the leftover purged", func() bool {
+		p, err := e.st.PurgePending(ctx, "ws")
 		return err == nil && len(p) == 0
 	})
 	if exists(fh, ref) {
 		t.Fatal("the purge-pending mark was dropped but the session remains")
 	}
 	owned, err := e.st.NativeSessions(ctx, pending[0].AgentID)
-	if err != nil || len(owned) != 1 || owned[0].NativeID != ref.NativeID {
-		t.Fatalf("owned = %v, %v; want the leftover kept as owned", owned, err)
+	if err != nil || len(owned) != 2 || owned[0].NativeID != ref.NativeID {
+		t.Fatalf("owned = %v, %v; want the leftover kept as owned, then the working session", owned, err)
 	}
 }
 
@@ -79,7 +80,7 @@ func TestHarnessSwitchOpenLeftoverPurged(t *testing.T) {
 	if exists(e.fb, loomharness.NativeRef{Root: owned[1].NativeRoot, NativeID: owned[1].NativeID}) {
 		t.Fatal("the leftover was not purged")
 	}
-	if p, _ := e.s.store.PurgePending(ctx); len(p) != 0 {
+	if p, _ := e.s.store.PurgePending(ctx, "ws"); len(p) != 0 {
 		t.Fatalf("purge-pending = %v after a successful purge", p)
 	}
 	if a := e.s.get(t, "a1"); a.Harness != "fa" {
@@ -90,7 +91,7 @@ func TestHarnessSwitchOpenLeftoverPurged(t *testing.T) {
 // TestCreateOpenLeftoverSweepRacesReopen: the start-up sweep reads a
 // purge-pending session, then pauses; a retried Create re-Opens the same
 // session as its working one, which clears the mark. When the sweep goes on
-// it re-checks the mark under the agent lock and leaves the session alone.
+// it reads the marks under the agent lock and leaves the session alone.
 func TestCreateOpenLeftoverSweepRacesReopen(t *testing.T) {
 	ctx := context.Background()
 	e := newCreateEnv(t)
@@ -107,7 +108,11 @@ func TestCreateOpenLeftoverSweepRacesReopen(t *testing.T) {
 	sweepPause = func() { close(paused); <-resume }
 	t.Cleanup(func() { sweepPause = func() {} })
 	swept := make(chan error, 1)
-	go func() { swept <- s.PurgeLeftovers(ctx) }()
+	go func() { // the dispatcher's start-up sweep
+		s.resync(ctx, true)
+		s.reconcileDue(ctx)
+		swept <- nil
+	}()
 	<-paused                                  // the sweep holds the pending ref
 	info, err := s.Create(ctx, leadReq("r1")) // the retry re-Opens the same session
 	if err != nil {
@@ -122,7 +127,7 @@ func TestCreateOpenLeftoverSweepRacesReopen(t *testing.T) {
 	if !exists(fh, ref) {
 		t.Fatal("the sweep purged the agent's working session")
 	}
-	if p, _ := e.st.PurgePending(ctx); len(p) != 0 {
+	if p, _ := e.st.PurgePending(ctx, "ws"); len(p) != 0 {
 		t.Fatalf("purge-pending = %v", p)
 	}
 }

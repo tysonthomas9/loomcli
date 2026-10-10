@@ -1,6 +1,6 @@
 # Makefile for loomcli project
 
-.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli test-skills-release-compat fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status compose-smoke compose-smoke-down ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-ci test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify local-mode-skills-verify local-mode-skill-pointer-verify test-e2e-github-webhook test-e2e-github-webhook-live
+.PHONY: all build build-frontend build-all test test-builtin-workflows test-integration test-all test-playground test-fleetdb-embedded test-fleetdb-supervisor test-fleetdb-ui test-fleetdb-empty-cli test-skills-release-compat fleetdb-empty-up fleetdb-empty-down fleetdb-regression-up fleetdb-regression-down test-env-up test-env-down test-env-status compose-smoke compose-smoke-down ensure-frontend-dist ensure-frontend-deps local-mode-frontend-dist local-mode-up local-mode-codex-up local-mode-claude-up local-mode-daytona-up local-mode-agents-up local-mode-agents-down local-mode-down local-mode-logs local-mode-verify local-mode-codex-verify test-local-mode-harness test-distributed-smoke lint lint-frontend test-frontend e2e test-e2e test-e2e-ci test-e2e-api test-e2e-api-local test-e2e-real-smoke test-e2e-real-smoke-local test-e2e-real-regression test-e2e-real-regression-local test-e2e-integration test-e2e-integration-local test-e2e-integration-full clean install help frontend check check-go check-frontend gate gate-e2e gate-e2e-full hooks ensure-hooks dev dev-check dev-loom dev-vite check-loc check-loc-stale check-control-plane-paths check-no-raw-exec check-no-beads-prod test-coverage test-forkwatch test-frontend-coverage test-race-cover test-integration-race-cover gen-go-api check-go-api-staleness local-mode-webhook-verify local-mode-skills-verify local-mode-skill-pointer-verify test-e2e-github-webhook test-e2e-github-webhook-live
 
 # Default target
 all: build
@@ -13,15 +13,30 @@ LOCAL_MODE_FLEETDB_IMAGE ?= $(LOCAL_MODE_COMPOSE_PROJECT)-fleet-db:latest
 LOCAL_MODE_LOOM_IMAGE ?= $(LOCAL_MODE_COMPOSE_PROJECT)-loom:latest
 LOCAL_MODE_LOOM_CODEX_IMAGE ?= $(LOCAL_MODE_COMPOSE_PROJECT)-loom-codex:latest
 LOCAL_MODE_LOOM_CLAUDE_IMAGE ?= $(LOCAL_MODE_COMPOSE_PROJECT)-loom-claude:latest
+LOCAL_MODE_LOOM_AGENTS_IMAGE ?= $(LOCAL_MODE_COMPOSE_PROJECT)-loom-agents:latest
 LOCAL_MODE_COMPOSE_EXTRA := $(foreach file,$(LOCAL_MODE_COMPOSE_FILES),-f $(file))
 LOCAL_MODE_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml $(LOCAL_MODE_COMPOSE_EXTRA)
 LOCAL_MODE_CODEX_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.codex.yml $(LOCAL_MODE_COMPOSE_EXTRA)
 LOCAL_MODE_CLAUDE_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.claude.yml $(LOCAL_MODE_COMPOSE_EXTRA)
+LOCAL_MODE_AGENTS_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.agents.yml $(if $(LOCAL_MODE_AGENTS_REAL),-f test/local-mode/docker-compose.agents-real.yml $(if $(filter 1,$(LOCAL_MODE_CLAUDE_COPY)),-f test/local-mode/docker-compose.agents-claude-copy.yml)) $(LOCAL_MODE_COMPOSE_EXTRA)
 LOCAL_MODE_DAYTONA_COMPOSE_ARGS = -p $(LOCAL_MODE_COMPOSE_PROJECT) -f test/local-mode/docker-compose.yml -f test/local-mode/docker-compose.daytona.yml $(LOCAL_MODE_COMPOSE_EXTRA)
 export LOCAL_MODE_FLEETDB_IMAGE
 export LOCAL_MODE_LOOM_IMAGE
 export LOCAL_MODE_LOOM_CODEX_IMAGE
 export LOCAL_MODE_LOOM_CLAUDE_IMAGE
+export LOCAL_MODE_LOOM_AGENTS_IMAGE
+export LOCAL_MODE_COMPOSE_PROJECT
+# REAL Agent API stacks: the per-project private copy of the host's OpenCode
+# login (test/local-mode/real-opencode-copy.sh). Under $HOME so the podman VM
+# can bind it; `make local-mode-agents-down` / `local-mode-down` remove it.
+LOCAL_MODE_STATE_DIR ?= $(or $(XDG_STATE_HOME),$(HOME)/.local/state)/loom-local-mode
+LOCAL_MODE_OPENCODE_COPY = $(LOCAL_MODE_STATE_DIR)/$(LOCAL_MODE_COMPOSE_PROJECT)/opencode.db
+export LOCAL_MODE_OPENCODE_COPY
+# Opt-in (LOCAL_MODE_CLAUDE_COPY=1 with LOCAL_MODE_AGENTS_REAL=1): mount a
+# private copy of the host's current Claude login with its refresh token
+# removed (test/local-mode/real-claude-copy.sh) instead of
+# ~/.claude/.credentials.json. Removed by the same down targets.
+LOCAL_MODE_CLAUDE_COPY_PATH = $(LOCAL_MODE_STATE_DIR)/$(LOCAL_MODE_COMPOSE_PROJECT)/claude-auth/.credentials.json
 LOCAL_MODE_COMPOSE_SELECT = \
 	if [ "$(strip $(LOCAL_MODE_COMPOSE))" != "" ]; then \
 	  compose="$(LOCAL_MODE_COMPOSE)"; \
@@ -169,9 +184,17 @@ fleetdb-empty-down:
 # sidecar. Docker silently substitutes an empty directory when the bind-mount
 # source is missing, so a stack started from a clean checkout comes up "healthy"
 # and serves 404 with nothing in any log. Build it once on the host instead.
+# Rebuilds the dist when it is missing or older than any frontend source, so a
+# stack serving the host dist (local-mode, fleetdb-regression) never shows a
+# stale UI after a pull or a branch switch.
+FRONTEND_DIST_SOURCES = $(FRONTEND_DIR)/src $(FRONTEND_DIR)/public $(FRONTEND_DIR)/index.html $(FRONTEND_DIR)/package.json $(FRONTEND_DIR)/package-lock.json $(FRONTEND_DIR)/vite.config.ts $(FRONTEND_DIR)/tsconfig.json
 ensure-frontend-dist:
-	@if [ ! -f "$(FRONTEND_DIR)/dist/index.html" ]; then \
+	@dist="$(FRONTEND_DIR)/dist/index.html"; \
+	if [ ! -f "$$dist" ]; then \
 	  echo "Web UI dist is missing; building it once on the host..."; \
+	  $(MAKE) build-frontend; \
+	elif [ -n "$$(find $(FRONTEND_DIST_SOURCES) -newer "$$dist" -print 2>/dev/null | head -n 1)" ]; then \
+	  echo "Web UI dist is older than the frontend sources; rebuilding it on the host..."; \
 	  $(MAKE) build-frontend; \
 	fi
 
@@ -274,18 +297,21 @@ local-mode-up: local-mode-frontend-dist
 	@echo "Starting local-mode dogfood stack ($(LOCAL_MODE_COMPOSE_PROJECT)) on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/ws/LOCALMODE/kanban..."
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
+	test/local-mode/preflight.sh $$compose $(LOCAL_MODE_COMPOSE_ARGS); \
 	$$compose $(LOCAL_MODE_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
 
 local-mode-codex-up: local-mode-frontend-dist
 	@echo "Starting local-mode Codex dogfood stack ($(LOCAL_MODE_COMPOSE_PROJECT)) on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/ws/LOCALMODE/kanban..."
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
+	test/local-mode/preflight.sh $$compose $(LOCAL_MODE_CODEX_COMPOSE_ARGS); \
 	$$compose $(LOCAL_MODE_CODEX_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
 
 local-mode-claude-up: local-mode-frontend-dist
 	@echo "Starting local-mode Claude dogfood stack ($(LOCAL_MODE_COMPOSE_PROJECT)) on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/ws/LOCALMODE/kanban..."
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
+	test/local-mode/preflight.sh $$compose $(LOCAL_MODE_CLAUDE_COMPOSE_ARGS); \
 	$$compose $(LOCAL_MODE_CLAUDE_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
 
 # Daemon TS leaf routed to Daytona: a claimed task runs inside a real Daytona
@@ -296,12 +322,48 @@ local-mode-daytona-up: local-mode-frontend-dist
 	@echo "Starting local-mode Daytona dogfood stack ($(LOCAL_MODE_COMPOSE_PROJECT)) on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/ws/LOCALMODE/kanban..."
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
+	test/local-mode/preflight.sh $$compose $(LOCAL_MODE_DAYTONA_COMPOSE_ARGS); \
 	$$compose $(LOCAL_MODE_DAYTONA_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS)
+
+# Agent API stack: the default stack plus the pinned OpenCode 2.0.19 build and
+# the scripted fake model, so Leads run in the browser with no provider auth.
+# The agents image is the `agents` target of test/local-mode/Dockerfile, built
+# in one step on top of its `local-mode` stage. Refuses the default project
+# name so it never replaces the dogfood stack.
+local-mode-agents-up: local-mode-frontend-dist
+	@test "$(LOCAL_MODE_COMPOSE_PROJECT)" != loomcli-local-mode || { echo "set LOCAL_MODE_COMPOSE_PROJECT to your own project; loomcli-local-mode is the dogfood stack" >&2; exit 1; }
+	@echo "Starting local-mode Agent API stack ($(LOCAL_MODE_COMPOSE_PROJECT)) on http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/..."
+	@set -e; \
+	$(LOCAL_MODE_COMPOSE_SELECT); \
+	test/local-mode/preflight.sh $$compose $(LOCAL_MODE_AGENTS_COMPOSE_ARGS); \
+	if [ -n "$(LOCAL_MODE_AGENTS_REAL)" ]; then test/local-mode/real-opencode-copy.sh make "$(LOCAL_MODE_OPENCODE_COPY)"; fi; \
+	case "$(LOCAL_MODE_CLAUDE_COPY)" in ""|1) ;; *) echo "LOCAL_MODE_CLAUDE_COPY must be 1 or unset" >&2; exit 1 ;; esac; \
+	if [ -n "$(LOCAL_MODE_AGENTS_REAL)" ] && [ "$(LOCAL_MODE_CLAUDE_COPY)" = 1 ]; then \
+	  test/local-mode/real-claude-copy.sh make "$(LOCAL_MODE_CLAUDE_COPY_PATH)"; \
+	  LOCAL_MODE_CLAUDE_AUTH="$(LOCAL_MODE_CLAUDE_COPY_PATH)"; export LOCAL_MODE_CLAUDE_AUTH; \
+	fi; \
+	$$compose $(LOCAL_MODE_AGENTS_COMPOSE_ARGS) up $(LOCAL_MODE_COMPOSE_UP_FLAGS); \
+	case " $(LOCAL_MODE_COMPOSE_UP_FLAGS) " in *" -d "*|*" --detach "*) ;; *) exit 0 ;; esac; \
+	echo "Waiting for loom-local to print [local-mode] ready..."; \
+	i=0; until $$compose $(LOCAL_MODE_AGENTS_COMPOSE_ARGS) exec -T loom-local test -e /tmp/local-mode-ready >/dev/null 2>&1; do \
+	  i=$$((i + 1)); [ $$i -le 300 ] || { echo "loom-local not ready after 300s; see its logs" >&2; exit 1; }; sleep 1; \
+	done; \
+	echo "STACK UP: http://localhost:$${LOCAL_MODE_UI_PORT:-8283}/"
+
+local-mode-agents-down:
+	@test "$(LOCAL_MODE_COMPOSE_PROJECT)" != loomcli-local-mode || { echo "set LOCAL_MODE_COMPOSE_PROJECT to your own project; loomcli-local-mode is the dogfood stack" >&2; exit 1; }
+	@set -e; \
+	$(LOCAL_MODE_COMPOSE_SELECT); \
+	$$compose $(LOCAL_MODE_AGENTS_COMPOSE_ARGS) down -v --remove-orphans; \
+	test/local-mode/real-opencode-copy.sh remove "$(LOCAL_MODE_OPENCODE_COPY)"; \
+	test/local-mode/real-claude-copy.sh remove "$(LOCAL_MODE_CLAUDE_COPY_PATH)"
 
 local-mode-down:
 	@set -e; \
 	$(LOCAL_MODE_COMPOSE_SELECT); \
-	$$compose $(LOCAL_MODE_COMPOSE_ARGS) down -v --remove-orphans
+	$$compose $(LOCAL_MODE_COMPOSE_ARGS) down -v --remove-orphans; \
+	test/local-mode/real-opencode-copy.sh remove "$(LOCAL_MODE_OPENCODE_COPY)"; \
+	test/local-mode/real-claude-copy.sh remove "$(LOCAL_MODE_CLAUDE_COPY_PATH)"
 
 local-mode-logs:
 	@set -e; \
@@ -523,6 +585,18 @@ test-aft-live-workers:
 
 test-aft-podman:
 	@tests/aft/run-aft-podman.sh $(AFT_ARGS)
+
+# Run the isolated e2e stack (scripts/start-e2e-server.sh) against the
+# test-only OpenCode emulator instead of OpenCode (R29), with OpenCode's XDG
+# roots in an owned /tmp sandbox and the stub farm on PATH. With no
+# LOOM_HARNESS_EMU_SCENARIOS or LOOM_HARNESS_EMU_MODEL, a turn echoes its prompt.
+.PHONY: serve-emu
+serve-emu:
+	@go build -o tmp/emu-bin/opencode ./cmd/loom-harness-emu
+	@sbx=$$(mktemp -d /tmp/loom-serve-emu.XXXXXX) && \
+	LOOM_HARNESS_EMU=1 LOOM_OPENCODE_BIN="$(CURDIR)/tmp/emu-bin/opencode" GOCACHE="$$(go env GOCACHE)" \
+	PATH="$(CURDIR)/tmp/emu-bin:$(CURDIR)/e2e/stubs:$$PATH" XDG_CONFIG_HOME="$$sbx/config" XDG_DATA_HOME="$$sbx/data" \
+	XDG_STATE_HOME="$$sbx/state" XDG_CACHE_HOME="$$sbx/cache" scripts/start-e2e-server.sh
 
 # Run Playwright API e2e tests (self-contained: builds loom, starts server, runs tests)
 # Run the browser e2e suite exactly as CI does: the chromium-ci project, which
@@ -847,6 +921,7 @@ help:
 	@echo "                            Use this, not the live stack on :3011, for anything that writes"
 	@echo "  make local-mode-up      - Run local-mode Podman/Docker stack"
 	@echo "  make local-mode-codex-up - Run local-mode stack with Codex agents"
+	@echo "  make local-mode-agents-up - Run local-mode stack with OpenCode Leads on a fake model"
 	@echo "  make local-mode-verify  - Verify deterministic local-mode stack"
 	@echo "  make local-mode-codex-verify - Verify Codex local-mode stack"
 	@echo "  make local-mode-skills-verify - Verify the skills vertical e2e (no model)"

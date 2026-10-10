@@ -403,3 +403,30 @@
     0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
   --panel-shadow-strong: 0 25px 50px -12px rgb(0 0 0 / 25%);
 }
+
+/* ===========================
+ * Agent identity colours (CL1): one per agent, from its id
+ * (hooks/agents/agentColor.ts). No yellow or grey; each stays readable at
+ * 55% on the background. Dark first, then the light (beige) theme.
+ * =========================== */
+:root {
+  --agent-color-0: #ea580c; /* orange-600 */
+  --agent-color-1: #e11d48; /* rose-600 */
+  --agent-color-2: #c026d3; /* fuchsia-600 */
+  --agent-color-3: #7c3aed; /* violet-600 */
+  --agent-color-4: #2563eb; /* blue-600 */
+  --agent-color-5: #0891b2; /* cyan-600 */
+  --agent-color-6: #16a34a; /* green-600 */
+  --agent-color-7: #65a30d; /* lime-600 */
+}
+
+[data-theme="light"] {
+  --agent-color-0: #c2410c; /* orange-700 */
+  --agent-color-1: #be123c; /* rose-700 */
+  --agent-color-2: #a21caf; /* fuchsia-700 */
+  --agent-color-3: #6d28d9; /* violet-700 */
+  --agent-color-4: #1d4ed8; /* blue-700 */
+  --agent-color-5: #0e7490; /* cyan-700 */
+  --agent-color-6: #15803d; /* green-700 */
+  --agent-color-7: #4d7c0f; /* lime-700 */
+}

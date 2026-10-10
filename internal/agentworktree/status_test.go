@@ -402,3 +402,22 @@ func TestWorkspaceRemoveConfirmedFingerprint(t *testing.T) {
 		t.Fatalf("Status after delete = %+v, %v; want absent", st, err)
 	}
 }
+
+// TestWorkspaceStatusSwitchedBranchIsPortNotOwned (CL3): an agent that moved
+// its worktree to another branch gets a Status failure loomagent can tell
+// apart, ErrWorkspaceNotOwned, so its task result is saved without a head
+// instead of being retried forever.
+func TestWorkspaceStatusSwitchedBranchIsPortNotOwned(t *testing.T) {
+	ctx := context.Background()
+	ws, _, repo := portSetup(t)
+	s := loomagent.WorkspaceSpec{Key: "agt_sw", Repo: repo, BaseRef: "main", Branch: "loom/agent/agt_sw"}
+	wc, err := ws.Ensure(ctx, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run(t, wc.Path, "switch", "-q", "-c", "feature-x")
+	_, err = ws.Status(ctx, s)
+	if !errors.Is(err, loomagent.ErrWorkspaceNotOwned) || !errors.Is(err, ErrNotOwned) {
+		t.Fatalf("Status after the agent switched branch = %v; want ErrWorkspaceNotOwned and ErrNotOwned", err)
+	}
+}

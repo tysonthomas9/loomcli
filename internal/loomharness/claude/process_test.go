@@ -61,13 +61,15 @@ func fakeClaude() {
 			id, resume = args[i+1], a == "--resume"
 		}
 	}
-	path := filepath.Join(root, "projects", "fake", id+".jsonl")
-	if _, err := os.Stat(path); (err == nil || os.Getenv("LOOM_FAKE_CLAUDE_IN_USE") == id) && !resume {
-		fmt.Fprintf(os.Stderr, "Error: Session ID %s is already in use.\n", id)
-		os.Exit(1)
+	if id != "" { // the capability probe has no session
+		path := filepath.Join(root, "projects", "fake", id+".jsonl")
+		if _, err := os.Stat(path); (err == nil || os.Getenv("LOOM_FAKE_CLAUDE_IN_USE") == id) && !resume {
+			fmt.Fprintf(os.Stderr, "Error: Session ID %s is already in use.\n", id)
+			os.Exit(1)
+		}
+		_ = os.MkdirAll(filepath.Dir(path), 0o755)
+		_ = os.WriteFile(path, nil, 0o600)
 	}
-	_ = os.MkdirAll(filepath.Dir(path), 0o755)
-	_ = os.WriteFile(path, nil, 0o600)
 	out := json.NewEncoder(os.Stdout)
 	inited, running, n := false, false, 0
 	sc := bufio.NewScanner(os.Stdin)
@@ -76,6 +78,7 @@ func fakeClaude() {
 			Type, UUID string
 			RequestID  string `json:"request_id"`
 			Message    struct{ Content string }
+			Request    struct{ Subtype string }
 		}
 		_ = json.Unmarshal(sc.Bytes(), &in)
 		switch in.Type {
@@ -97,12 +100,27 @@ func fakeClaude() {
 			}
 			if strings.Contains(in.Message.Content, "hang") {
 				running = true
-				_ = out.Encode(map[string]any{"type": "stream_event", "event": map[string]any{"type": "ping"}})
+				_ = out.Encode(map[string]any{"type": "stream_event", "event": map[string]any{"type": "message_start",
+					"message": map[string]any{"id": "msg_hang", "usage": map[string]any{"input_tokens": 4}}}})
 				continue
 			}
 			fakeTurn(out, fmt.Sprintf("msg_%d", n), in.UUID, in.Message.Content)
-			_ = out.Encode(map[string]any{"type": "result", "subtype": "success", "session_id": id})
+			// total_cost_usd is this process's running total, as Claude's.
+			_ = out.Encode(map[string]any{"type": "result", "subtype": "success", "session_id": id, "total_cost_usd": 0.25 * float64(n)})
 		case "control_request":
+			if in.Request.Subtype == "initialize" { // the capability probe
+				if os.Getenv("LOOM_FAKE_CLAUDE_INIT_FAIL") == "1" {
+					os.Exit(2)
+				}
+				if e := os.Getenv("LOOM_FAKE_CLAUDE_INIT_ERROR"); e != "" {
+					_ = out.Encode(map[string]any{"type": "control_response", "response": map[string]any{"subtype": "error " + e,
+						"request_id": in.RequestID, "error": "auth failed for " + e}})
+					continue
+				}
+				_ = out.Encode(map[string]any{"type": "control_response", "response": map[string]any{"subtype": "success",
+					"request_id": in.RequestID, "response": fakeInitResponse(args)}})
+				continue
+			}
 			_ = out.Encode(map[string]any{"type": "control_response",
 				"response": map[string]any{"subtype": "success", "request_id": in.RequestID}})
 			if running {
@@ -111,6 +129,22 @@ func fakeClaude() {
 			}
 		}
 	}
+}
+
+// fakeInitResponse is LOOM_FAKE_CLAUDE_INIT plus, when project settings
+// are read, a command per .claude/commands/*.md in the working directory.
+func fakeInitResponse(args []string) map[string]any {
+	var init map[string]any
+	_ = json.Unmarshal([]byte(os.Getenv("LOOM_FAKE_CLAUDE_INIT")), &init)
+	if i := slices.Index(args, "--setting-sources"); i >= 0 && strings.Contains(args[i+1], "project") {
+		files, _ := filepath.Glob(filepath.Join(".claude", "commands", "*.md"))
+		cmds, _ := init["commands"].([]any)
+		for _, f := range files {
+			cmds = append(cmds, map[string]any{"name": strings.TrimSuffix(filepath.Base(f), ".md"), "description": "(project)"})
+		}
+		init["commands"] = cmds
+	}
+	return init
 }
 
 // fakeTurn emits one assistant message in the 2.1.285 partial-message shape.

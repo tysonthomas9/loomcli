@@ -307,7 +307,7 @@ func TestFakeCloseKeepsHistoryUntilResume(t *testing.T) {
 	if ok, err := s.Interrupt(ctx); ok || !errors.Is(err, lh.ErrUnavailable) {
 		t.Fatalf("Interrupt after Close = %v, %v", ok, err)
 	}
-	if err := s.SetModel(ctx, "m"); !errors.Is(err, lh.ErrUnavailable) {
+	if err := s.SetModel(ctx, "m", nil); !errors.Is(err, lh.ErrUnavailable) {
 		t.Fatalf("SetModel after Close = %v", err)
 	}
 	if st := status(t, s); st.Running {

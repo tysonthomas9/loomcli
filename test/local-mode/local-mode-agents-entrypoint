@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# Agent API variant: start the scripted fake model (unless LOCAL_MODE_AGENTS_REAL
+# selects a private copy of the host's OpenCode login), point OpenCode's XDG roots
+# at a sandbox on the loom-data volume (so sessions survive a container
+# restart) whose opencode.json routes provider "aft" to it, then run the
+# default local-mode entrypoint, which builds its workspace from the 2.0f
+# Slack-clone fixture seeded here as the source repo. Script replies from the
+# host with:
+#   podman exec <loom-local container> curl -s -X POST \
+#     http://127.0.0.1:4010/__script -d '{"steps":[{"text":"hi"}]}'
+set -euo pipefail
+
+sbx="${LOOM_CONFIG_DIR:-/root/.loom}/agents-opencode"
+mkdir -p "$sbx/config/opencode"
+if [ -n "${LOCAL_MODE_AGENTS_REAL:-}" ]; then
+  # Real providers from the host's OpenCode login; optional default model.
+  printf '{%s}\n' "${LOCAL_MODE_AGENTS_MODEL:+\"model\":\"$LOCAL_MODE_AGENTS_MODEL\"}" \
+    > "$sbx/config/opencode/opencode.json"
+else
+  cat > "$sbx/config/opencode/opencode.json" <<JSON
+{"provider":{"aft":{"name":"AFT fake","npm":"@ai-sdk/openai-compatible",
+  "options":{"baseURL":"http://127.0.0.1:${FAKE_MODEL_PORT}/v1","apiKey":"x"},
+  "models":{"m":{"name":"M","limit":{"context":100000,"output":4000}}}}},"model":"aft/m"}
+JSON
+  node /opt/fake-model/server.mjs >/tmp/fake-model.log 2>&1 &
+fi
+export XDG_CONFIG_HOME="$sbx/config" XDG_DATA_HOME="$sbx/data" \
+  XDG_STATE_HOME="$sbx/state" XDG_CACHE_HOME="$sbx/cache"
+if [ -n "${LOCAL_MODE_AGENTS_REAL:-}" ]; then
+  # The stack's own OpenCode database lives on the loom-data volume. On first
+  # boot, seed it from the read-only private copy of the host's opencode.db
+  # (which already holds the login); a restart keeps the stack's database and
+  # its token refreshes. Nothing is written back to the host.
+  ocdb="$XDG_DATA_HOME/opencode/opencode.db"
+  if [ ! -f "$ocdb" ]; then
+    if [ -s /run/secrets/opencode-seed.db ]; then
+      (umask 077; mkdir -p "$(dirname "$ocdb")"; cp /run/secrets/opencode-seed.db "$ocdb.tmp")
+      mv -f "$ocdb.tmp" "$ocdb"
+    else
+      echo "WARNING: no private OpenCode copy mounted; run \`opencode auth login\` on the host, then down and up the stack" >&2
+    fi
+  fi
+  # A setup-token token skips the login flow, but not Claude's first-run
+  # onboarding, which ends at "Select login method"; mark it done (no secret).
+  # The same applies to the private login copy (LOCAL_MODE_CLAUDE_COPY=1).
+  if { [ -s /run/secrets/claude-token ] || [ "${LOCAL_MODE_CLAUDE_COPY:-}" = 1 ]; } \
+    && [ ! -e "$CLAUDE_CONFIG_DIR/.claude.json" ]; then
+    mkdir -p "$CLAUDE_CONFIG_DIR"
+    echo '{"hasCompletedOnboarding":true}' > "$CLAUDE_CONFIG_DIR/.claude.json"
+  fi
+  # Check the read-only codex and Claude logins only through each CLI's own
+  # status command; its output is never shown, only a pass or a warning.
+  codex login status >/dev/null 2>&1 \
+    || echo "WARNING: codex is not logged in; refresh ~/.codex/auth.json on the host" >&2
+  claude auth status >/dev/null 2>&1 \
+    || echo "WARNING: Claude is not logged in; set LOCAL_MODE_CLAUDE_TOKEN_FILE (see README)" >&2
+fi
+
+src="${LOOM_LOCAL_MODE_SOURCE_REPO:-/workspace/source-repo}"
+origin="${LOOM_LOCAL_MODE_ORIGIN_REPO:-/workspace/source-repo-origin.git}"
+if [ ! -d "$src/.git" ]; then
+  /opt/fixtures/scripts/seed-slack-clone.sh "$src"
+  git init -q --bare "$origin"
+  git -C "$src" remote add origin "$origin"
+  git -C "$src" push -q -u origin main
+fi
+
+exec /usr/local/bin/local-mode-entrypoint "$@"

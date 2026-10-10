@@ -2,6 +2,8 @@ package loomagent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"slices"
@@ -16,23 +18,28 @@ import (
 const (
 	KindDelta   = "delta"
 	KindFeedGap = "feed.gap"
+	// KindToolStarted is a tool call that started; a Subscribe gets it if
+	// it asks for deltas or names tool.started in its Kinds.
+	KindToolStarted = "tool.started"
 )
 
 // Ask is one open harness ask (design v2 §4.10). Loom keeps open asks in
 // memory, from the live feed and each backfill of the native history.
 type Ask struct {
-	ID     string
-	Type   string // approval | question
-	About  string
-	TurnID string `json:"-"`
+	ID        string
+	Type      string // approval | question
+	About     string
+	Questions []loomharness.Question // a question's questions, when its harness says
+	TurnID    string                 `json:"-"`
 }
 
 // RespondRequest answers an open ask: Decision (allow_once, allow_always or
-// deny) for an approval, Answer for a question.
+// deny) for an approval, Answer or Answers (by question id) for a question.
 type RespondRequest struct {
 	Envelope
 	AgentID, AskID   string
 	Decision, Answer string
+	Answers          map[string][]string
 }
 
 // openAsks returns agentID's open asks by ID.
@@ -47,23 +54,40 @@ func (s *Service) openAsks(agentID string) []Ask {
 	return out
 }
 
-// Respond checks the ask is open, then replies through the harness. An
+// Respond checks the ask is open, resumes the session if this process has
+// not yet, then replies through the harness. An
 // unknown, answered or lost ask fails with ask_not_found. A decision is
 // passed as given, never narrowed: a harness that cannot keep allow_always
 // fails the reply, Respond returns that error and the ask stays open.
+//
+// Each ask takes at most one Reply (OR5a): a claim on (agent, ask), the
+// ask being its ID on its turn (codex reuses IDs on later turns), saved
+// before the Reply, binds the first Respond's request and answer. A retry
+// of it returns its outcome; the same request with another answer fails
+// with conflict, and another request with already_answered. A Reply that
+// fails before it is sent releases the claim. One that fails after it may
+// have gone out is settled by the native ask: still pending releases the
+// claim, resolved is a success, and no evidence either way is terminal:
+// reply_unknown, shown as Attention, and never sent again.
 func (s *Service) Respond(ctx context.Context, req RespondRequest) error {
-	defer s.lock(req.AgentID)()
+	defer s.lockReady(ctx, req.AgentID)()
 	a, err := s.live(ctx, req.AgentID)
 	if err != nil {
 		return err
 	}
+	hash := answerHash(req)
 	s.mu.Lock()
 	ask, ok := s.asks[a.AgentID][req.AskID]
 	s.mu.Unlock()
+	if c, held, err := s.heldClaim(ctx, a, req, ask, ok); err != nil {
+		return err
+	} else if held {
+		return claimResult(c, req.RequestID, hash)
+	}
 	if !ok {
 		return &Error{Code: CodeAskNotFound, Message: req.AskID}
 	}
-	r := loomharness.Reply{Answer: req.Answer}
+	r := loomharness.Reply{Answer: req.Answer, Answers: req.Answers}
 	switch {
 	case req.Decision == "allow_once":
 		r.Allow = true
@@ -74,19 +98,212 @@ func (s *Service) Respond(ctx context.Context, req RespondRequest) error {
 	default:
 		return invalid("Respond needs a Decision for an approval", "allow_once", "allow_always", "deny")
 	}
+	if a, err = s.resumeOnce(ctx, a); err != nil { // lazily installs the policy (§4.15)
+		return err
+	}
 	sess, _, err := s.current(ctx, a)
 	if err != nil || sess == nil {
 		return &Error{Code: CodeHarnessUnavailable, Message: a.Harness + " is not available"}
 	}
-	if err := sess.Reply(ctx, req.AskID, r); errors.Is(err, loomharness.ErrQuarantined) {
-		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), quarantineCleanup)
-		defer cancel() // the Reply may have used up ctx; the loss must still be saved
-		return errors.Join(harnessErr(err), s.quarantined(cleanup, a, ask))
-	} else if err != nil {
-		return harnessErr(err)
+	c := loomstore.AskClaim{AgentID: a.AgentID, AskID: req.AskID, TurnID: ask.TurnID, RequestID: req.RequestID, PayloadHash: hash}
+	if got, won, err := s.store.ClaimAsk(ctx, c); err != nil {
+		return err
+	} else if !won {
+		return claimResult(got, req.RequestID, hash)
 	}
-	s.setAsk(a.AgentID, Ask{ID: req.AskID}, false)
+	dispatchCrash("claimed")
+	rerr := sess.Reply(ctx, req.AskID, r)
+	dispatchCrash("replied")
+	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), quarantineCleanup)
+	defer cancel() // the Reply may have used up ctx; its outcome must still be saved
+	return s.replied(cleanup, a, sess, ask, c, rerr)
+}
+
+// heldClaim is the claim already on req's ask ID that decides its outcome,
+// a claim a crash left pending settled first: the one req itself made, on
+// any turn (a late retry never answers a later ask with its ID), else the
+// latest not released. held is false when the ask can be claimed: there is
+// no such claim, the latest is on an earlier ask with this ID (ask, open,
+// has another turn), or req's own claim on this ask was released with the
+// same answer. req's released claim on an ask no longer open is
+// ask_not_found; with another answer, it is held (conflict).
+func (s *Service) heldClaim(ctx context.Context, a loomstore.Agent, req RespondRequest, ask Ask, open bool) (c loomstore.AskClaim, held bool, err error) {
+	err = loomstore.ErrNotFound
+	if req.RequestID != "" { // a Respond with no key has no retry to tell apart
+		c, err = s.store.AskClaim(ctx, a.AgentID, req.AskID, req.RequestID)
+	}
+	own := err == nil
+	if errors.Is(err, loomstore.ErrNotFound) {
+		if c, err = s.store.AskClaim(ctx, a.AgentID, req.AskID); err == nil && open && c.TurnID != ask.TurnID {
+			err = loomstore.ErrNotFound // the claim is on an earlier ask with this ID
+		}
+	}
+	if errors.Is(err, loomstore.ErrNotFound) {
+		return c, false, nil
+	} else if err != nil {
+		return c, false, err
+	}
+	if c.State == loomstore.ClaimPending {
+		if c, err = s.settleLeftClaim(ctx, a, c); err != nil {
+			return c, false, err
+		}
+	}
+	switch {
+	case c.State != loomstore.ClaimReleased:
+		return c, true, nil
+	case own && !(open && c.TurnID == ask.TurnID):
+		return c, false, &Error{Code: CodeAskNotFound, Message: req.AskID} // req's ask is gone; a later one is not its
+	case own && c.PayloadHash != answerHash(req):
+		return c, true, nil // req keeps its answer even unsent: conflict
+	}
+	return c, false, nil // never sent: the ask can be claimed again
+}
+
+// answerHash is the hash of req's answer, which its claim binds.
+func answerHash(req RespondRequest) string {
+	b, _ := json.Marshal([]any{req.Decision, req.Answer, req.Answers})
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+// claimResult is the outcome a Respond of requestID with answer hash gets
+// from c, the claim already on its ask.
+func claimResult(c loomstore.AskClaim, requestID, hash string) error {
+	switch {
+	case c.RequestID != requestID:
+		return &Error{Code: CodeAlreadyAnswered, Message: c.AskID + " answered by " + c.RequestID}
+	case c.PayloadHash != hash:
+		return &Error{Code: CodeConflict, Message: requestID + " answered " + c.AskID + " differently"}
+	case c.State == loomstore.ClaimReplied:
+		return nil
+	case c.State == loomstore.ClaimPending:
+		return &Error{Code: CodeAgentBusy, Message: c.AskID + " is being answered by " + c.RequestID}
+	}
+	return &Error{Code: CodeReplyUnknown, Message: c.AskID + ": its answer may not have reached the harness"}
+}
+
+// notSent reports whether a Reply that failed with err was never sent: the
+// harness refused it, or it never left Loom.
+func notSent(err error) bool {
+	return errors.Is(err, loomharness.ErrNotSent) || errors.Is(err, loomharness.ErrBadRequest) ||
+		errors.Is(err, errors.ErrUnsupported) || errors.Is(err, loomharness.ErrQuarantined)
+}
+
+// replied saves the outcome of ask's Reply, which returned rerr, on c, its claim.
+func (s *Service) replied(ctx context.Context, a loomstore.Agent, sess loomharness.Session, ask Ask, c loomstore.AskClaim, rerr error) error {
+	state := loomstore.ClaimReplied
+	if rerr != nil && notSent(rerr) {
+		state = loomstore.ClaimReleased
+	} else if rerr != nil {
+		state, _ = nativeOutcome(ctx, sess, c) // an unread history is no evidence: unknown
+	}
+	if state == loomstore.ClaimUnknown { // Attention first: a terminal claim is never settled again
+		if err := s.replyUnknown(ctx, a); err != nil {
+			return errors.Join(harnessErr(rerr), err)
+		}
+	}
+	if err := s.store.SettleAskClaim(ctx, c, state); err != nil {
+		return errors.Join(harnessErr(rerr), err)
+	}
+	switch {
+	case state == loomstore.ClaimUnknown:
+		return &Error{Code: CodeReplyUnknown, Message: rerr.Error()}
+	case state == loomstore.ClaimReleased && errors.Is(rerr, loomharness.ErrQuarantined):
+		return errors.Join(harnessErr(rerr), s.quarantined(ctx, a, ask))
+	case state == loomstore.ClaimReleased:
+		return harnessErr(rerr)
+	}
+	s.setAsk(a.AgentID, Ask{ID: ask.ID}, false)
 	return s.syncWaiting(ctx, a)
+}
+
+// nativeOutcome is the claim state sess's native history proves for c's
+// ask, whose Reply may have gone out: released while it is still
+// pending, replied once it is resolved, and unknown with no evidence either
+// way. A failed history read returns unknown and its error.
+func nativeOutcome(ctx context.Context, sess loomharness.Session, c loomstore.AskClaim) (string, error) {
+	state := loomstore.ClaimUnknown
+	for after := ""; ; {
+		page, err := sess.Messages(ctx, after, 100)
+		if err != nil {
+			return loomstore.ClaimUnknown, err
+		}
+		for _, e := range page.Events {
+			switch {
+			case e.AskID != c.AskID || (e.TurnID != "" && c.TurnID != "" && e.TurnID != c.TurnID):
+			case e.Type == loomharness.EventAskOpened:
+				state = loomstore.ClaimReleased
+			case e.Type == loomharness.EventAskResolved:
+				state = loomstore.ClaimReplied
+			default:
+				state = loomstore.ClaimUnknown
+			}
+		}
+		if after = page.Next; after == "" {
+			return state, nil
+		}
+	}
+}
+
+// replyUnknown shows reply_unknown on a unless it already shows Attention.
+func (s *Service) replyUnknown(ctx context.Context, a loomstore.Agent) error {
+	if a.AttentionReason != nil {
+		return nil
+	}
+	_, err := s.raiseAttention(ctx, a, AttentionReplyUnknown)
+	return err
+}
+
+// settleClaims settles each claim a crash left pending on a (its Reply's
+// outcome unsaved) by the native ask, never by replying again; a replied
+// ask still open is closed. A claim whose history cannot be read stays
+// pending, and the error means retry.
+func (s *Service) settleClaims(ctx context.Context, a loomstore.Agent, sess loomharness.Session) (loomstore.Agent, error) {
+	claims, err := s.store.PendingAskClaims(ctx, a.AgentID)
+	for _, c := range claims {
+		if err != nil {
+			break
+		}
+		var state string
+		if state, err = nativeOutcome(ctx, sess, c); err != nil {
+			break
+		}
+		if state == loomstore.ClaimUnknown && a.AttentionReason == nil { // Attention first, as in replied
+			if a, err = s.raiseAttention(ctx, a, AttentionReplyUnknown); err != nil {
+				break
+			}
+		}
+		if err = s.store.SettleAskClaim(ctx, c, state); err != nil {
+			break
+		}
+		s.mu.Lock()
+		ask, open := s.asks[a.AgentID][c.AskID]
+		s.mu.Unlock()
+		if state == loomstore.ClaimReplied && open && ask.TurnID == c.TurnID {
+			s.setAsk(a.AgentID, ask, false)
+		}
+	}
+	if err == nil && len(claims) > 0 {
+		err = s.syncWaiting(ctx, a)
+	}
+	return a, err
+}
+
+// settleLeftClaim settles c, a claim a crash left pending that start-up has
+// not yet settled, and returns c as it then is.
+func (s *Service) settleLeftClaim(ctx context.Context, a loomstore.Agent, c loomstore.AskClaim) (loomstore.AskClaim, error) {
+	a, err := s.resumeOnce(ctx, a)
+	if err != nil {
+		return c, err
+	}
+	sess, _, err := s.current(ctx, a)
+	if err != nil || sess == nil {
+		return c, &Error{Code: CodeHarnessUnavailable, Message: a.Harness + " is not available"}
+	}
+	if _, err := s.settleClaims(ctx, a, sess); err != nil {
+		return c, err
+	}
+	return s.store.GetAskClaim(ctx, c)
 }
 
 // quarantineCleanup bounds saving a quarantined ask's loss, which runs even
@@ -139,7 +356,7 @@ func askOf(e loomharness.Event) Ask {
 	if e.ItemKind == "question" {
 		typ = "question"
 	}
-	return Ask{ID: e.AskID, Type: typ, About: e.Text, TurnID: e.TurnID}
+	return Ask{ID: e.AskID, Type: typ, About: e.Text, Questions: e.Questions, TurnID: e.TurnID}
 }
 
 // syncWaiting sets a running agent waiting{approval|input} while an ask of

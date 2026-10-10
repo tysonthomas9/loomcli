@@ -38,8 +38,8 @@ func eventKey(e loomharness.Event) string {
 // ids is what the port contract requires to match between the two copies of
 // an event (Text, Time and Seq may differ).
 func ids(e loomharness.Event) string {
-	return fmt.Sprintf("type=%s root=%s native=%s turn=%s input=%s ask=%s item=%s kind=%s stop=%s",
-		e.Type, e.Session.Root, e.Session.NativeID, e.TurnID, e.InputKey, e.AskID, e.ItemID, e.ItemKind, e.StopReason)
+	return fmt.Sprintf("type=%s root=%s native=%s turn=%s input=%s ask=%s item=%s kind=%s stop=%s usage=%+v",
+		e.Type, e.Session.Root, e.Session.NativeID, e.TurnID, e.InputKey, e.AskID, e.ItemID, e.ItemKind, e.StopReason, e.Usage)
 }
 
 // keyed indexes the saved events by EventID, failing on a collision (two
@@ -116,6 +116,7 @@ func history(t *testing.T, s *Session, limit int) []loomharness.Event {
 // first feed saw.
 func TestEventsLiveMatchesMessages(t *testing.T) {
 	ctx := context.Background()
+	stepTokens := map[string]any{"input": 10, "output": 20, "reasoning": 5, "cache": map[string]int{"read": 30, "write": 40}}
 	seed := func() (*store, *Client, loomharness.NativeRef) {
 		st := newStore()
 		c := fakeServer(t, st)
@@ -125,12 +126,12 @@ func TestEventsLiveMatchesMessages(t *testing.T) {
 		}
 		st.messages[ref.NativeID] = []map[string]any{
 			{"id": "msg_u1", "type": "user", "text": "go"},
-			{"id": "msg_a1", "type": "assistant", "finish": "tool-calls", "content": []map[string]any{
+			{"id": "msg_a1", "type": "assistant", "finish": "tool-calls", "cost": 0.5, "tokens": stepTokens, "content": []map[string]any{
 				{"type": "reasoning", "text": "think"},
 				{"type": "tool", "id": "call_1", "state": map[string]string{"status": "completed"}},
 			}},
 			{"id": "msg_11", "type": "synthetic", "text": "The server restarted", "metadata": map[string]string{"notice": "restart"}},
-			{"id": "msg_a2", "type": "assistant", "finish": "stop", "content": []map[string]any{{"type": "text", "text": "done"}}},
+			{"id": "msg_a2", "type": "assistant", "finish": "stop", "tokens": map[string]any{"input": 7}, "content": []map[string]any{{"type": "text", "text": "done"}}},
 			{"id": "msg_15", "type": "idle", "outcome": "succeeded"},
 			{"id": "msg_u2", "type": "user", "text": "again"},
 			{"id": "msg_a3", "type": "assistant", "content": []map[string]any{
@@ -155,14 +156,14 @@ func TestEventsLiveMatchesMessages(t *testing.T) {
 		e(6, "permission.asked", `{"sessionID":"SID","id":"per_1"}`),
 		e(7, "permission.replied", `{"sessionID":"SID","requestID":"per_1","reply":"once"}`),
 		e(8, "session.tool.success", `{"sessionID":"SID","assistantMessageID":"msg_a1","id":"call_1"}`),
-		e(9, "session.step.ended", `{"sessionID":"SID","assistantMessageID":"msg_a1"}`),
+		e(9, "session.step.ended", `{"sessionID":"SID","assistantMessageID":"msg_a1","cost":0.5,"tokens":{"input":10,"output":20,"reasoning":5,"cache":{"read":30,"write":40}}}`),
 		e(10, "session.execution.interrupted", `{"sessionID":"SID","reason":"shutdown"}`),
 	}
 	afterRestart := []string{
 		e(11, "session.synthetic", `{"sessionID":"SID","text":"The server restarted","metadata":{"notice":"restart"}}`),
 		e(12, "session.text.started", `{"sessionID":"SID","assistantMessageID":"msg_a2","ordinal":0}`),
 		e(13, "session.text.ended", `{"sessionID":"SID","assistantMessageID":"msg_a2","ordinal":0,"text":"done"}`),
-		e(14, "session.step.ended", `{"sessionID":"SID","assistantMessageID":"msg_a2"}`),
+		e(14, "session.step.ended", `{"sessionID":"SID","assistantMessageID":"msg_a2","tokens":{"input":7}}`),
 	}
 	turnEnd := []string{
 		e(15, "session.execution.succeeded", `{"sessionID":"SID"}`),
@@ -205,6 +206,16 @@ func TestEventsLiveMatchesMessages(t *testing.T) {
 		if usage != 2 {
 			t.Errorf("limit %d: %d usage rows in history, want 2", limit, usage)
 		}
+	}
+	// Each usage carries its own step's counts, reasoning in output.
+	var got []loomharness.Usage
+	for _, ev := range full {
+		if ev.Type == loomharness.EventUsage {
+			got = append(got, ev.Usage)
+		}
+	}
+	if want := []loomharness.Usage{{InputTokens: 10, OutputTokens: 25, CacheReadTokens: 30, CacheWriteTokens: 40, CostUSD: 0.5}, {InputTokens: 7}}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("live usage %+v, want %+v", got, want)
 	}
 	for _, want := range []string{"turn.started", "turn.resumed", "turn.completed", "usage", "item.completed", "ask.opened", "message.delivered"} {
 		found := false

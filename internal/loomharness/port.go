@@ -42,10 +42,12 @@ type Session interface {
 	HasInput(ctx context.Context, key string) (Landed, error)
 	Messages(ctx context.Context, after string, limit int) (MessagePage, error) // catch-up read
 	Status(ctx context.Context) (Status, error)
-	SetModel(ctx context.Context, model string) error // from the next turn
-	Move(ctx context.Context, dir string) error       // at a turn boundary
-	Unload(ctx context.Context) error                 // free an idle session
-	Close(ctx context.Context) error                  // stop this runtime; native history is kept
+	// SetModel sets the model and its options from the next turn; opts is
+	// the session's whole option selection, replacing what it had.
+	SetModel(ctx context.Context, model string, opts []Option) error
+	Move(ctx context.Context, dir string) error // at a turn boundary
+	Unload(ctx context.Context) error           // free an idle session
+	Close(ctx context.Context) error            // stop this runtime; native history is kept
 }
 
 // NativeRef is a provider-native session or thread ID plus the root it lives
@@ -103,8 +105,24 @@ type Reply struct {
 	// grant, such as OpenCode's "always"). An adapter that cannot honor it
 	// fails Reply with an explicit error, never narrowing it; the ask stays open.
 	Always bool
-	Answer string
+	// Answer answers a question ask's first question. Answers, when set,
+	// answers each question by its Question.ID instead: one value, or one
+	// per chosen option of a MultiSelect question.
+	Answer  string
+	Answers map[string][]string
 }
+
+// Question is one question of a question ask, in T3 Code's shape: a short
+// Header, the Question text and the Options to choose from; with none, or
+// besides them, the answer may be free text.
+type Question struct {
+	ID, Header, Question string
+	Options              []Choice
+	MultiSelect          bool
+}
+
+// Choice is one option a Question offers.
+type Choice struct{ Label, Description string }
 
 // Landed says whether an input reached the harness.
 type Landed string
@@ -123,10 +141,59 @@ type Status struct {
 	LastTurnInterrupt bool // the newest finished turn was interrupted
 }
 
-// Model is one model the harness offers.
+// Model is one model the harness offers, with its capabilities in T3 Code's
+// generic shape: each option the model takes is a descriptor, and a selection
+// is a list of {ID, Value}.
 type Model struct {
-	ID   string
-	Name string
+	ID           string
+	Name         string
+	Provider     string // the provider id, e.g. "openai"; the harness name when it has one provider
+	ProviderName string
+	ContextLimit int64    // tokens; 0 when unknown
+	Input        []string // text | image | pdf
+	Default      bool     // the model a session gets with none chosen
+	Options      []OptionDescriptor
+	Custom       bool // a workspace custom model id the harness does not list (MCS3)
+}
+
+// Option types.
+const (
+	OptionSelect  = "select"
+	OptionBoolean = "boolean"
+)
+
+// OptionEffort is the reasoning-effort option every harness names the same way.
+const OptionEffort = "effort"
+
+// OptionDescriptor is one option a model takes. A select lists its Choices;
+// a boolean takes "true" or "false". Current is the value used when none is set.
+type OptionDescriptor struct {
+	ID, Label, Description string
+	Type                   string // select | boolean
+	Choices                []OptionChoice
+	Current                string
+}
+
+// OptionChoice is one value of a select option.
+type OptionChoice struct {
+	ID, Label, Description string
+	Default                bool
+}
+
+// Option is one chosen option value; a boolean's Value is "true" or "false".
+type Option struct {
+	ID    string
+	Value string
+}
+
+// OptionValue returns the value of option id in opts, or "".
+func OptionValue(opts []Option, id string) string {
+	for _, o := range opts {
+		if o.ID == id {
+			return o.Value
+		}
+	}
+	return ""
 }
 
 // Health reports the installed version and the version check result.
@@ -179,8 +246,35 @@ type Event struct {
 	Time       time.Time
 	InputKey   string // the input's key, for message.delivered and the turn.started it began
 	AskID      string
-	Text       string
-	StopReason string // completed | cancelled | failed, for turn.completed
+	Text       string // for ask.opened: what it asks about (the command, file or diff, or the question)
+	Sender     string // the Loom slot sender of a message.delivered; loomagent sets it
+	StopReason string // completed | cancelled | declined (OpenCode, a rejected permission) | failed, for turn.completed
+	Error      string // for a failed turn.completed: the harness's reason, when it gives one
+	Usage      Usage  // for usage: this step's own counts, never a running total
+	Tool       *Tool  // for a tool item's item.started and item.completed: what the chat shows
+	// Questions, for a question's ask.opened, are what it asks when the
+	// harness says; Text is then the first question.
+	Questions []Question
+}
+
+// Tool is a tool call as the chat shows it, the same for every harness: the
+// harness's tool name, its input as text (JSON when the input is structured)
+// and, once it completed, its output text and whether it failed. An
+// item.started carries what is known when the call starts.
+type Tool struct {
+	Name   string `json:"name,omitempty"`
+	Input  string `json:"input,omitempty"`
+	Output string `json:"output,omitempty"`
+	Failed bool   `json:"failed,omitempty"`
+}
+
+// Usage is one step's token counts, and its cost where the harness reports one.
+// Input excludes cached input; Output includes reasoning. A harness that
+// reports only the session's running cost (Claude) sets CostTotalUSD instead
+// of CostUSD; loomagent saves its rise since the session's last saved total.
+type Usage struct {
+	InputTokens, OutputTokens, CacheReadTokens, CacheWriteTokens int64
+	CostUSD, CostTotalUSD                                        float64
 }
 
 // Errors adapters return. Wrap them with fmt.Errorf("...: %w", err).
@@ -188,7 +282,14 @@ var (
 	ErrUnavailable     = errors.New("loomharness: harness unavailable")
 	ErrBusy            = errors.New("loomharness: session busy")
 	ErrSessionNotFound = errors.New("loomharness: session not found")
+	// ErrBadRequest: the harness refused the request as invalid; repeating
+	// it fails the same way.
+	ErrBadRequest = errors.New("loomharness: bad request")
 	// ErrQuarantined: the session's policy is unconfirmed, so it refuses
 	// Prompt and Reply until Open or Resume confirms one.
 	ErrQuarantined = errors.New("loomharness: session quarantined: its policy is unconfirmed")
+	// ErrNotSent: the call failed before any of its request reached the
+	// harness (no connection, or refused before writing), so it had no
+	// effect there and may be made again.
+	ErrNotSent = errors.New("loomharness: request not sent")
 )

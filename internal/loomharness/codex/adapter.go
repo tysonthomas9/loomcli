@@ -29,17 +29,26 @@ type Adapter struct {
 	// starts holds each thread's turn.started until the turn's user item
 	// gives it the input's key (codex sends turn/started first).
 	starts map[loomharness.NativeRef]loomharness.Event
+	// next holds a thread's model, effort and cwd from SetModel and Move until a
+	// turn/start sends them.
+	next map[loomharness.NativeRef]override
+	// diffs holds each started fileChange item's diff until it completes,
+	// for its approval, whose request names only the item.
+	diffs map[string]string
 
 	openMu sync.Mutex         // one Open at a time, so a key never gets two threads
 	opened map[opening]string // thread ids this process opened, until purged
 }
+
+// override is what a thread's next turn/start sets.
+type override struct{ model, effort, dir string }
 
 // opening is what Open is idempotent by.
 type opening struct{ root, dir, key string }
 
 // NewAdapter returns an adapter; cfg.Unrouted is its own.
 func NewAdapter(cfg Config) *Adapter {
-	a := &Adapter{feeds: map[*feed]struct{}{}, asks: map[string]map[string]Message{}, starts: map[loomharness.NativeRef]loomharness.Event{}, opened: map[opening]string{}}
+	a := &Adapter{feeds: map[*feed]struct{}{}, asks: map[string]map[string]Message{}, starts: map[loomharness.NativeRef]loomharness.Event{}, next: map[loomharness.NativeRef]override{}, diffs: map[string]string{}, opened: map[opening]string{}}
 	cfg.Unrouted = a.receive
 	a.Supervisor = New(cfg)
 	return a
@@ -73,6 +82,13 @@ func (a *Adapter) LaunchFor(projectDir, profileKey string) (loomharness.Launch, 
 // thread/list searchTerm finds it, after a restart too (probed on 0.157.1;
 // threadSource is not persisted). Before that message codex lists nothing
 // for it and it has no history, so this process remembers what it opened.
+//
+// That record stays in memory on purpose. Such a thread has no rollout, so
+// it does not outlive its app-server, a child of this process: after a
+// restart thread/read still names it, but thread/resume fails with "no
+// rollout found" and thread/turns/list with "missing source rollout"
+// (probed on 0.157.1). A record kept on disk would make a restarted Open
+// return that dead thread; a new Open opening a fresh one is right.
 const markerPrefix = "loom:"
 
 // Open returns the thread for spec.Key in spec.Dir on spec.Launch.Root's
@@ -185,20 +201,28 @@ func (a *Adapter) Purge(ctx context.Context, owned []loomharness.NativeRef) erro
 		if err := a.delete(ctx, ref); err != nil {
 			return err
 		}
-		a.openMu.Lock()
-		for k, id := range a.opened {
-			if k.root == a.Root(ref.Root) && id == ref.NativeID {
-				delete(a.opened, k)
-			}
-		}
-		a.openMu.Unlock()
+		a.forget(ref)
+		a.mu.Lock()
+		delete(a.next, ref)
+		a.mu.Unlock()
 	}
 	return nil
 }
 
+// forget drops the record that this process opened ref.
+func (a *Adapter) forget(ref loomharness.NativeRef) {
+	a.openMu.Lock()
+	defer a.openMu.Unlock()
+	for k, id := range a.opened {
+		if k.root == a.Root(ref.Root) && id == ref.NativeID {
+			delete(a.opened, k)
+		}
+	}
+}
+
 // delete deletes one thread on its recorded root; one already gone is fine.
 func (a *Adapter) delete(ctx context.Context, ref loomharness.NativeRef) error {
-	err := a.Session(ref).call(ctx, "thread/delete", protocol.ThreadDeleteParams{ThreadId: ref.NativeID}, nil)
+	err := a.session(ref).call(ctx, "thread/delete", protocol.ThreadDeleteParams{ThreadId: ref.NativeID}, nil)
 	var rpc *RPCError
 	if errors.As(err, &rpc) && strings.HasPrefix(rpc.Message, "no rollout found") {
 		return nil // deleted before
@@ -207,6 +231,17 @@ func (a *Adapter) delete(ctx context.Context, ref loomharness.NativeRef) error {
 		return fmt.Errorf("codex delete %s under %s: %w", ref.NativeID, ref.Root, err)
 	}
 	return nil
+}
+
+// Restart restarts every app-server Loom runs, one root at a time, so the
+// idle timer frees their memory; a root with no running server stays down
+// until its next use. Only servers this supervisor spawned are touched.
+func (a *Adapter) Restart(ctx context.Context) error {
+	var errs []error
+	for _, root := range a.running() {
+		errs = append(errs, a.Supervisor.Restart(ctx, root))
+	}
+	return errors.Join(errs...)
 }
 
 // Models lists the models the inherited root's app-server offers.
@@ -223,7 +258,7 @@ func (a *Adapter) Models(ctx context.Context) ([]loomharness.Model, error) {
 			return nil, fmt.Errorf("codex model/list: %w", err)
 		}
 		for _, m := range page.Data {
-			out = append(out, loomharness.Model{ID: m.Model, Name: m.DisplayName})
+			out = append(out, catalogModel(m))
 		}
 		if page.NextCursor == nil || len(page.Data) == 0 {
 			return out, nil
@@ -280,8 +315,30 @@ func (a *Adapter) receive(root string, m Message) {
 			a.mu.Unlock()
 		}
 	}
-	if e, ok := live(root, m); ok {
-		a.started(e)
+	e, ok := live(root, m)
+	if !ok {
+		return
+	}
+	a.diff(m, &e)
+	a.started(e)
+}
+
+// diff keeps a started fileChange item's diff and adds it to the Text of
+// that item's approval; the item's completion drops it.
+func (a *Adapter) diff(m Message, e *loomharness.Event) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	switch {
+	case e.Type == loomharness.EventItemStarted && e.Tool != nil && e.Tool.Name == "edit":
+		var p protocol.ItemStartedNotification
+		var it item
+		if json.Unmarshal(m.Params, &p) == nil && json.Unmarshal(p.Item, &it) == nil {
+			a.diffs[e.ItemID] = it.tool(false).Output
+		}
+	case e.Type == loomharness.EventItemCompleted:
+		delete(a.diffs, e.ItemID)
+	case e.Type == loomharness.EventAskOpened && m.Method == "item/fileChange/requestApproval" && a.diffs[e.ItemID] != "":
+		e.Text = strings.TrimPrefix(e.Text+"\n"+a.diffs[e.ItemID], "\n")
 	}
 }
 

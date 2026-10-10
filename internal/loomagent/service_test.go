@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
 )
@@ -23,15 +23,18 @@ func newService(t *testing.T, cfg ServiceConfig, agents ...loomstore.Agent) *Ser
 			t.Fatal(err)
 		}
 	}
-	cfg.Store, cfg.Events = st, NewEventLog(st)
-	return New(cfg)
+	cfg.Store, cfg.Events, cfg.WorkspaceID = st, NewEventLog(st), "ws"
+	s := New(cfg)
+	useTestClock(s) // nothing in a test waits on real time
+	return s
 }
 
 func svcAgent(id, mode, state string) loomstore.Agent {
 	return loomstore.Agent{AgentID: id, WorkspaceID: "ws", Name: id, ProfileKey: id, Preset: "lead",
 		PresetVersion: "1", Mode: mode, InteractionMode: "interactive", RoleKind: "interactive", SpecJSON: "{}",
 		SpecVersion: 1, OwnerKind: "user", OwnerID: "u", CreatedByKind: "user", CreatedByID: "u",
-		CreateRequestID: "req-" + id, Repo: "/repo", Harness: "fake", State: state, Attempt: 1}
+		CreateRequestID: "req-" + id, Repo: "/repo", Harness: "fake", State: state, Attempt: 1,
+		CreateStep: stepDone}
 }
 
 func (s *Service) get(t *testing.T, id string) loomstore.Agent {
@@ -242,7 +245,7 @@ func TestStateAgentLockOrdersWrites(t *testing.T) {
 			defer wg.Done()
 			defer s.lock("a1")()
 			v := n
-			time.Sleep(time.Microsecond)
+			runtime.Gosched() // let another writer run inside the lock if it could
 			n = v + 1
 		}()
 	}
@@ -276,5 +279,23 @@ func TestBusSlowSubscriberLagged(t *testing.T) {
 	b.Unsubscribe(other)
 	if _, ok := <-other.C; ok || other.Err() != nil {
 		t.Fatalf("unsubscribed: ok=%v err=%v", ok, other.Err())
+	}
+}
+
+// TestOtherWorkspaceAgentNotFound: a service never reads or changes an agent
+// of another workspace, even by its AgentID.
+func TestOtherWorkspaceAgentNotFound(t *testing.T) {
+	ctx := context.Background()
+	b := svcAgent("b1", "persistent", StateIdle)
+	b.WorkspaceID = "ws2"
+	s := newService(t, ServiceConfig{}, b)
+	_, getErr := s.Get(ctx, "b1")
+	_, listErr := s.ListEvents(ctx, loomstore.EventQuery{AgentID: "b1"})
+	_, subErr := s.Subscribe(ctx, SubscribeRequest{AgentIDs: []string{"b1"}, Cursors: map[string]int64{"b1": 0}})
+	archErr := s.Archive(ctx, ArchiveRequest{AgentID: "b1"})
+	for what, err := range map[string]error{"Get": getErr, "ListEvents": listErr, "Subscribe": subErr, "Archive": archErr} {
+		if !isCode(err, CodeAgentNotFound) {
+			t.Errorf("%s = %v; want agent_not_found", what, err)
+		}
 	}
 }

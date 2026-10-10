@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"path"
 	"strings"
 	"time"
 
@@ -142,6 +143,10 @@ func Auth(cfg AuthConfig) Middleware {
 			}
 
 			tokenStr := extractBearerToken(r)
+			if isBridgeCall(r, tokenStr) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			if tokenStr == "" {
 				writeJSONError(w, http.StatusUnauthorized, "authentication required")
 				return
@@ -192,6 +197,26 @@ func VerifiedUserActorFromContext(ctx context.Context) (actor, userID string, ok
 		actor = userID
 	}
 	return actor, userID, true
+}
+
+// BridgeTokenPrefix starts every Agent API bridge and daemon token. The
+// agentsv1 handler checks those tokens itself (design v2 §6.1).
+const BridgeTokenPrefix = "loomb1."
+
+// isBridgeCall reports whether the request is an Agent API call carrying a
+// bridge or daemon token, which only the Agent API routes accept. The path
+// must be exactly /api/workspaces/{ws}/v1/…: clean (no dot segments or
+// double slashes) and with nothing percent-encoded, even where Go leaves
+// RawPath empty (%3F, %23), so no other route can
+// be reached past the JWT check.
+func isBridgeCall(r *http.Request, token string) bool {
+	p := r.URL.Path
+	if !strings.HasPrefix(token, BridgeTokenPrefix) || strings.Contains(r.URL.EscapedPath(), "%") || path.Clean(p) != p {
+		return false
+	}
+	rest, ok := strings.CutPrefix(p, "/api/workspaces/")
+	ws, tail, _ := strings.Cut(rest, "/")
+	return ok && ws != "" && strings.HasPrefix(tail, "v1/")
 }
 
 // extractBearerToken extracts a Bearer token from the Authorization header only.

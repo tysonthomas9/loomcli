@@ -2,6 +2,8 @@ package codex
 
 import (
 	"encoding/json"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
@@ -27,6 +29,7 @@ func live(root string, m Message) (loomharness.Event, bool) {
 			return e, false
 		}
 		e.Type, e.TurnID, e.StopReason = loomharness.EventTurnCompleted, p.Turn.Id, stopReason(p.Turn.Status)
+		e.Error = turnError(p.Turn.Error)
 		return e, p.Turn.Status != protocol.TurnStatusInProgress
 	case "item/started", "item/completed":
 		var p protocol.ItemStartedNotification // the same shape as ItemCompletedNotification
@@ -51,8 +54,7 @@ func live(root string, m Message) (loomharness.Event, bool) {
 		if json.Unmarshal(m.Params, &p) != nil {
 			return e, false
 		}
-		e.Type, e.TurnID = loomharness.EventUsage, p.TurnId
-		return e, true
+		return usage(e, p), true
 	case "serverRequest/resolved":
 		var p protocol.ServerRequestResolvedNotification
 		if json.Unmarshal(m.Params, &p) != nil {
@@ -64,22 +66,70 @@ func live(root string, m Message) (loomharness.Event, bool) {
 	return askOpened(e, m)
 }
 
+// usage maps a step's token usage. Last is the step's own; Total is the
+// thread's running sum, which only names the step: it grows with every step.
+func usage(e loomharness.Event, p protocol.ThreadTokenUsageUpdatedNotification) loomharness.Event {
+	l := p.TokenUsage.Last
+	e.Type, e.TurnID = loomharness.EventUsage, p.TurnId
+	e.ItemID = p.TurnId + "/usage/" + strconv.FormatInt(p.TokenUsage.Total.TotalTokens, 10)
+	e.Usage = loomharness.Usage{InputTokens: l.InputTokens - l.CachedInputTokens, OutputTokens: l.OutputTokens,
+		CacheReadTokens: l.CachedInputTokens, CacheWriteTokens: l.CacheWriteInputTokens}
+	return e
+}
+
 // askOpened maps a server request that is an ask: a question when it asks
-// for the user's input, else an approval.
+// for the user's input, else an approval. Text is what it asks about.
 func askOpened(e loomharness.Event, m Message) (loomharness.Event, bool) {
 	if m.ID == nil || !askMethods[m.Method] {
 		return e, false
 	}
 	var p struct {
-		TurnID string `json:"turnId"`
-		ItemID string `json:"itemId"`
+		TurnID      string                                  `json:"turnId"`
+		ItemID      string                                  `json:"itemId"`
+		Command     string                                  `json:"command"`     // commandExecution
+		Cwd         string                                  `json:"cwd"`         // commandExecution
+		Reason      string                                  `json:"reason"`      // approvals
+		GrantRoot   string                                  `json:"grantRoot"`   // fileChange
+		Permissions json.RawMessage                         `json:"permissions"` // permissions
+		Message     string                                  `json:"message"`     // mcpServer elicitation
+		Questions   []protocol.ToolRequestUserInputQuestion `json:"questions"`   // requestUserInput
 	}
 	_ = json.Unmarshal(m.Params, &p)
 	e.Type, e.AskID, e.TurnID, e.ItemID = loomharness.EventAskOpened, askID(m.ID), p.TurnID, p.ItemID
 	e.ItemKind = "approval"
-	if m.Method == "item/tool/requestUserInput" || m.Method == "mcpServer/elicitation/request" {
+	var about []string
+	switch m.Method {
+	case "item/commandExecution/requestApproval":
+		about = append(about, p.Command)
+		if p.Cwd != "" {
+			about = append(about, "in "+p.Cwd)
+		}
+	case "item/fileChange/requestApproval":
+		if p.GrantRoot != "" {
+			about = append(about, "write access to "+p.GrantRoot)
+		}
+	case "item/permissions/requestApproval":
+		about = append(about, string(p.Permissions))
+	case "item/tool/requestUserInput":
 		e.ItemKind = "question"
+		for _, q := range p.Questions {
+			lq := loomharness.Question{ID: q.Id, Header: q.Header, Question: q.Question}
+			for _, o := range q.Options {
+				lq.Options = append(lq.Options, loomharness.Choice{Label: o.Label, Description: o.Description})
+			}
+			e.Questions = append(e.Questions, lq)
+		}
+		if len(p.Questions) > 0 {
+			about = append(about, p.Questions[0].Question)
+		}
+	case "mcpServer/elicitation/request":
+		e.ItemKind = "question"
+		about = append(about, p.Message)
 	}
+	if p.Reason != "" {
+		about = append(about, p.Reason)
+	}
+	e.Text = strings.Join(slices.DeleteFunc(about, func(s string) bool { return s == "" || s == "null" }), "\n")
 	return e, true
 }
 
@@ -91,6 +141,86 @@ type item struct {
 	Text     string          `json:"text"`     // agentMessage
 	Summary  []string        `json:"summary"`  // reasoning
 	Content  json.RawMessage `json:"content"`  // userMessage: [{type, text}]
+
+	// Tool items (toolKinds).
+	Status           string          `json:"status"`
+	Command          string          `json:"command"`          // commandExecution
+	AggregatedOutput string          `json:"aggregatedOutput"` // commandExecution
+	ExitCode         *int            `json:"exitCode"`         // commandExecution
+	Changes          []fileChange    `json:"changes"`          // fileChange
+	Server           string          `json:"server"`           // mcpToolCall
+	Tool             string          `json:"tool"`             // mcpToolCall, dynamicToolCall
+	Arguments        json.RawMessage `json:"arguments"`        // mcpToolCall, dynamicToolCall
+	Result           *struct {
+		Content []textPart `json:"content"`
+	} `json:"result"` // mcpToolCall
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error"` // mcpToolCall
+	ContentItems []textPart `json:"contentItems"` // dynamicToolCall
+	Success      *bool      `json:"success"`      // dynamicToolCall
+	Query        string     `json:"query"`        // webSearch
+}
+
+type fileChange struct {
+	Path string `json:"path"`
+	Diff string `json:"diff"`
+}
+
+// textPart is a text content part; other part types carry no text.
+type textPart struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+func joinText(parts []textPart) string {
+	var out []string
+	for _, p := range parts {
+		if p.Text != "" {
+			out = append(out, p.Text)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// tool is a tool item as the chat shows it. Its name follows the item type;
+// a started item carries no output.
+func (it item) tool(started bool) *loomharness.Tool {
+	enc := func(v any) string { b, _ := json.Marshal(v); return string(b) }
+	var t loomharness.Tool
+	switch it.Type {
+	case "commandExecution":
+		t = loomharness.Tool{Name: "command", Input: enc(map[string]string{"command": it.Command}), Output: it.AggregatedOutput,
+			Failed: it.Status == "failed" || it.Status == "declined" || (it.ExitCode != nil && *it.ExitCode != 0)}
+	case "fileChange":
+		paths := make([]string, len(it.Changes))
+		diffs := make([]string, len(it.Changes))
+		for i, c := range it.Changes {
+			paths[i], diffs[i] = c.Path, c.Diff
+		}
+		t = loomharness.Tool{Name: "edit", Input: enc(map[string][]string{"files": paths}), Output: strings.Join(diffs, "\n"),
+			Failed: it.Status == "failed" || it.Status == "declined"}
+	case "mcpToolCall":
+		t = loomharness.Tool{Name: it.Server + "/" + it.Tool, Input: string(it.Arguments), Failed: it.Error != nil || it.Status == "failed"}
+		if it.Result != nil {
+			t.Output = joinText(it.Result.Content)
+		}
+		if it.Error != nil {
+			t.Output = it.Error.Message
+		}
+	case "dynamicToolCall":
+		t = loomharness.Tool{Name: it.Tool, Input: string(it.Arguments), Output: joinText(it.ContentItems),
+			Failed: (it.Success != nil && !*it.Success) || it.Status == "failed"}
+	case "webSearch":
+		t = loomharness.Tool{Name: "web_search", Input: enc(map[string]string{"query": it.Query})}
+	}
+	if t.Input == "null" {
+		t.Input = ""
+	}
+	if started {
+		t.Output, t.Failed = "", false
+	}
+	return &t
 }
 
 // toolKinds are the ThreadItem types Loom shows as tool items.
@@ -138,7 +268,7 @@ func itemEvent(e loomharness.Event, raw protocol.ThreadItem, started, isLive boo
 			e.Text = strings.Join(it.Summary, "\n")
 		}
 	case toolKinds[it.Type]:
-		e.ItemKind = "tool"
+		e.ItemKind, e.Tool = "tool", it.tool(started)
 	case it.Type == "collabAgentToolCall" || it.Type == "subAgentActivity":
 		e.Type = loomharness.EventSubagentStarted
 		return e, started && isLive
@@ -146,6 +276,17 @@ func itemEvent(e loomharness.Event, raw protocol.ThreadItem, started, isLive boo
 		return e, false
 	}
 	return e, true
+}
+
+// turnError is a failed turn's reason as text: its message and any details.
+func turnError(err *protocol.TurnError) string {
+	if err == nil {
+		return ""
+	}
+	if err.AdditionalDetails != nil && *err.AdditionalDetails != "" {
+		return err.Message + "\n" + *err.AdditionalDetails
+	}
+	return err.Message
 }
 
 func stopReason(s protocol.TurnStatus) string {

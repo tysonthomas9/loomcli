@@ -1,0 +1,13 @@
+# Agent API override for the local-mode stack: the pinned OpenCode 2.0.19
+# build and the scripted fake model run inside loom-local.
+#
+# Usage (always with your own project and unclaimed ports):
+#   make local-mode-agents-up    # see test/local-mode/README.md
+
+services:
+  loom-local:
+    image: ${LOCAL_MODE_LOOM_AGENTS_IMAGE:-loomcli-local-mode-loom-agents:latest}
+    # One build: the `agents` stage layers on the `local-mode` stage of the
+    # same Dockerfile, so no separately tagged base image is needed.
+    build:
+      target: agents

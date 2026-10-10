@@ -1,0 +1,564 @@
+# Ports of the zz-lead-agent create-flow scenarios to the Agent API lead
+# (Tyson 2026-10-03: leave zz-lead-agent as it is and port its scenarios).
+# Each case names the old case it ports; the mapping, including the old cases
+# that no longer apply, is in the AFT1 task note (61500912). OpenCode runs for
+# real or as its emulator (LOOM_HARNESS_EMU=1); only the model is scripted.
+suite: agents-v1-lead-parity
+classification: { area: agents, feature: agent-api-lead, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: |
+  set -e
+  curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-PAR" >/dev/null || true
+  for r in agv1-par-alpha agv1-par-beta; do
+    repo="$AFT_WORK_DIR/$r"
+    mkdir -p "$repo"
+    git -C "$repo" init -q -b main
+    echo "$r ${RUN_ID:-local}" > "$repo/README.md"
+    git -C "$repo" add README.md
+    git -C "$repo" -c user.email=e2e@x -c user.name=e2e commit -q -m init
+  done
+  printf '{"name":"e2e-agv1-par","type":"empty","repos":["%s","%s"]}' "$AFT_WORK_DIR/agv1-par-alpha" "$AFT_WORK_DIR/agv1-par-beta" |
+    curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @- >/dev/null
+  # par-lead <name> <saved var>: an OpenCode lead on agv1-par-alpha made
+  # through the Agent API; its agent id goes to $AFT_WORK_DIR/<saved var>.
+  cat > "$AFT_WORK_DIR/par-lead" <<'SH'
+  #!/bin/sh
+  set -e
+  printf '{"preset":"lead","name":"%s","repo":"%s","base_ref":"main","overrides":{"harness":"opencode"}}' \
+    "$1" "$AFT_WORK_DIR/agv1-par-alpha" |
+    curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-AGV1-PAR/v1/agents" \
+      -H "Content-Type: application/json" -H "Idempotency-Key: $1" -d @- |
+    python3 -c 'import json,sys; print(json.load(sys.stdin)["agent_id"])' > "$AFT_WORK_DIR/$2"
+  SH
+  chmod +x "$AFT_WORK_DIR/par-lead"
+  # par-kid <child name> <child reply>: the lead's agent_create call through
+  # Code Mode's execute tool, then a reply both the lead and the child may
+  # take next (they share the fake model's queue).
+  cat > "$AFT_WORK_DIR/par-kid" <<'SH'
+  #!/bin/sh
+  set -e
+  curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+  python3 -c 'import json,sys; code="return await tools.loom.agent_create(%s)" % json.dumps({"name": sys.argv[1], "brief": "do the task"})
+  print(json.dumps({"steps": [{"tool_calls": [{"name": "execute", "arguments": {"code": code}}]}, {"text": sys.argv[2]}, {"text": sys.argv[2]}]}))' "$1" "$2" |
+    curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" -d @- >/dev/null
+  SH
+  chmod +x "$AFT_WORK_DIR/par-kid"
+teardown: |
+  set +e
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-PAR" >/dev/null
+
+tests:
+  # ports: zz-lead-agent "lead template creates an interactive lead agent and role"
+  - name: parity - the Lead template creates an Agent API lead with its own worktree and branch
+    intent: An operator creates a Lead in the New Agent modal and the saved agent is a user-made OpenCode lead on the picked repo, with its own worktree on its own branch from the tip of the repo's default branch even when the repo's checkout is on another branch
+    steps:
+      - run: |
+          set -e
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-PAR" |
+            python3 -c 'import json,sys; d=json.load(sys.stdin); d=d.get("data") or d; r=[r for r in d["repos"] if r["name"]=="agv1-par-alpha"][0]; print(r["path"]); print(r["default_branch"])' > "$AFT_WORK_DIR/par-alpha-ws"
+          copy="$(sed -n 1p "$AFT_WORK_DIR/par-alpha-ws")"; def="$(sed -n 2p "$AFT_WORK_DIR/par-alpha-ws")"
+          [ -n "$def" ] || { echo "no default_branch for agv1-par-alpha"; exit 1; }
+          git -C "$copy" rev-parse "$def^{commit}" > "$AFT_WORK_DIR/par-alpha-def-tip"
+          git -C "$copy" switch -q -c "par-side-${RUN_ID:-local}"
+          echo side > "$copy/par-side.txt"
+          git -C "$copy" add par-side.txt
+          git -C "$copy" -c user.email=e2e@x -c user.name=e2e commit -q -m "par side commit"
+          git -C "$copy" rev-parse HEAD > "$AFT_WORK_DIR/par-alpha-side-tip"
+          [ "$(git -C "$copy" rev-parse --abbrev-ref HEAD)" != "$def" ] && [ "$(cat "$AFT_WORK_DIR/par-alpha-side-tip")" != "$(cat "$AFT_WORK_DIR/par-alpha-def-tip")" ]
+        intent: "Put the workspace's agv1-par-alpha checkout on a side branch with its own commit, so its HEAD differs from its default branch"
+      - open: /ws/E2E-AGV1-PAR/agents
+      - wait:
+          fn: &parAddReady >-
+            Array.from(document.querySelectorAll('button')).some((b) => (b.textContent || '').trim() === '+ Add agent')
+        intent: "Wait until the agents page offers + Add agent"
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait: { testid: create-agent-overlay }
+      - click: { testid: create-agent-template-lead }
+      - fill: { testid: create-agent-name, value: "par-atlas-${RUN_ID:-local}" }
+      - click: { testid: create-agent-submit }
+      - wait: { url: "/ws/E2E-AGV1-PAR/chat/agt_" }
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode' &&
+            (document.querySelector('[aria-label="Agent chat"] header')?.textContent || '').includes('par-atlas-${RUN_ID:-local}')
+        intent: "Wait until the new lead's chat opens with its name and harness"
+      - run: |
+          set -e
+          id="$(agent-browser --session "$AFT_SESSION" eval "location.pathname.split('/').pop()" | tr -d '"')"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-PAR/v1/agents/$id" > "$AFT_WORK_DIR/par-atlas.json"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-PAR" > "$AFT_WORK_DIR/par-ws.json"
+          python3 - "$AFT_WORK_DIR/par-atlas.json" "par-atlas-${RUN_ID:-local}" agv1-par-alpha "$AFT_WORK_DIR/par-ws.json" <<'PY'
+          import json, os, subprocess, sys
+          a = json.load(open(sys.argv[1]))
+          name, repo = sys.argv[2], sys.argv[3]
+          git = lambda d, *args: subprocess.check_output(["git", "-C", d] + list(args), text=True).strip()
+          assert a["name"] == name and a["preset"] == "lead" and a["harness"] == "opencode", a
+          assert a["created_by_kind"] == "user" and a["parent_agent_id"] is None, a
+          assert os.path.basename(a["repo"]) == repo and "/.loom-config/workspaces/e2e-agv1-par/" in a["repo"], a
+          assert a["branch"] == "loom/agent/" + a["agent_id"], a
+          ws = json.load(open(sys.argv[4]))
+          ws = ws.get("data") or ws
+          picked = [r for r in ws["repos"] if r["name"] == repo]
+          assert len(picked) == 1, ws["repos"]
+          assert os.path.realpath(a["repo"]) == os.path.realpath(picked[0]["path"]), (a, picked)
+          assert a["base_ref"] == picked[0]["default_branch"], (a, picked)
+          wt = a["worktree_path"]
+          assert wt and os.path.isdir(wt), a
+          assert git(wt, "rev-parse", "--abbrev-ref", "HEAD") == a["branch"], wt
+          assert a["base_ref"] != git(a["repo"], "rev-parse", "--abbrev-ref", "HEAD"), ("base_ref followed the checkout's HEAD", a)
+          def_tip = open(os.path.join(os.path.dirname(sys.argv[1]), "par-alpha-def-tip")).read().strip()
+          side_tip = open(os.path.join(os.path.dirname(sys.argv[1]), "par-alpha-side-tip")).read().strip()
+          assert git(wt, "rev-parse", "HEAD") == def_tip != side_tip, "worktree did not start at the tip of " + a["base_ref"]
+          assert os.path.realpath(git(wt, "rev-parse", "--path-format=absolute", "--git-common-dir")) == \
+            os.path.realpath(git(a["repo"], "rev-parse", "--path-format=absolute", "--git-common-dir")), wt
+          PY
+        intent: "An operator's readback shows a user-made OpenCode lead on the workspace's copy of the picked repo, with its own worktree on loom/agent/<id> from the tip of the repo's default branch as the modal sends it"
+      - run: |
+          set -e
+          copy="$(sed -n 1p "$AFT_WORK_DIR/par-alpha-ws")"; def="$(sed -n 2p "$AFT_WORK_DIR/par-alpha-ws")"
+          git -C "$copy" switch -q "$def"
+        intent: "Put the agv1-par-alpha checkout back on its default branch"
+
+  # ports: zz-lead-agent "lead backend dropdown selects the runtime"
+  - name: parity - the Lead backend list is the server's lead harnesses and the pick reaches the agent
+    intent: An operator sees the Lead backend list offer exactly the harnesses the lead preset allows on this server, picks one, and the new lead runs on it
+    steps:
+      - run: |
+          set -e
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-PAR/v1/presets/lead" |
+            python3 -c 'import json,sys; h=json.load(sys.stdin)["harnesses"]; assert h, h; print("|".join(h))' > "$AFT_WORK_DIR/par-harnesses"
+          echo "lead harnesses: $(cat "$AFT_WORK_DIR/par-harnesses")"
+        intent: "An operator reads the harnesses the lead preset allows on this server"
+      - open: /ws/E2E-AGV1-PAR/agents
+      - wait:
+          fn: *parAddReady
+        intent: "Wait until the agents page offers + Add agent"
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait: { testid: create-agent-overlay }
+      - click: { testid: create-agent-template-lead }
+      - run: |
+          set -e
+          want="$(cat "$AFT_WORK_DIR/par-harnesses")"
+          for i in $(seq 1 20); do
+            got="$(agent-browser --session "$AFT_SESSION" eval "Array.from(document.querySelectorAll('[data-testid=create-agent-backend] option')).map((o) => o.value).join('|')" | tr -d '"')"
+            [ "$got" = "$want" ] && exit 0
+            sleep 0.5
+          done
+          echo "backend options '$got', want '$want'"; exit 1
+        intent: "The Lead backend list offers exactly the lead preset's harnesses"
+      - fill: { testid: create-agent-name, value: "par-backend-${RUN_ID:-local}" }
+      - select: { testid: create-agent-backend, value: opencode }
+      - click: { testid: create-agent-submit }
+      - wait: { url: "/ws/E2E-AGV1-PAR/chat/agt_" }
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the chat labels the lead's harness as the one picked"
+      - run: |
+          set -e
+          id="$(agent-browser --session "$AFT_SESSION" eval "location.pathname.split('/').pop()" | tr -d '"')"
+          h="$(curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-PAR/v1/agents/$id" | python3 -c 'import json,sys; print(json.load(sys.stdin)["harness"])')"
+          [ "$h" = opencode ] || { echo "saved harness $h"; exit 1; }
+        intent: "An operator's readback confirms the picked harness is saved on the agent"
+
+  # ports: zz-lead-agent "lead repo scope round trips workspace-wide and pinned choices"
+  - name: parity - a Lead pinned to the second repo is made on that repo, and a Lead with no repo is refused in the modal
+    intent: An operator picks the workspace's second repo for a Lead and its worktree is on that repo; with no repo picked the modal says a lead needs a repo and creates nothing
+    steps:
+      - open: /ws/E2E-AGV1-PAR/agents
+      - wait:
+          fn: *parAddReady
+        intent: "Wait until the agents page offers + Add agent"
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait: { testid: create-agent-overlay }
+      - click: { testid: create-agent-template-lead }
+      - fill: { testid: create-agent-name, value: "par-none-${RUN_ID:-local}" }
+      - wait:
+          fn: >-
+            (() => { const chips = Array.from(document.querySelectorAll('[data-testid=create-agent-repo-chips] button'));
+              chips.filter((b) => b.getAttribute('aria-pressed') === 'true').forEach((b) => b.click());
+              return chips.length === 2 && chips.every((b) => b.getAttribute('aria-pressed') !== 'true'); })()
+        intent: "Clear every repo chip"
+      - click: { testid: create-agent-submit }
+      - wait:
+          fn: >-
+            (() => { const o = document.querySelector('[data-testid=create-agent-overlay]');
+              const t = o?.textContent || '';
+              return (document.querySelector('[data-testid=create-agent-error]')?.textContent || '').includes('Pick a repo for the lead to work in.') &&
+                t.includes('Pick the repo this lead works in.') && !t.includes('workspace-wide scope') && !t.includes('workspace scope'); })()
+        intent: "Wait until the modal says a lead needs a repo, stays open, and its hint asks for the lead's repo with no workspace-scope promise"
+      - run: |
+          set -e
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-PAR/v1/agents" |
+            python3 -c 'import json,sys; n=[a for a in json.load(sys.stdin)["agents"] if a["name"]==sys.argv[1]]; assert not n, n' "par-none-${RUN_ID:-local}"
+        intent: "An operator's readback confirms no agent was made without a repo"
+      - fill: { testid: create-agent-name, value: "par-beta-${RUN_ID:-local}" }
+      - wait:
+          fn: >-
+            (() => { const beta = Array.from(document.querySelectorAll('[data-testid=create-agent-repo-chips] button'))
+                .find((b) => (b.textContent || '').includes('agv1-par-beta'));
+              if (beta && beta.getAttribute('aria-pressed') !== 'true') beta.click();
+              return beta?.getAttribute('aria-pressed') === 'true'; })()
+        intent: "Pin the agv1-par-beta repo"
+      - click: { testid: create-agent-submit }
+      - wait: { url: "/ws/E2E-AGV1-PAR/chat/agt_" }
+      - run: |
+          set -e
+          id="$(agent-browser --session "$AFT_SESSION" eval "location.pathname.split('/').pop()" | tr -d '"')"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-PAR/v1/agents/$id" > "$AFT_WORK_DIR/par-beta.json"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-PAR" > "$AFT_WORK_DIR/par-ws-beta.json"
+          python3 - "$AFT_WORK_DIR/par-beta.json" agv1-par-beta "$AFT_WORK_DIR/par-ws-beta.json" <<'PY'
+          import json, os, subprocess, sys
+          a = json.load(open(sys.argv[1]))
+          git = lambda d, *args: subprocess.check_output(["git", "-C", d] + list(args), text=True).strip()
+          assert os.path.basename(a["repo"]) == sys.argv[2] and "/.loom-config/workspaces/e2e-agv1-par/" in a["repo"], a
+          ws = json.load(open(sys.argv[3]))
+          ws = ws.get("data") or ws
+          picked = [r for r in ws["repos"] if r["name"] == sys.argv[2]]
+          assert len(picked) == 1 and os.path.realpath(a["repo"]) == os.path.realpath(picked[0]["path"]), (a, picked)
+          assert a["base_ref"] == picked[0]["default_branch"], (a, picked)
+          assert os.path.realpath(git(a["worktree_path"], "rev-parse", "--path-format=absolute", "--git-common-dir")) == \
+            os.path.realpath(git(a["repo"], "rev-parse", "--path-format=absolute", "--git-common-dir")), a
+          PY
+        intent: "An operator's readback shows the lead and its worktree are on agv1-par-beta"
+
+  # ports: zz-lead-agent "duplicate lead name renders the server error inline"
+  - name: parity - a Lead with a taken name shows the server's error in the modal and makes no second agent
+    intent: An operator tries to create a Lead with the name of an existing agent, sees the name-taken error in the dialog, and only one agent has that name
+    steps:
+      - run: |
+          set -e
+          "$AFT_WORK_DIR/par-lead" "par-dup-${RUN_ID:-local}" parDupId
+        intent: "Create an OpenCode lead named par-dup through the Agent API"
+      - open: /ws/E2E-AGV1-PAR/agents
+      - wait:
+          fn: *parAddReady
+        intent: "Wait until the agents page offers + Add agent"
+      - click: { role: button, name: "+ Add agent", exact: true }
+      - wait: { testid: create-agent-overlay }
+      - click: { testid: create-agent-template-lead }
+      - fill: { testid: create-agent-name, value: "par-dup-${RUN_ID:-local}" }
+      - click: { testid: create-agent-submit }
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=create-agent-error]')?.textContent || '').includes('already exists') &&
+            !!document.querySelector('[data-testid=create-agent-overlay]') && !location.pathname.includes('/chat/')
+        intent: "Wait until the dialog shows the name-taken error and stays open"
+      - run: |
+          set -e
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-PAR/v1/agents" |
+            python3 -c 'import json,sys; n=[a["agent_id"] for a in json.load(sys.stdin)["agents"] if a["name"]==sys.argv[1]]; assert n==[sys.argv[2]], n' \
+              "par-dup-${RUN_ID:-local}" "$(cat "$AFT_WORK_DIR/parDupId")"
+        intent: "An operator's readback confirms the name still belongs to the one existing lead"
+      - click: { testid: create-agent-close }
+
+  # ports: zz-lead-agent "second lead reuses the existing lead role"
+  - name: parity - two leads in one workspace each get their own worktree and branch and both reply
+    intent: An operator runs two leads side by side in one workspace; each has its own worktree on its own branch, and each answers in its own chat
+    steps:
+      - run: |
+          set -e
+          "$AFT_WORK_DIR/par-lead" "par-one-${RUN_ID:-local}" parOneId
+          "$AFT_WORK_DIR/par-lead" "par-two-${RUN_ID:-local}" parTwoId
+          api="$AFT_BASE_URL/api/workspaces/E2E-AGV1-PAR/v1/agents"
+          curl -sf "$api/$(cat "$AFT_WORK_DIR/parOneId")" > "$AFT_WORK_DIR/par-one.json"
+          curl -sf "$api/$(cat "$AFT_WORK_DIR/parTwoId")" > "$AFT_WORK_DIR/par-two.json"
+          python3 - "$AFT_WORK_DIR/par-one.json" "$AFT_WORK_DIR/par-two.json" <<'PY'
+          import json, os, sys
+          a, b = (json.load(open(p)) for p in sys.argv[1:3])
+          assert a["preset"] == b["preset"] == "lead", (a, b)
+          assert a["worktree_path"] != b["worktree_path"] and a["branch"] != b["branch"], (a, b)
+          assert os.path.isdir(a["worktree_path"]) and os.path.isdir(b["worktree_path"]), (a, b)
+          PY
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" \
+            -d '{"steps":[{"text":"PAR-ONE-REPLY"},{"text":"PAR-TWO-REPLY"}]}' >/dev/null
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-PAR/chat/$(cat "$AFT_WORK_DIR/parOneId")"
+        intent: "Create two leads, check they have separate worktrees and branches, script a reply for each, and open the first"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the first lead's chat is ready"
+      - fill: { label: Message, value: "hello lead one" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('PAR-ONE-REPLY')
+        budget: 90000
+        intent: "Wait until the first lead replies"
+      - run: |
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-PAR/chat/$(cat "$AFT_WORK_DIR/parTwoId")"
+        intent: "Open the second lead"
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent;
+              return document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode' &&
+                t !== undefined && !t.includes('PAR-ONE-REPLY') && !t.includes('hello lead one'); })()
+        intent: "Wait until the second lead's chat is ready with none of the first lead's conversation"
+      - fill: { label: Message, value: "hello lead two" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('PAR-TWO-REPLY')
+        budget: 90000
+        intent: "Wait until the second lead replies in its own chat"
+
+  # ports: zz-lead-agent "opening a lead agent launches loom lead with attribution env"
+  - name: parity - a child the lead creates through its Loom tools is attributed to that lead
+    intent: An operator's lead creates a child through its Loom agent tools, and the child is saved as made by that lead, under it, in the lead's tree
+    steps:
+      - run: |
+          set -e
+          "$AFT_WORK_DIR/par-lead" "par-attr-${RUN_ID:-local}" parAttrId
+          "$AFT_WORK_DIR/par-kid" "par-attr-kid-${RUN_ID:-local}" PAR-ATTR-DONE
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-PAR/chat/$(cat "$AFT_WORK_DIR/parAttrId")"
+        intent: "Create an OpenCode lead, script its agent_create call and open its chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the lead's chat is ready"
+      - fill: { label: Message, value: "make a child" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=started-marker]')?.textContent || '').includes('par-attr-kid-${RUN_ID:-local}')
+        budget: 90000
+        intent: "Wait until the lead's chat shows the Started marker naming the child"
+      - run: |
+          set -e
+          lead="$(cat "$AFT_WORK_DIR/parAttrId")"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-PAR/v1/agents?parent=$lead" > "$AFT_WORK_DIR/par-attr-kids.json"
+          python3 - "$AFT_WORK_DIR/par-attr-kids.json" "$lead" "par-attr-kid-${RUN_ID:-local}" <<'PY'
+          import json, sys
+          kids = json.load(open(sys.argv[1]))["agents"]
+          lead, name = sys.argv[2], sys.argv[3]
+          assert len(kids) == 1 and kids[0]["name"] == name, kids
+          k = kids[0]
+          assert k["created_by_kind"] == "agent" and k["created_by_id"] == lead, k
+          assert k["parent_agent_id"] == lead and k["root_agent_id"] == lead, k
+          PY
+        intent: "An operator's readback shows the child was made by the lead, under it, with the lead as its root"
+
+  # ports: zz-lead-agent "reopening a lead reuses its terminal session"
+  - name: parity - reopening a lead shows the same conversation once and the next turn continues it
+    intent: An operator leaves a lead's chat and comes back, sees the earlier exchange exactly once, and the lead's next turn carries on the same conversation
+    steps:
+      - run: |
+          set -e
+          "$AFT_WORK_DIR/par-lead" "par-reopen-${RUN_ID:-local}" parReopenId
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" \
+            -d '{"steps":[{"text":"PAR-REOPEN-ONE"},{"text":"PAR-REOPEN-TWO"}]}' >/dev/null
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-PAR/chat/$(cat "$AFT_WORK_DIR/parReopenId")"
+        intent: "Create an OpenCode lead, script two replies and open its chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the lead's chat is ready"
+      - fill: { label: Message, value: "par reopen first" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('PAR-REOPEN-ONE')
+        budget: 90000
+        intent: "Wait until the first reply streams in"
+      - open: /ws/E2E-AGV1-PAR/kanban
+      - wait:
+          fn: >-
+            location.pathname.endsWith('/kanban') && !document.querySelector('[data-testid=chat-transcript]')
+        intent: "Wait until the board replaces the chat"
+      - run: |
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-PAR/chat/$(cat "$AFT_WORK_DIR/parReopenId")"
+        intent: "Reopen the lead"
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              return t.split('par reopen first').length === 2 && t.split('PAR-REOPEN-ONE').length === 2; })()
+        intent: "Wait until the reopened chat shows the first message and its reply exactly once"
+      - fill: { label: Message, value: "par reopen second" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('PAR-REOPEN-TWO')
+        budget: 90000
+        intent: "Wait until the second reply streams in"
+      - run: |
+          set -e
+          curl -sf "$AFT_FAKE_MODEL_URL/__requests" > "$AFT_WORK_DIR/par-reopen-requests.json"
+          python3 - "$AFT_WORK_DIR/par-reopen-requests.json" <<'PY'
+          import json, sys
+          reqs = [json.dumps(r) for r in json.load(open(sys.argv[1]))["requests"]]
+          second = [r for r in reqs if "par reopen second" in r]
+          assert second, "the second message never reached the model"
+          assert "par reopen first" in second[-1], "the second turn did not carry the first turn's conversation"
+          PY
+        intent: "Check that the second turn reached the model with the first turn's conversation"
+
+  # ports: zz-lead-agent "migrating a lead backend rebuilds the launch spec" (refusal only).
+  # Deferred: a successful switch needs a second harness, and the emulator stack runs only
+  # OpenCode (codex and claude are harness_unavailable here), so it belongs to a real-backend run.
+  - name: parity - a harness switch to a harness this server does not run is refused and the lead keeps working
+    intent: An operator asks to move a lead to codex on a server without codex, gets a clear harness_unavailable refusal, and the lead keeps its harness, history and replies
+    steps:
+      - run: |
+          set -e
+          "$AFT_WORK_DIR/par-lead" "par-switch-${RUN_ID:-local}" parSwitchId
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" \
+            -d '{"steps":[{"text":"PAR-SWITCH-ONE"},{"text":"PAR-SWITCH-TWO"}]}' >/dev/null
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-PAR/chat/$(cat "$AFT_WORK_DIR/parSwitchId")"
+        intent: "Create an OpenCode lead, script two replies and open its chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the lead's chat is ready"
+      - fill: { label: Message, value: "par before switch" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('PAR-SWITCH-ONE')
+        budget: 90000
+        intent: "Wait until the first reply streams in"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/parSwitchId")"
+          api="$AFT_BASE_URL/api/workspaces/E2E-AGV1-PAR/v1/agents/$id"
+          ver="$(curl -sf "$api" | python3 -c 'import json,sys; print(json.load(sys.stdin)["spec_version"])')"
+          code="$(curl -s -o "$AFT_WORK_DIR/par-switch.json" -w '%{http_code}' -X PATCH "$api" -H "Content-Type: application/json" \
+            -H "Idempotency-Key: par-switch-${RUN_ID:-local}" -d "{\"harness\":\"codex\",\"expect\":{\"spec_version\":$ver}}")"
+          [ "$code" = 503 ] || { echo "switch gave $code"; cat "$AFT_WORK_DIR/par-switch.json"; exit 1; }
+          python3 -c 'import json,sys; b=json.load(open(sys.argv[1])); assert b["code"]=="harness_unavailable" and "codex" in b["error"], b' "$AFT_WORK_DIR/par-switch.json"
+          curl -sf "$api" | python3 -c 'import json,sys; a=json.load(sys.stdin); assert a["harness"]=="opencode" and a["spec_version"]==int(sys.argv[1]), a' "$ver"
+        intent: "A switch to codex is refused as harness_unavailable, and the lead keeps OpenCode and its spec version"
+      - reload: true
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              return document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode' &&
+                t.includes('par before switch') && t.includes('PAR-SWITCH-ONE'); })()
+        intent: "Wait until a reload shows the lead still on OpenCode with its history"
+      - fill: { label: Message, value: "par after switch" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('PAR-SWITCH-TWO')
+        budget: 90000
+        intent: "Wait until the lead still replies"
+
+  # ports: zz-lead-agent "stopped lead keeps its terminal pane"
+  - name: parity - a stopped turn leaves the lead's chat in place and the lead takes the next message
+    intent: An operator stops a lead's running turn, still sees the chat and its history, sends another message and gets a reply, and a reload keeps all of it
+    steps:
+      - run: |
+          set -e
+          "$AFT_WORK_DIR/par-lead" "par-stop-${RUN_ID:-local}" parStopId
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" \
+            -d '{"steps":[{"bash":"sleep 120"},{"text":"PAR-STOP-AFTER"}]}' >/dev/null
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-PAR/chat/$(cat "$AFT_WORK_DIR/parStopId")"
+        intent: "Create an OpenCode lead, script a long first turn then a reply, and open its chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the lead's chat is ready"
+      - fill: { label: Message, value: "par long turn" }
+      - press: Enter
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('form button')).some((b) => b.textContent === 'Stop')
+        budget: 60000
+        intent: "Wait until the turn runs and the composer offers Stop"
+      - click: { role: button, name: Stop, exact: true }
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              return /Turn (interrupted|cancelled|canceled|aborted)/.test(t) && t.includes('par long turn') &&
+                !Array.from(document.querySelectorAll('form button')).some((b) => b.textContent === 'Stop'); })()
+        budget: 30000
+        intent: "Wait until the turn shows as stopped with the chat and its message still there"
+      - fill: { label: Message, value: "par after stop" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('PAR-STOP-AFTER')
+        budget: 90000
+        intent: "Wait until the lead replies to the next message"
+      - reload: true
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              return t.includes('par long turn') && t.includes('par after stop') && t.includes('PAR-STOP-AFTER'); })()
+        intent: "Wait until a reload shows the stopped turn, the next message and its reply"
+
+  # ports: zz-lead-agent "leads sort ahead of workers in the rail" (nesting part only).
+  # The old lead-before-independent-worker order and Background group are the case below (SB1).
+  - name: parity - the sidebar lists a lead at the top level with its child nested under it
+    intent: An operator sees a lead in the sidebar's agent list with the child it made indented under it, not beside it
+    steps:
+      - run: |
+          set -e
+          "$AFT_WORK_DIR/par-lead" "par-tree-${RUN_ID:-local}" parTreeId
+          "$AFT_WORK_DIR/par-kid" "par-tree-kid-${RUN_ID:-local}" PAR-TREE-DONE
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-PAR/chat/$(cat "$AFT_WORK_DIR/parTreeId")"
+        intent: "Create an OpenCode lead, script its agent_create call and open its chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the lead's chat is ready"
+      - fill: { label: Message, value: "make a child" }
+      - press: Enter
+      # SB2: a finished child shows only while its chat is open, and this
+      # child finishes at once, so check the nesting from the child's chat.
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=started-marker]')?.textContent || '').includes('par-tree-kid-${RUN_ID:-local}')
+        budget: 90000
+        intent: "Wait until the lead's chat shows the started marker naming the child"
+      - click: { selector: "[data-testid=started-marker] a" }
+      - wait:
+          fn: >-
+            (() => { const nav = document.querySelector('nav[aria-label=Agents]');
+              const top = Array.from(nav?.querySelectorAll('[data-testid=sortable-agent-item]') || []).filter((el) => !el.parentElement?.closest('[data-testid=sortable-agent-item]'));
+              const row = (el) => el.querySelector(':scope > [data-testid=sortable-agent-row] > a');
+              const lead = top.find((el) => (row(el)?.textContent || '').includes('par-tree-${RUN_ID:-local}'));
+              const nested = Array.from(lead?.querySelectorAll(':scope > [role=group] > [data-testid=sortable-agent-item] > [data-testid=sortable-agent-row] > a') || []).map((a) => a.textContent || '');
+              const topNames = top.map((el) => row(el)?.textContent || '');
+              return !!lead && nested.some((t) => t.includes('par-tree-kid-${RUN_ID:-local}')) &&
+                !topNames.some((t) => t.includes('par-tree-kid-${RUN_ID:-local}')); })()
+        budget: 30000
+        intent: "Wait until the child's chat is open and the sidebar shows the lead at the top level with the child nested under it"
+
+  # ports: zz-lead-agent "leads sort ahead of workers in the rail" (row 18)
+  - name: parity - the sidebar lists a lead ahead of an independent worker, which sits under Background
+    intent: An operator with a lead and an independent worker finds the lead first and the worker under the collapsible Background group
+    steps:
+      - run: |
+          set -e
+          printf '{"preset":"daemon-worker","name":"par-bg-worker-%s","repo":"%s","base_ref":"main","overrides":{"harness":"opencode"}}' \
+            "${RUN_ID:-local}" "$AFT_WORK_DIR/agv1-par-alpha" |
+            curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-AGV1-PAR/v1/agents" \
+              -H "Content-Type: application/json" -H "Idempotency-Key: par-bg-worker-${RUN_ID:-local}" -d @- >/dev/null
+          "$AFT_WORK_DIR/par-lead" "par-bg-lead-${RUN_ID:-local}" parBgLeadId
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-PAR/chat/$(cat "$AFT_WORK_DIR/parBgLeadId")"
+        intent: "Create an independent worker first, then a lead, so server order alone would list the worker first, and open the lead's chat"
+      - wait:
+          fn: >-
+            (() => { const nav = document.querySelector('nav[aria-label=Agents]');
+              const links = Array.from(nav?.querySelectorAll('a') || []).map((a) => a.textContent || '');
+              const lead = links.findIndex((t) => t.startsWith('par-bg-lead-${RUN_ID:-local}'));
+              const worker = links.findIndex((t) => t.startsWith('par-bg-worker-${RUN_ID:-local}'));
+              const bg = Array.from(nav?.querySelectorAll('[data-testid=agent-list-background] a') || []).map((a) => a.textContent || '');
+              return lead >= 0 && worker > lead &&
+                bg.some((t) => t.startsWith('par-bg-worker-${RUN_ID:-local}')) &&
+                !bg.some((t) => t.startsWith('par-bg-lead-${RUN_ID:-local}')); })()
+        budget: 30000
+        intent: "Wait until the sidebar lists the lead before the worker and only the worker under Background"
+      - click: { role: button, name: Background, exact: true }
+      - wait:
+          fn: >-
+            (() => { const bg = document.querySelector('nav[aria-label=Agents] [data-testid=agent-list-background]');
+              return bg?.querySelector('button')?.getAttribute('aria-expanded') === 'false' &&
+                !Array.from(document.querySelectorAll('nav[aria-label=Agents] a')).some((a) => (a.textContent || '').startsWith('par-bg-worker-${RUN_ID:-local}')) &&
+                Array.from(document.querySelectorAll('nav[aria-label=Agents] a')).some((a) => (a.textContent || '').startsWith('par-bg-lead-${RUN_ID:-local}')); })()
+        intent: "Collapsing Background hides the worker and keeps the lead"

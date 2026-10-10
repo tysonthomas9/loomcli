@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
-	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -21,6 +22,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/cli/cmdstore"
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
 	"github.com/tysonthomas9/loomcli/internal/cli/monitor"
+	"github.com/tysonthomas9/loomcli/internal/cli/serve/agentwire"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/daemonwire"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/metricscmd"
 	"github.com/tysonthomas9/loomcli/internal/cli/serve/observability"
@@ -186,7 +188,7 @@ func runServe(cmd *cobra.Command, args []string) {
 	defer cancel()
 
 	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	cmdstore.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
 	daemonWeStarted := ensureIssueBackend()
 	if daemonWeStarted {
@@ -238,14 +240,55 @@ func runServe(cmd *cobra.Command, args []string) {
 	collectDataFn := buildMonitorCollectDataFn(monitorDefaultWorkspace, issueBackendFn)
 	monitorHandlers := buildMonitorHandlers(collectDataFn, staleDetectorHandler, storeHandle.Store, issueBackendFn, monitorDefaultWorkspace)
 
+	cfg := buildServerConfig(monitorHandlers, fleetState, storeHandle)
+	if api := startAgentAPI(ctx, cfg); api != nil {
+		wireAgentAPI(&cfg, api)
+		defer api.Stop()
+	}
 	webuiErr := make(chan error, 1)
-	go func() {
-		cfg := buildServerConfig(monitorHandlers, fleetState, storeHandle)
-		webuiErr <- webuiapp.StartServer(ctx, cfg)
-	}()
+	go func() { webuiErr <- webuiapp.StartServer(ctx, cfg) }()
 
 	logServerStartup()
 	awaitShutdown(cmd, stop, webuiErr, cancel)
+}
+
+// startAgentAPI starts the Agent API beside the v5 routes, or returns nil
+// when it can't; serve then runs without it.
+func startAgentAPI(ctx context.Context, cfg webui.ServerConfig) *agentwire.API {
+	bin := os.Getenv("LOOM_OPENCODE_BIN")
+	if bin == "" {
+		bin = filepath.Join(bootstrap.LoomDir(), "harness/opencode/2.0.19/opencode")
+	}
+	api, err := agentwire.Start(ctx, agentwire.Config{Dir: bootstrap.LoomDir(),
+		OpenCodeBin: bin, Skills: cfg.Store, APIBase: agentAPIBase(cfg.BindAddress, cfg.Port),
+		GitHubRead: webuiapp.AgentGitHubRead(cfg)})
+	if err != nil {
+		slog.Warn("Agent API not started", "error", err)
+		return nil
+	}
+	return api
+}
+
+// wireAgentAPI mounts api on the server cfg configures, lets the agent git,
+// diff and file routes find its agents' worktrees, and points its bridges at
+// the port the server actually binds, which is a fallback when the
+// configured one is taken.
+func wireAgentAPI(cfg *webui.ServerConfig, api *agentwire.API) {
+	cfg.AgentAPIRoutes = api.Register
+	if g, ok := cfg.GitOps.(*opsimpl.GitOpsImpl); ok {
+		g.WithAgentAPI(api.Worktree).WithAgentAPIWorktrees(api.Worktrees)
+	}
+	bind := cfg.BindAddress
+	cfg.OnListen = func(port int) { api.SetAPIBase(agentAPIBase(bind, port)) }
+}
+
+// agentAPIBase is the origin the bridges call back to: loopback unless
+// serve binds one address only.
+func agentAPIBase(bind string, port int) string {
+	if ip := net.ParseIP(bind); bind == "" || ip != nil && ip.IsUnspecified() {
+		bind = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(bind, strconv.Itoa(port))
 }
 
 func configureServeLocalRuntimeMode() {

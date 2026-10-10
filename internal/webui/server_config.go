@@ -44,6 +44,10 @@ type MonitorHandlers struct {
 	ObservabilityEvents  http.HandlerFunc // GET /api/observability/events
 }
 
+// AgentAPIRoutesFn registers the Agent API routes on the outer mux with the
+// workspace middleware and the SSE token check (nil in open mode).
+type AgentAPIRoutesFn func(mux *http.ServeMux, workspace middleware.Middleware, validateToken func(token, workspace string) (string, error))
+
 // ServerConfig holds configuration for the web UI server.
 type ServerConfig struct {
 	Port                int
@@ -97,6 +101,8 @@ type ServerConfig struct {
 	AgentControlFn       agentcontrol.AgentControlFn                          // Sends agent lifecycle commands to the daemon control socket; nil in fleet mode or --no-daemon
 	AgentInputFn         agentcontrol.AgentInputFn                            // Reads/answers pending interactive prompts over the same socket; nil disables the answer routes
 	ClaimHoldFn          agentcontrol.ClaimHoldFn                             // Reads/sets the workspace claim hold over the same socket; nil disables the claim-hold routes
+	AgentAPIRoutes       AgentAPIRoutesFn                                     // Registers the Agent API routes (agentsv1); nil = no Agent API
+	OnListen             func(port int)                                       // Told the port actually bound (a fallback when Port was taken) before serving; nil = none
 	DaemonSupervisorFn   func() (*DaemonSupervisorData, error)                // Returns daemon supervisor state from state file; nil = endpoint unavailable
 	DaemonConfigFn       func() (json.RawMessage, error)                      // Returns effective merged daemon config as JSON; nil = endpoint unavailable
 	AgentQueueFn         func(agentName string) ([]AgentQueueEntry, error)    // Returns scored work queue for named agent; nil = endpoint unavailable

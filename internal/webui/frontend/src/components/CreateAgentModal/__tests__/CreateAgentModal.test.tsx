@@ -27,14 +27,18 @@ const mockCreateAgent = vi.fn();
 const mockUseInteractivePrompts = vi.fn();
 vi.mock("@/hooks/agents", () => ({
   useCreateWorkspaceAgent: () => mockCreateAgent,
+  useCreateLead: () => mockCreateLead,
+  useLeadHarnesses: () => [],
   useInteractivePrompts: () => mockUseInteractivePrompts(),
 }));
+
+const mockCreateLead = vi.fn();
 
 // ---------- Helpers ----------
 
 const repos: RepoInfo[] = [
-  { name: "alpha", default_branch: "main", local_path: "/a" },
-  { name: "beta", default_branch: "main", local_path: "/b" },
+  { name: "alpha", default_branch: "main", path: "/a" },
+  { name: "beta", default_branch: "main", path: "/b" },
 ];
 
 const sampleAgent: WorkspaceAgentInfo = {
@@ -64,6 +68,8 @@ function renderModal(
 
 beforeEach(() => {
   mockCreateAgent.mockReset();
+  mockCreateLead.mockReset();
+  mockCreateLead.mockResolvedValue({ agent_id: "ag_1", name: "x" });
   mockUseInteractivePrompts.mockReset();
   mockUseInteractivePrompts.mockReturnValue({
     prompts: [
@@ -167,9 +173,11 @@ describe("CreateAgentModal: empty repository guidance", () => {
     );
   });
 
-  it("explains that interactive agents can run with workspace scope", () => {
+  it("explains that non-lead interactive agents can run with workspace scope", () => {
     renderModal({ repos: [] });
-    fireEvent.click(screen.getByTestId("create-agent-template-lead"));
+    fireEvent.click(
+      screen.getByTestId("create-agent-template-interactive-pr-review"),
+    );
 
     expect(screen.getByTestId("create-agent-no-repos")).toHaveTextContent(
       "No repos yet — add one from the sidebar first. This agent will run with workspace scope.",
@@ -280,6 +288,29 @@ describe("CreateAgentModal: client-side validation", () => {
       screen.getByRole("button", { name: /create agent/i }),
     ).toBeDisabled();
     expect(mockCreateAgent).not.toHaveBeenCalled();
+    expect(
+      screen.queryByTestId("create-agent-name-error"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("says why Create is disabled for an invalid name, and clears it once valid", () => {
+    renderModal();
+    const nameInput = screen.getByTestId("create-agent-name");
+    fireEvent.change(nameInput, { target: { value: "My Lead" } });
+    expect(screen.getByTestId("create-agent-name-error")).toHaveTextContent(
+      /lowercase letters, numbers, hyphens/i,
+    );
+    expect(nameInput).toHaveAttribute("aria-invalid", "true");
+    expect(
+      screen.getByRole("button", { name: /create agent/i }),
+    ).toBeDisabled();
+
+    fireEvent.change(nameInput, { target: { value: "my-lead" } });
+    expect(
+      screen.queryByTestId("create-agent-name-error"),
+    ).not.toBeInTheDocument();
+    expect(nameInput).toHaveAttribute("aria-invalid", "false");
+    expect(screen.getByRole("button", { name: /create agent/i })).toBeEnabled();
   });
 
   it("treats a workspace with no repos as workspace scope (cross_repo)", async () => {
@@ -362,18 +393,20 @@ describe("CreateAgentModal: submission", () => {
     });
   });
 
-  it("submits lead agent when Lead template is selected", async () => {
-    mockCreateAgent.mockResolvedValueOnce(sampleAgent);
-    renderModal({ defaultName: "lead-nova" });
+  it("submits a lead through the Agent API when Lead template is selected", async () => {
+    const onLeadCreated = vi.fn();
+    renderModal({ defaultName: "lead-nova", onLeadCreated });
     fireEvent.click(screen.getByTestId("create-agent-template-lead"));
     fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
-    await waitFor(() => expect(mockCreateAgent).toHaveBeenCalled());
-    expect(mockCreateAgent.mock.calls[0][0]).toMatchObject({
+    await waitFor(() => expect(onLeadCreated).toHaveBeenCalled());
+    expect(mockCreateLead.mock.calls[0][0]).toEqual({
+      preset: "lead",
       name: "lead-nova",
-      role_name: "lead",
+      repo: "/a",
+      base_ref: "main",
+      overrides: { harness: "codex" },
     });
-    expect(mockCreateAgent.mock.calls[0][0]).not.toHaveProperty("kind");
-    expect(mockCreateAgent.mock.calls[0][0]).not.toHaveProperty("prompt_file");
+    expect(mockCreateAgent).not.toHaveBeenCalled();
   });
 
   it("submits interactive agent with a built-in prompt", async () => {
@@ -396,8 +429,7 @@ describe("CreateAgentModal: submission", () => {
     });
   });
 
-  it("reveals a textarea and submits a custom inline prompt", async () => {
-    mockCreateAgent.mockResolvedValueOnce(sampleAgent);
+  it("reveals a textarea and submits a lead with a persona override", async () => {
     renderModal({ defaultName: "custom-review" });
 
     fireEvent.click(screen.getByTestId("create-agent-template-custom-prompt"));
@@ -408,16 +440,16 @@ describe("CreateAgentModal: submission", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
 
-    await waitFor(() => expect(mockCreateAgent).toHaveBeenCalled());
-    expect(mockCreateAgent.mock.calls[0][0]).toMatchObject({
+    await waitFor(() => expect(mockCreateLead).toHaveBeenCalled());
+    expect(mockCreateLead.mock.calls[0][0]).toEqual({
+      preset: "lead",
       name: "custom-review",
-      role_name: "custom-review",
-      kind: "interactive",
-      prompt: "Review literally: {{ marker }}",
-      cross_repo: false,
-      repos: ["alpha"],
+      repo: "/a",
+      base_ref: "main",
+      overrides: { harness: "codex" },
+      persona: { text: "Review literally: {{ marker }}" },
     });
-    expect(mockCreateAgent.mock.calls[0][0]).not.toHaveProperty("prompt_file");
+    expect(mockCreateAgent).not.toHaveBeenCalled();
   });
 
   it("switches background template selection when Planner is clicked", () => {

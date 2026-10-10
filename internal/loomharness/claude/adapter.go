@@ -25,23 +25,24 @@ type Adapter struct {
 	mu       sync.Mutex
 	sessions map[loomharness.NativeRef]*Session // by root and native id
 	feeds    map[*feed]struct{}
+	caps     loomharness.Capabilities // the last good harness-level capability probe
+	probed   bool
+	repos    map[string]*repoProbe // capability probes by repo clone
+	probe    func(ctx context.Context, dir string) (loomharness.Capabilities, error)
 }
 
 var _ loomharness.Harness = (*Adapter)(nil)
 
 // New returns an adapter; nothing starts until a session's first Prompt.
 func New(cfg Config) *Adapter {
-	return &Adapter{cfg: cfg, sessions: map[loomharness.NativeRef]*Session{}, feeds: map[*feed]struct{}{}}
+	a := &Adapter{cfg: cfg, sessions: map[loomharness.NativeRef]*Session{}, feeds: map[*feed]struct{}{},
+		repos: map[string]*repoProbe{}}
+	a.probe = a.probeOnce
+	return a
 }
 
 // Name is the harness name.
 func (a *Adapter) Name() string { return "claude" }
-
-// Models lists the model aliases `claude --model` accepts; the CLI has no
-// model list.
-func (a *Adapter) Models(context.Context) ([]loomharness.Model, error) {
-	return []loomharness.Model{{ID: "opus", Name: "Opus"}, {ID: "sonnet", Name: "Sonnet"}, {ID: "haiku", Name: "Haiku"}}, nil
-}
 
 // Health checks the installed version: refused below the minimum, a warning
 // above the last tested one. It starts no session. The version child gets
@@ -99,7 +100,7 @@ func (a *Adapter) Open(_ context.Context, spec loomharness.OpenSpec) (loomharnes
 	ref := loomharness.NativeRef{Root: root, NativeID: SessionID(spec.Key)}
 	s := a.session(ref)
 	s.mu.Lock()
-	s.spec.Launch, s.spec.Dir, s.spec.Model = l, spec.Dir, spec.Model
+	s.spec.Launch, s.spec.Dir, s.spec.Model, s.spec.Persona = l, spec.Dir, spec.Model, spec.Preset.Persona
 	s.mu.Unlock()
 	return ref, nil
 }
@@ -291,7 +292,7 @@ type Session struct {
 var _ loomharness.Session = (*Session)(nil)
 
 // Prompt sends one input when idle, launching the process if none runs. A
-// model or worktree changed since the running process started takes effect
+// model, effort or worktree changed since the running process started takes effect
 // here, at the turn boundary, by relaunching with --resume.
 func (s *Session) Prompt(ctx context.Context, in loomharness.Input) error {
 	s.mu.Lock()
@@ -304,7 +305,7 @@ func (s *Session) Prompt(ctx context.Context, in loomharness.Input) error {
 	if proc != nil && proc.Busy() {
 		return loomharness.ErrBusy
 	}
-	if proc != nil && (proc.spec.Dir != spec.Dir || proc.spec.Model != spec.Model) {
+	if proc != nil && (proc.spec.Dir != spec.Dir || proc.spec.Model != spec.Model || proc.spec.Effort != spec.Effort) {
 		if err := proc.Close(ctx); err != nil {
 			return err
 		}
@@ -340,9 +341,9 @@ func (s *Session) onFrame(f Frame) {
 
 func (s *Session) onExit() {
 	s.mu.Lock()
-	e := s.m.exited()
+	events := s.m.exited()
 	s.mu.Unlock()
-	s.a.publish([]loomharness.Event{e})
+	s.a.publish(events)
 }
 
 // Interrupt ends only the running turn; the turn then completes as cancelled.
@@ -373,11 +374,11 @@ func (s *Session) Status(context.Context) (loomharness.Status, error) {
 }
 
 // SetModel takes effect from the next turn: the next Prompt relaunches with
-// --model and --resume.
-func (s *Session) SetModel(_ context.Context, model string) error {
+// --model, --effort and --resume.
+func (s *Session) SetModel(_ context.Context, model string, opts []loomharness.Option) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.spec.Model = model
+	s.spec.Model, s.spec.Effort = model, loomharness.OptionValue(opts, loomharness.OptionEffort)
 	return nil
 }
 
@@ -414,7 +415,12 @@ func (s *Session) Close(ctx context.Context) error {
 	if proc == nil {
 		return nil
 	}
-	return proc.Close(ctx)
+	err := proc.Close(ctx)
+	s.mu.Lock()
+	events := s.m.flush() // a turn cut off by the Close keeps its usage
+	s.mu.Unlock()
+	s.a.publish(events)
+	return err
 }
 
 // Resume (5.3) must install the current rules before anything runs (R-H);
@@ -425,7 +431,7 @@ func (s *Session) Resume(context.Context, loomharness.Launch, []loomharness.Perm
 
 // Reply answers an ask through the permission tool (5.2); until then it fails.
 func (s *Session) Reply(context.Context, string, loomharness.Reply) error {
-	return fmt.Errorf("claude: Reply is not available until the 5.2 permission tool: %w", loomharness.ErrUnavailable)
+	return fmt.Errorf("claude: Reply is not available until the 5.2 permission tool: %w: %w", loomharness.ErrNotSent, loomharness.ErrUnavailable)
 }
 
 // HasInput reads the transcript (5.2b); until then it fails.
