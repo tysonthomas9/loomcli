@@ -295,6 +295,33 @@ func (s *SQLite) LeadMergeStacks(ctx context.Context) ([]LeadMergeStack, error) 
 	return stacks, rows.Err()
 }
 
+// LeadMergeTrunkPR is an open PR to trunk (PR per task) in a workspace whose
+// lead may merge when green.
+type LeadMergeTrunkPR struct{ Workspace, Change, SetBy string }
+
+// LeadMergeTrunkPRs lists the published, not yet landed PRs to trunk (no stack)
+// whose workspace lets the lead merge when green.
+func (s *SQLite) LeadMergeTrunkPRs(ctx context.Context) ([]LeadMergeTrunkPR, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT p.workspace,p.change_id,ws.lead_may_merge_set_by
+		FROM change_publications p JOIN workspace_settings ws ON ws.workspace=p.workspace
+		WHERE ws.lead_may_merge='when_green' AND p.stack_id='' AND p.phase='done' AND p.pr_number>0
+			AND NOT EXISTS (SELECT 1 FROM landed_changes l WHERE l.workspace=p.workspace AND l.change_id=p.change_id)
+		ORDER BY p.workspace,p.pr_number`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var prs []LeadMergeTrunkPR
+	for rows.Next() {
+		var pr LeadMergeTrunkPR
+		if err := rows.Scan(&pr.Workspace, &pr.Change, &pr.SetBy); err != nil {
+			return nil, err
+		}
+		prs = append(prs, pr)
+	}
+	return prs, rows.Err()
+}
+
 // AutoCommit defaults on for workspaces without an explicit setting.
 func (s *SQLite) AutoCommit(ctx context.Context, workspace string) (bool, error) {
 	if workspace == "" {

@@ -13,6 +13,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/githubtoken"
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/landing"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/review"
 	"github.com/tysonthomas9/loomcli/internal/stackpublish"
 )
@@ -121,7 +122,110 @@ func ReconcileLeadMergesAt(ctx context.Context, path string, forge leadMergeForg
 			failures = append(failures, fmt.Errorf("lead merge %s/%s: %w", stack.Workspace, stack.StackID, err))
 		}
 	}
+	prs, err := store.LeadMergeTrunkPRs(ctx)
+	if err != nil {
+		return errors.Join(append(failures, err)...)
+	}
+	for _, pr := range prs {
+		if err := startTrunkLeadMerge(ctx, store, forge, pr); err != nil {
+			slog.Warn("lead merge not started", "workspace", pr.Workspace, "change", pr.Change, "err", err)
+			failures = append(failures, fmt.Errorf("lead merge %s/%s: %w", pr.Workspace, pr.Change, err))
+		}
+	}
 	return errors.Join(failures...)
+}
+
+// leadMergeActor is how a lead merge under the when_green setting is recorded
+// on a PR to trunk: it merges on the human's setting, never on its own say.
+func leadMergeActor(setBy string) string { return "lead under setting set by " + setBy }
+
+// startTrunkLeadMerge merges a PR to trunk (PR per task) on its own, with no
+// stack order, once it is green: Loom approved its head, its blockers have
+// landed and the provider's required checks pass. It records a lead-owned
+// merge approval that the Approve and merge machine then merges once and
+// follows. A PR that is not green gets nothing, so it holds back no other PR.
+// A finished merge for the same head (cancelled by a human, stale) is not
+// restarted, except one cancelled only because the setting was off.
+func startTrunkLeadMerge(ctx context.Context, store *journal.SQLite, forge leadMergeForge, trunk journal.LeadMergeTrunkPR) error {
+	publication, found, err := store.Publication(ctx, trunk.Workspace, trunk.Change)
+	if err != nil || !found {
+		return err
+	}
+	existing, found, err := store.MergeApproval(ctx, trunk.Workspace, trunk.Change)
+	if err != nil || (found && (journal.MergeApprovalActive(existing.Status) ||
+		(existing.ApprovedHead == publication.Head && !policyCancelled(existing)))) {
+		return err
+	}
+	if green, err := trunkLeadMergeReady(ctx, store, forge, publication); err != nil || !green {
+		return err
+	}
+	approval := journal.MergeApproval{Workspace: trunk.Workspace, Change: trunk.Change, Head: publication.Head,
+		ActorKind: "lead", ActorID: leadMergeActor(trunk.SetBy), Status: MergeApprovalWaiting,
+		CreatedAt: mergeApprovalNow().UnixNano()}
+	recorded, err := store.RecordMergeApproval(ctx, approval)
+	if errors.Is(err, journal.ErrStale) {
+		// A human's Approve and merge got there first.
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return advanceMergeApproval(ctx, store, forge, recorded)
+}
+
+// policyCancelled reports a lead merge stopped only because the setting was
+// off; it starts again once the human turns the setting back on.
+func policyCancelled(approval journal.MergeApproval) bool {
+	return approval.ActorKind == "lead" && approval.Status == MergeApprovalCancelled &&
+		approval.Reason == "cancelled: lead_may_merge is off"
+}
+
+// trunkLeadMergeReady reports whether the lead may merge publication's PR now.
+func trunkLeadMergeReady(ctx context.Context, store *journal.SQLite, forge leadMergeForge, publication journal.Publication) (bool, error) {
+	if hold, err := trunkLeadMergeHold(ctx, store, publication); err != nil || hold != "" {
+		return false, err
+	}
+	owner, repo, ok := strings.Cut(publication.Slug, "/")
+	if !ok || publication.DriftSHA != "" {
+		return false, nil
+	}
+	pr, err := forge.PullByNumber(ctx, owner, repo, publication.PRNumber)
+	if err != nil || pr.Merged || pr.State != "open" || pr.HeadSHA != publication.Head {
+		return false, err
+	}
+	statuses, err := forge.PRStatuses(ctx, owner, repo, publication.Branch)
+	if err != nil {
+		return false, err
+	}
+	status, found := statuses[publication.Branch]
+	return found && status.Number == pr.Number && greenStatus(status), nil
+}
+
+// trunkLeadMergeHold says why Loom itself holds a lead merge of publication's
+// PR back, or "": the human setting, Loom's approval of the PR head, and the
+// task's blockers having landed are re-read every time.
+func trunkLeadMergeHold(ctx context.Context, store *journal.SQLite, publication journal.Publication) (string, error) {
+	policy, err := store.LeadMayMerge(ctx, publication.Workspace)
+	if err != nil {
+		return "", err
+	}
+	if policy.Value != "when_green" {
+		return "cancelled: lead_may_merge is off", nil
+	}
+	if publication.StackID != "" {
+		return "cancelled: the PR is part of a stack", nil
+	}
+	if requireNativeVerdict(ctx, store, publication) != nil {
+		return "the PR head has no approved revision", nil
+	}
+	status, found, err := landing.TaskDependencies(ctx, store, publication.Workspace, publication.Change, mergePredecessors)
+	if err != nil {
+		return "", err
+	}
+	if found && status.State != "success" {
+		return status.Description, nil
+	}
+	return "", nil
 }
 
 func startLeadMerge(ctx context.Context, store *journal.SQLite, forge leadMergeForge, stack journal.LeadMergeStack) error {

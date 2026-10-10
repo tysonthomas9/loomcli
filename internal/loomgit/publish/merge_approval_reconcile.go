@@ -47,6 +47,9 @@ func advanceMergeApproval(ctx context.Context, store *journal.SQLite, forge merg
 	if landed {
 		return setMergeApproval(ctx, store, approval, MergeApprovalMerged, "")
 	}
+	if held, err := holdLeadApproval(ctx, store, approval); err != nil || held {
+		return err
+	}
 	switch approval.Status {
 	case MergeApprovalWaiting, MergeApprovalBlocked:
 		if approval.Attention {
@@ -58,6 +61,31 @@ func advanceMergeApproval(ctx context.Context, store *journal.SQLite, forge merg
 		return followMergeApproval(ctx, store, forge, approval)
 	}
 	return nil
+}
+
+// holdLeadApproval re-checks a lead merge under the when_green setting before
+// it can reach the provider: it is cancelled once the human turns the setting
+// off, and waits while Loom's approval or a blocker is missing. A merge
+// already handed to the provider is left to finish.
+func holdLeadApproval(ctx context.Context, store *journal.SQLite, approval journal.MergeApproval) (bool, error) {
+	queued := approval.Status == MergeApprovalWaiting || approval.Status == MergeApprovalBlocked ||
+		(approval.Status == MergeApprovalMerging && approval.DispatchAttempts == 0 && approval.ProviderRequestID == "")
+	if approval.ActorKind != "lead" || !queued {
+		return false, nil
+	}
+	publication, found, err := store.Publication(ctx, approval.Workspace, approval.Change)
+	if err != nil || !found {
+		return false, err
+	}
+	hold, err := trunkLeadMergeHold(ctx, store, publication)
+	if err != nil || hold == "" {
+		return false, err
+	}
+	status := MergeApprovalBlocked
+	if strings.HasPrefix(hold, "cancelled: ") {
+		status = MergeApprovalCancelled
+	}
+	return true, setMergeApproval(ctx, store, approval, status, hold)
 }
 
 // tryMergeApproval merges an approved PR once it is the bottom of its stack,
