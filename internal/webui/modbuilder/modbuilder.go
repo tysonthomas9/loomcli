@@ -110,6 +110,12 @@ func NewApprovalsModule(st store.Store) interface{ Register(*http.ServeMux) } {
 	return approvals.NewModule(st)
 }
 
+// NewHostGitHub is the host GitHub reader PR watches use (OR10): a PR review
+// module of its own (no reviewer services) on st and dispatcher.
+func NewHostGitHub(st store.Store, dispatcher *connector.Dispatcher, localSettingsDir string) *prreview.HostGitHub {
+	return prreview.NewHostGitHub(prreview.NewModule(st, dispatcher, nil, nil, localSettingsDir))
+}
+
 // NewPRReviewModule creates the connector-backed pull request review module.
 // terminalSvc may be nil (no PTY manager); reviewer backend migration then
 // skips killing live reviewer terminals. localSettingsDir supplies the shared

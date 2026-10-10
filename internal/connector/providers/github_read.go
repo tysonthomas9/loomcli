@@ -21,7 +21,7 @@ const ActionGitHubRead = "github.read"
 // takes as query parameters, the array holding a list's items, and the
 // response keys kept (at any depth); everything else is dropped.
 type readOp struct {
-	path  string            // under /repos/{owner}/{repo}, or absolute when it starts with /search
+	path  string            // under /repos/{owner}/{repo}, or absolute when it starts with /search or is /user
 	query map[string]string // arg -> GitHub query parameter
 	list  string            // the key of the items array; "" when the body itself is the item(s)
 	keys  string
@@ -38,8 +38,8 @@ const (
 )
 
 // GitHubReadOps is the whole github_read surface (the R1–R11 inventory).
-// Every op is a GET on the bound repo; there is no method, path or GraphQL
-// argument. stack_health is served by the host forge, not this provider.
+// Every op is a GET authorized on the bound repo (viewer reads the
+// credential's own user); there is no method, path or GraphQL argument. stack_health is served by the host forge, not this provider.
 var GitHubReadOps = map[string]readOp{
 	"pr_view": {path: "/pulls/{number}", keys: prKeys + " body mergeable mergeable_state merged requested_reviewers requested_teams slug assignees" +
 		" additions deletions changed_files commits review_comments comments"},
@@ -68,6 +68,8 @@ var GitHubReadOps = map[string]readOp{
 	"branch_list":        {path: "/branches", keys: "name commit sha protected", page: true},
 	"contents":           {path: "/contents/{path}", query: map[string]string{"ref": "ref"}, keys: "name path type size sha content encoding html_url"},
 	"assignees":          {path: "/assignees", keys: userKeys, page: true},
+	// viewer is the GitHub user the host credential authenticates as (OR10).
+	"viewer": {path: "/user", keys: "login id type"},
 }
 
 // maxLogBytes bounds job_log: the log's last maxLogBytes are returned.
@@ -135,7 +137,7 @@ func (g *GitHub) githubRead(ctx context.Context, spec CallSpec) (CallResult, err
 // are the bound repo; args never set them.
 func readRequest(op readOp, args map[string]any, owner, repo string) (string, url.Values, error) {
 	path := op.path
-	if !strings.HasPrefix(path, "/search") {
+	if !strings.HasPrefix(path, "/search") && path != "/user" {
 		path = fmt.Sprintf("/repos/%s/%s", url.PathEscape(owner), url.PathEscape(repo)) + path
 	}
 	for _, name := range []string{"number", "run", "job", "ref", "base", "head", "tag", "path"} {
