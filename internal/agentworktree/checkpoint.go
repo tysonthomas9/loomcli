@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/gitrunner"
+	"github.com/tysonthomas9/loomcli/internal/loomagent"
 )
 
 // checkpointCrash runs at each Checkpoint crash point; tests use it to crash there.
@@ -107,4 +109,69 @@ func nestedRepos(ctx context.Context, git gitrunner.EnvRunner, path string, env 
 		}
 	}
 	return out, nil
+}
+
+// checkpointPrefix is where every checkpoint ref lives.
+const checkpointPrefix = "refs/loom/checkpoints/"
+
+// changeStatus names git diff --name-status letters.
+var changeStatus = map[string]string{"A": "added", "M": "modified", "D": "deleted", "T": "type_changed"}
+
+// CheckpointDiff is the change in repo from checkpoint ref from to ref to:
+// each path that differs (no renames) and the patch, with no external diff
+// or textconv run. A ref that does not exist fails with
+// loomagent.ErrNoCheckpoint.
+func (w *Worktrees) CheckpointDiff(ctx context.Context, repo, from, to string) (loomagent.CheckpointDiff, error) {
+	git, ok := w.git.(gitrunner.EnvRunner)
+	if !ok {
+		return loomagent.CheckpointDiff{}, errors.New("agentworktree: CheckpointDiff needs a git runner with raw output")
+	}
+	for _, ref := range []string{from, to} {
+		if !strings.HasPrefix(ref, checkpointPrefix) {
+			return loomagent.CheckpointDiff{}, fmt.Errorf("agentworktree: %s is not a checkpoint ref", ref)
+		}
+		if _, err := w.git.Run(ctx, repo, "rev-parse", "--verify", "--quiet", ref+"^{commit}"); err != nil {
+			return loomagent.CheckpointDiff{}, fmt.Errorf("%w: %s", loomagent.ErrNoCheckpoint, ref)
+		}
+	}
+	diff := func(opt ...string) (string, error) {
+		args := append([]string{"diff", "--no-ext-diff", "--no-textconv", "--no-color", "--no-renames"}, opt...)
+		return git.RunEnv(ctx, repo, nil, append(args, from, to, "--")...)
+	}
+	names, err := diff("--name-status", "-z")
+	if err != nil {
+		return loomagent.CheckpointDiff{}, err
+	}
+	var out loomagent.CheckpointDiff
+	f := strings.Split(strings.TrimSuffix(names, "\x00"), "\x00")
+	for i := 0; i+1 < len(f); i += 2 {
+		st := changeStatus[f[i]]
+		if st == "" {
+			st = f[i]
+		}
+		out.Files = append(out.Files, loomagent.ChangedFile{Path: f[i+1], Status: st})
+	}
+	out.Patch, err = diff()
+	return out, err
+}
+
+// DropCheckpoints deletes every ref under prefix, one agent's checkpoint
+// refs, in repo. A repo that is gone holds none.
+func (w *Worktrees) DropCheckpoints(ctx context.Context, repo, prefix string) error {
+	if !strings.HasPrefix(prefix, checkpointPrefix) || !strings.HasSuffix(prefix, "/") || prefix == checkpointPrefix {
+		return fmt.Errorf("agentworktree: %q is not one agent's checkpoint refs", prefix)
+	}
+	if _, err := os.Stat(repo); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	refs, err := w.git.Run(ctx, repo, "for-each-ref", "--format=%(refname)", prefix)
+	if err != nil {
+		return err
+	}
+	for _, ref := range strings.Fields(refs) {
+		if _, err := w.git.Run(ctx, repo, "update-ref", "-d", ref); err != nil {
+			return err
+		}
+	}
+	return nil
 }

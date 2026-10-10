@@ -295,6 +295,19 @@ type WithdrawResult struct {
 	Result string `json:"result"`
 }
 
+// TurnDiff is the change one turn made to the agent's working copy.
+type TurnDiff struct {
+	Turn  int           `json:"turn"`
+	Files []ChangedFile `json:"files"`
+	Patch string        `json:"patch"`
+}
+
+// ChangedFile is one path a turn changed: added, modified, deleted or type_changed.
+type ChangedFile struct {
+	Path   string `json:"path"`
+	Status string `json:"status"`
+}
+
 // PermissionRule is one preset permission rule.
 type PermissionRule struct {
 	Action   string `json:"action"`

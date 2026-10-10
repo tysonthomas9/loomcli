@@ -29,6 +29,7 @@ const (
 	CodeHistoryExpired      Code = "history_expired"
 	CodeCursorExpired       Code = "cursor_expired"
 	CodeWorktreeTaken       Code = "worktree_taken"
+	CodeTurnNotFound        Code = "turn_not_found"
 	// OR5a: a Respond's claim on its ask. conflict: the same request with
 	// another answer; already_answered: another request claimed the ask;
 	// reply_unknown: its Reply may or may not have landed, and is never sent again.

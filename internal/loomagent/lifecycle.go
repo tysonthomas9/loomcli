@@ -131,7 +131,7 @@ type DeleteRequest struct {
 
 // Delete checks children and unsaved work, then stops the agent, purges only
 // its recorded native sessions, removes its working copy (keeping the branch)
-// and tombstones the row (design v2 §4.8). Each step is safe to repeat; a
+// and its checkpoint refs, and tombstones the row (design v2 §4.8). Each step is safe to repeat; a
 // failure leaves the row stopping with its delete flag, and the reconcile
 // queue retries it.
 func (s *Service) Delete(ctx context.Context, req DeleteRequest) error {
@@ -200,6 +200,9 @@ func (s *Service) delete(ctx context.Context, req DeleteRequest) error {
 		if err := s.workspace.Remove(ctx, *spec); err != nil {
 			return err
 		}
+	}
+	if err := s.dropCheckpoints(ctx, a); err != nil {
+		return err
 	}
 	if err := s.retireLaunch(ctx, a); err != nil { // before the tombstone, so a failure is retried
 		return err

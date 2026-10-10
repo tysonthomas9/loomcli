@@ -4500,6 +4500,24 @@ paths:
         "200": {description: One page of events, content: {application/json: {schema: {$ref: "#/components/schemas/AgentV1EventPage"}}}}
         default: {$ref: "#/components/responses/AgentV1Error"}
 
+  /api/workspaces/{ws}/v1/agents/{id}/turns/{n}/diff:
+    get:
+      operationId: getAgentTurnDiffV1
+      tags: [agents-v1]
+      summary: Get the change one turn made to the agent's working copy
+      description: >-
+        The diff from the checkpoint of turn n-1 to that of turn n (turn 1 diffs from the turn 0 baseline taken at
+        create), tracked and untracked files as on disk, without rename detection. A turn with no checkpoint (not
+        ended yet, or 0) is turn_not_found; after the history purge, or the agent's delete, the checkpoints are gone.
+      security: [{BearerAuth: []}, {AgentBridgeToken: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/AgentV1Id"
+        - {name: n, in: path, required: true, schema: {type: integer, minimum: 1}, description: "Loom's turn ordinal"}
+      responses:
+        "200": {description: The turn's diff, content: {application/json: {schema: {$ref: "#/components/schemas/AgentV1TurnDiff"}}}}
+        default: {$ref: "#/components/responses/AgentV1Error"}
+
   /api/workspaces/{ws}/v1/events:
     get:
       operationId: streamAgentEventsV1
@@ -5052,6 +5070,19 @@ components:
         snapshot_seq: {type: integer, format: int64}
         next: {type: integer, format: int64}
         more: {type: boolean}
+    AgentV1TurnDiff:
+      type: object
+      required: [turn, files, patch]
+      properties:
+        turn: {type: integer}
+        files: {type: array, items: {$ref: "#/components/schemas/AgentV1ChangedFile"}}
+        patch: {type: string, description: "git diff of the turn, no external diff or textconv"}
+    AgentV1ChangedFile:
+      type: object
+      required: [path, status]
+      properties:
+        path: {type: string}
+        status: {type: string, enum: [added, modified, deleted, type_changed]}
     AgentV1PermissionRule:
       type: object
       required: [action, resource, effect]

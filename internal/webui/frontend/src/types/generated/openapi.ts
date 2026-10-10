@@ -2452,6 +2452,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/v1/agents/{id}/turns/{n}/diff": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get the change one turn made to the agent's working copy
+     * @description The diff from the checkpoint of turn n-1 to that of turn n (turn 1 diffs from the turn 0 baseline taken at create), tracked and untracked files as on disk, without rename detection. A turn with no checkpoint (not ended yet, or 0) is turn_not_found; after the history purge, or the agent's delete, the checkpoints are gone.
+     */
+    get: operations["getAgentTurnDiffV1"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/v1/events": {
     parameters: {
       query?: never;
@@ -2888,6 +2908,17 @@ export interface components {
       /** Format: int64 */
       next: number;
       more: boolean;
+    };
+    AgentV1TurnDiff: {
+      turn: number;
+      files: components["schemas"]["AgentV1ChangedFile"][];
+      /** @description git diff of the turn, no external diff or textconv */
+      patch: string;
+    };
+    AgentV1ChangedFile: {
+      path: string;
+      /** @enum {string} */
+      status: "added" | "modified" | "deleted" | "type_changed";
     };
     AgentV1PermissionRule: {
       action: string;
@@ -9345,6 +9376,34 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AgentV1EventPage"];
+        };
+      };
+      default: components["responses"]["AgentV1Error"];
+    };
+  };
+  getAgentTurnDiffV1: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        /** @description Agent ID */
+        id: components["parameters"]["AgentV1Id"];
+        /** @description Loom's turn ordinal */
+        n: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The turn's diff */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentV1TurnDiff"];
         };
       };
       default: components["responses"]["AgentV1Error"];

@@ -48,6 +48,46 @@ func (s *Service) checkpoint(ctx context.Context, a loomstore.Agent) error {
 	return nil
 }
 
+// TurnDiff is the change agentID's turn n made: its working copy from the
+// ref of turn n-1 (turn/0, the baseline, for turn 1) to the ref of turn n.
+// A turn with no ref on either side is turn_not_found; a purged history is
+// history_expired.
+func (s *Service) TurnDiff(ctx context.Context, agentID string, n int) (CheckpointDiff, error) {
+	a, err := s.agent(ctx, agentID)
+	if err != nil {
+		return CheckpointDiff{}, err
+	}
+	if a.HistoryPurgedAt != nil {
+		return CheckpointDiff{}, &Error{Code: CodeHistoryExpired, Message: agentID + " history was purged"}
+	}
+	notFound := &Error{Code: CodeTurnNotFound, Message: fmt.Sprintf("%s has no checkpoint for turn %d", agentID, n)}
+	if n < 1 || s.workspace == nil || a.Repo == "" {
+		return CheckpointDiff{}, notFound
+	}
+	repo, err := s.repoPath(ctx, a.Repo)
+	if err != nil {
+		return CheckpointDiff{}, err
+	}
+	d, err := s.workspace.CheckpointDiff(ctx, repo, checkpointRef(agentID, n-1), checkpointRef(agentID, n))
+	if errors.Is(err, ErrNoCheckpoint) {
+		return CheckpointDiff{}, notFound
+	}
+	return d, err
+}
+
+// dropCheckpoints deletes every checkpoint ref of a, for Delete and the
+// history purge.
+func (s *Service) dropCheckpoints(ctx context.Context, a loomstore.Agent) error {
+	if s.workspace == nil || a.Repo == "" {
+		return nil
+	}
+	repo, err := s.repoPath(ctx, a.Repo)
+	if err != nil {
+		return err
+	}
+	return s.workspace.DropCheckpoints(ctx, repo, "refs/loom/checkpoints/"+a.AgentID+"/")
+}
+
 func isCheckpointFailed(err error) bool {
 	var c checkpointFailed
 	return errors.As(err, &c)
