@@ -85,6 +85,22 @@ func ResolveLineageBase(ctx context.Context, repoPath, workspace, task, predeces
 	return LineageBase{Ref: ref, SHA: head, Change: change, Revision: number}, nil
 }
 
+// TaskHasChange reports whether task has a change in repo: a blocker whose
+// code is all in other repositories gives a dependent in repo nothing to
+// build on.
+func TaskHasChange(ctx context.Context, workspace, task, repo string) (bool, error) {
+	st, err := open()
+	if err != nil {
+		return false, unresolved("open local lineage", err)
+	}
+	defer func() { _ = st.Close() }()
+	found, err := st.TaskHasChange(ctx, workspace, task, repo)
+	if err != nil {
+		return false, unresolved("read predecessor changes", err)
+	}
+	return found, nil
+}
+
 // RecordLineageBase saves the revision actually used after the dependent copy exists.
 func RecordLineageBase(ctx context.Context, workspace, task, repo string, base LineageBase) error {
 	st, err := open()

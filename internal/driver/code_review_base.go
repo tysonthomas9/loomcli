@@ -7,6 +7,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/backend"
 	"github.com/tysonthomas9/loomcli/internal/cli"
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/taskcopy"
 	"github.com/tysonthomas9/loomcli/internal/webui/server/middleware"
 )
 
@@ -26,9 +27,12 @@ func FleetCodeReviewBase(ctx context.Context, workspace, task string) (string, b
 	return backend.CodeReviewBase(ctx, cli.WorkspaceAwareIssueBackend()(ctx), task)
 }
 
-// codeReviewBase returns task's code-review base. A failed lookup stops the
-// task copy: guessing would build the task without its blocker's code.
-func (l StackLineageLookup) codeReviewBase(ctx context.Context, workspace, task string) (string, bool, error) {
+// codeReviewBase returns task's code-review base in repo. A blocker with no
+// change in repo (its code is in other repositories) is none: the task keeps
+// its usual base there, as it would once the blocker closed. A failed lookup
+// stops the task copy: guessing would build the task without its blocker's
+// code.
+func (l StackLineageLookup) codeReviewBase(ctx context.Context, workspace, repo, task string) (string, bool, error) {
 	if l.CodeReviewBase == nil {
 		return "", false, nil
 	}
@@ -36,11 +40,15 @@ func (l StackLineageLookup) codeReviewBase(ctx context.Context, workspace, task 
 	if err != nil {
 		return "", false, loomgit.NewError(loomgit.LineageUnresolved, "read the blocker whose code awaits review", err)
 	}
-	return predecessor, found, nil
+	if !found {
+		return "", false, nil
+	}
+	inRepo, err := taskcopy.TaskHasChange(ctx, workspace, predecessor, repo)
+	return predecessor, inRepo && err == nil, err
 }
 
 type codeReviewBaseLookup interface {
-	codeReviewBase(context.Context, string, string) (string, bool, error)
+	codeReviewBase(context.Context, string, string, string) (string, bool, error)
 }
 
 // choosesBase reports whether a delegated task names its own base: a base

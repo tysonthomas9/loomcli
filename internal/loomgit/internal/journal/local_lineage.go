@@ -45,6 +45,17 @@ func (s *SQLite) LatestTaskRevision(ctx context.Context, workspace, task, repo s
 	return change, number, head, err
 }
 
+// TaskHasChange reports whether task has a change in repo, ready or not.
+func (s *SQLite) TaskHasChange(ctx context.Context, workspace, task, repo string) (bool, error) {
+	var one int
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM driver_changes
+		WHERE workspace = ? AND task_id = ? AND repo = ? LIMIT 1`, workspace, task, repo).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 func (s *SQLite) LatestReadyRevision(ctx context.Context, workspace, change string) (int, string, error) {
 	var number int
 	var head string

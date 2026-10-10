@@ -10,6 +10,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/bootstrap"
 	"github.com/tysonthomas9/loomcli/internal/domain"
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
+	"github.com/tysonthomas9/loomcli/internal/loomgit/driverfreeze"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/taskcopy"
 	loomworkspace "github.com/tysonthomas9/loomcli/internal/loomgit/workspace"
 	"github.com/tysonthomas9/loomcli/internal/stackstore"
@@ -142,5 +143,36 @@ func TestTaskCopyStopsWhenTheCodeReviewLookupFails(t *testing.T) {
 	leadSession(t, f)
 	if _, err := delegated(t, f, "task-y"); !errors.Is(err, loomgit.NewError(loomgit.LineageUnresolved, "", nil)) {
 		t.Fatalf("delegated copy with a failed lookup = %v, want lineage_unresolved", err)
+	}
+}
+
+// A blocker whose code is in another repository gives the task nothing to
+// build on in this one: the task keeps its usual base, as it would once the
+// blocker closed, plain or delegated.
+func TestTaskBehindCodeReviewInAnotherRepoKeepsItsBase(t *testing.T) {
+	f := withReviewBases(t, func(_ context.Context, _, task string) (string, bool, error) {
+		return "api-task", task == "app-task" || task == "app-lead", nil
+	})
+	// api-task's frozen revision is in the api repository only.
+	base := strings.TrimSpace(testGitOutput(t, f.repoPath, "rev-parse", "main"))
+	if _, err := driverfreeze.FreezeAt(context.Background(), filepath.Join(f.loomDir, "loomgit", "store.db"), driverfreeze.Request{
+		Workspace: "TEST", Task: "api-task", Repo: "api", Attempt: "api-1", Worktree: f.repoPath, Base: base,
+		Patch: []byte(testGitOutput(t, f.repoPath, "diff", base, f.taskAH)), Outcome: "completed",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := resolveHead(t, f.resolver, "app-task", "task/run:app"); got != f.mainHead {
+		t.Fatalf("app-task base = %s, want the default branch %s", got, f.mainHead)
+	}
+	if _, err := taskcopy.ReadLineageStatus(context.Background(), "TEST", "app-task", "app"); err == nil {
+		t.Fatal("app-task has a pinned lineage on a blocker with no change in its repo")
+	}
+	leadSession(t, f)
+	copy, err := delegated(t, f, "app-lead")
+	if err != nil || copy.BaseSHA == f.taskAH {
+		t.Fatalf("delegated app-lead = %s, %v; want the lead's base", copy.BaseSHA, err)
+	}
+	if got := strings.TrimSpace(testGitOutput(t, copy.Path, "show", "HEAD:lead.txt")); got != "lead" {
+		t.Fatalf("delegated app-lead lacks the lead's work: %q", got)
 	}
 }

@@ -362,7 +362,7 @@ type localPredecessorLookup interface {
 }
 
 func (l StackLineageLookup) PredecessorForTask(ctx context.Context, workspaceKey, repoName, taskID string) (string, bool, error) {
-	if predecessor, found, err := l.codeReviewBase(ctx, workspaceKey, taskID); err != nil || found {
+	if predecessor, found, err := l.codeReviewBase(ctx, workspaceKey, repoName, taskID); err != nil || found {
 		return predecessor, found, err
 	}
 	_, node, byTask, ok, err := findTaskStack(ctx, l.Store, workspaceKey, repoName, taskID)
@@ -390,7 +390,7 @@ func (r LocalTaskWorktreeResolver) codeReviewLineageBase(ctx context.Context, re
 	if err != nil || chosen {
 		return false, "", taskcopy.LineageBase{}, err
 	}
-	predecessor, found, err := lookup.codeReviewBase(ctx, req.WorkspaceKey, req.TaskID)
+	predecessor, found, err := lookup.codeReviewBase(ctx, req.WorkspaceKey, selected.Name, req.TaskID)
 	if err != nil || !found {
 		return false, "", taskcopy.LineageBase{}, err
 	}
