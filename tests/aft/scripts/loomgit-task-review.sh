@@ -192,7 +192,8 @@ approve)
   # the label; the dependent becomes ready.
   task="$(cat "$work-$3-task")"
   verdict "$task" approve '' > "$work-approve.json"
-  grep -q '"status":"applied"' "$work-approve.json" || { cat "$work-approve.json" >&2; exit 1; }
+  # D40: Approve applies and, with a provider, also opens the PR.
+  grep -Eq '"status":"(applied|published)"' "$work-approve.json" || { cat "$work-approve.json" >&2; exit 1; }
   wait_status "$task" closed False
   python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["data"]; r=d.get("close_reason"); assert r in (None, "", "Approved: code applied"), r' "$work-issue.json"
   dependent="$(cat "$work-$3-dependent")"
