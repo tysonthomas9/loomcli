@@ -3565,6 +3565,17 @@ paths:
         required: true
         schema:
           type: string
+    get:
+      operationId: getMergeUpTo
+      tags: [git]
+      summary: Show the merge up to a change's PR and each layer's progress
+      responses:
+        "200":
+          description: The stack's layers up to the change, with merge progress once queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MergeStackView"
     post:
       operationId: queueMergeUpTo
       tags: [git]

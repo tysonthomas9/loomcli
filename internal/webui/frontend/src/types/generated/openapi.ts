@@ -1826,7 +1826,8 @@ export interface paths {
       };
       cookie?: never;
     };
-    get?: never;
+    /** Show the merge up to a change's PR and each layer's progress */
+    get: operations["getMergeUpTo"];
     put?: never;
     /**
      * Queue "merge up to here" for a change's PR
@@ -7997,6 +7998,30 @@ export interface operations {
         };
         content: {
           "application/json": Record<string, never>;
+        };
+      };
+    };
+  };
+  getMergeUpTo: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        change: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The stack's layers up to the change, with merge progress once queued */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MergeStackView"];
         };
       };
     };

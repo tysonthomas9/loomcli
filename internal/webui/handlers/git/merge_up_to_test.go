@@ -49,6 +49,19 @@ func TestMergeUpToQueuesForTheReportedActor(t *testing.T) {
 	}
 }
 
+func TestMergeUpToShowsTheChangesMerge(t *testing.T) {
+	old := mergeUpToView
+	t.Cleanup(func() { mergeUpToView = old })
+	mergeUpToView = func(_ context.Context, workspace, change string) (publish.MergeStackView, error) {
+		return publish.MergeStackView{StackID: "feature-" + workspace, Target: change, Phase: "done"}, nil
+	}
+	response := serveMergeQueue(http.MethodGet, "/api/workspaces/W/changes/C/merge-up-to", "")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"stack_id":"feature-W"`) ||
+		!strings.Contains(response.Body.String(), `"phase":"done"`) {
+		t.Fatalf("view %d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestMergeQueueListsTheWorkspaceQueue(t *testing.T) {
 	old := mergeQueue
 	t.Cleanup(func() { mergeQueue = old })

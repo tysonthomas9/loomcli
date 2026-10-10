@@ -108,21 +108,11 @@ func QueueMergeUpTo(ctx context.Context, store *journal.SQLite, forge Forge, wor
 		}
 		authority.SetBy = policy.SetBy
 	}
-	publication, found, err := store.Publication(ctx, workspace, change)
+	publication, lead, err := stackOf(ctx, store, workspace, change)
 	if err != nil {
 		return MergeStackView{}, err
-	}
-	if !found || publication.StackID == "" || publication.PRNumber == 0 {
-		return MergeStackView{}, loomgit.NewError(loomgit.Stale, "task "+change+" has no open stacked PR", nil)
 	}
 	stackID := publication.StackID
-	lead, err := store.StackLead(ctx, workspace, stackID)
-	if err != nil {
-		return MergeStackView{}, err
-	}
-	if lead == "" {
-		return MergeStackView{}, loomgit.NewError(loomgit.Stale, "stack "+stackID+" is not applied in a lead working area", nil)
-	}
 	if target, active, err := activeStackMerge(ctx, store, workspace, stackID); err != nil {
 		return MergeStackView{}, err
 	} else if active && target == change {
@@ -158,6 +148,38 @@ func QueueMergeUpTo(ctx context.Context, store *journal.SQLite, forge Forge, wor
 		return view, err
 	}
 	return mergeStackView(ctx, store, workspace, lead, stackID, change)
+}
+
+// MergeUpToViewLocal shows the merge up to change: its stack's layers and,
+// once queued, each layer's progress.
+func MergeUpToViewLocal(ctx context.Context, workspace, change string) (MergeStackView, error) {
+	store, err := openLocalStore()
+	if err != nil {
+		return MergeStackView{}, err
+	}
+	defer func() { _ = store.Close() }()
+	publication, lead, err := stackOf(ctx, store, workspace, change)
+	if err != nil {
+		return MergeStackView{}, err
+	}
+	return mergeStackView(ctx, store, workspace, lead, publication.StackID, change)
+}
+
+// stackOf returns change's stacked PR and the lead whose working area applied
+// the stack.
+func stackOf(ctx context.Context, store *journal.SQLite, workspace, change string) (journal.Publication, string, error) {
+	publication, found, err := store.Publication(ctx, workspace, change)
+	if err != nil {
+		return publication, "", err
+	}
+	if !found || publication.StackID == "" || publication.PRNumber == 0 {
+		return publication, "", loomgit.NewError(loomgit.Stale, "task "+change+" has no open stacked PR", nil)
+	}
+	lead, err := store.StackLead(ctx, workspace, publication.StackID)
+	if err == nil && lead == "" {
+		err = loomgit.NewError(loomgit.Stale, "stack "+publication.StackID+" is not applied in a lead working area", nil)
+	}
+	return publication, lead, err
 }
 
 // activeStackMerge reports the target of the stack's running merge, if any.

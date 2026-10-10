@@ -65,6 +65,7 @@ func (m *Module) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/workspaces/{ws}/changes/{change}/merge-approval", handleMergeApproval)
 	mux.HandleFunc("POST /api/workspaces/{ws}/changes/{change}/merge-approval", handleMergeApproval)
 	mux.HandleFunc("DELETE /api/workspaces/{ws}/changes/{change}/merge-approval", handleMergeApproval)
+	mux.HandleFunc("GET /api/workspaces/{ws}/changes/{change}/merge-up-to", handleMergeUpTo)
 	mux.HandleFunc("POST /api/workspaces/{ws}/changes/{change}/merge-up-to", handleMergeUpTo)
 	mux.HandleFunc("GET /api/workspaces/{ws}/git/merge-queue", handleMergeQueue)
 	mux.HandleFunc("PUT /api/workspaces/{ws}/git/following/{lead}", handleFollowing)

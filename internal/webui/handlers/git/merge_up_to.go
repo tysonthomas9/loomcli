@@ -16,13 +16,20 @@ type mergeUpToRequest struct {
 }
 
 var queueMergeUpTo = publish.QueueMergeUpToLocal
+var mergeUpToView = publish.MergeUpToViewLocal
 var mergeQueue = publish.MergeQueueLocal
 
 // handleMergeUpTo queues "merge up to this task's PR" (D38): the PR and the
 // approved PRs below it, bottom up. It is the one merge queue the PR page's
 // button and the lead's `loom merge` share. A lead is refused with
 // "Lead may merge is off" while that setting is off.
+// GET shows the merge up to the change and its per-layer progress.
 func handleMergeUpTo(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		result, err := mergeUpToView(r.Context(), r.PathValue("ws"), r.PathValue("change"))
+		writeMergeResult(w, result, err)
+		return
+	}
 	var request mergeUpToRequest
 	if r.Body == nil || json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&request) != nil {
 		handler.RespondError(w, http.StatusBadRequest, "actor is required")

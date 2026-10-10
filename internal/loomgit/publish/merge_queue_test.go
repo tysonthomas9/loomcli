@@ -97,6 +97,10 @@ func TestLeadQueuesWholeStackMergeWithOneRequest(t *testing.T) {
 			// The lead's merge carries the lead authority, so it waits for green
 			// and stops if the human turns Lead may merge off.
 			requireQueuedThroughC(t, item, backend, leadMergeAuthority, human.ID)
+			shown, err := MergeUpToViewLocal(ctx, "W", "C")
+			if err != nil || shown.Phase != view.Phase || shown.StackID != "feature" {
+				t.Fatalf("shown=%+v err=%v", shown, err)
+			}
 			again, err := QueueMergeUpToLocal(ctx, "W", "C", leadL)
 			if err != nil || again.Phase != view.Phase {
 				t.Fatalf("asking again=%+v err=%v", again, err)
