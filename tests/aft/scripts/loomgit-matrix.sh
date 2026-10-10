@@ -713,7 +713,19 @@ lead-epic-midsession)
     curl -fsS "$AFT_BASE_URL/api/monitor/status?workspace=$workspace" > "$work/midsession-monitor.json"
     json "$work/midsession-monitor.json" 'a=[x for x in v.get("agents",[]) if x.get("name")=="lead"][0]; assert a.get("parent")==sys.argv[2] and a.get("delivery_state") in ("delivered","acknowledged"), a' "$epic"
   }
-  wait_until 90 "epic assigned to the running lead was never delivered: $(cat "$work/midsession-monitor.json" 2> /dev/null | head -c 600)" delivered
+  if ! (wait_until 90 "epic assigned to the running lead was never delivered" delivered); then
+    # Keep what explains a stuck delivery: the lead's session runtime metadata
+    # (Codex endpoint/thread), its inbox, and the server log (the next run overwrites it).
+    cp "$AFT_TESTS_DIR/reports/server.log" "$work/midsession-server.log" 2> /dev/null || true
+    fdb="$(grep -o 'embedded fleet-db client" url=http://127.0.0.1:[0-9]*' "$work/midsession-server.log" 2> /dev/null | tail -1 | sed 's/.*url=//')"
+    if [[ -n "$fdb" ]]; then
+      curl -sS "$fdb/api/v1/$workspace/agent-sessions" > "$work/midsession-agent-sessions.json" 2>&1 || true
+      curl -sS "$fdb/api/v1/$workspace/agent-inbox-messages" > "$work/midsession-inbox.json" 2>&1 || true
+    fi
+    lead_terminal_text 2> /dev/null || true
+    cp "$work/lead-terminal.txt" "$work/midsession-lead-terminal.txt" 2> /dev/null || true
+    fail "epic assigned to the running lead was never delivered: $(head -c 600 "$work/midsession-monitor.json" 2> /dev/null)"
+  fi
   say "mid-session epic assignment delivered"
   ;;
 
