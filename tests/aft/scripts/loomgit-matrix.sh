@@ -248,6 +248,13 @@ lead_busy() { lead_terminal_text; grep -q 'esc to interrupt' "$work/lead-termina
 lead_idle() { ! lead_busy && grep -q 'Worked for' "$work/lead-terminal.txt"; }
 lead_turns() { lead_terminal_text; grep -cE 'esc to interrupt|Worked for' "$work/lead-terminal.txt" || true; }
 lead_say() { # lead_say <instruction>: type one line into the running lead's terminal
+  # Each instruction starts with its own step marker; a refusal must appear after
+  # it (xterm only renders the visible rows, so counting matches cannot work).
+  local n
+  n=$(($(cat "$work/lead-step.n" 2> /dev/null || echo 0) + 1))
+  printf '%s\n' "$n" > "$work/lead-step.n"
+  printf '[aft-step %s]\n' "$n" > "$work/lead-step.marker"
+  set -- "[aft-step $n] $1"
   browser open "$AFT_BASE_URL/ws/$workspace/agents/lead" > /dev/null
   wait_until 20 "lead terminal mounted" lead_terminal_mounted
   # Text typed while the lead's own first turn runs stays unsent in its composer.
@@ -271,11 +278,13 @@ lead_terminal_text() {
   browser eval "Array.from(document.querySelectorAll('[data-testid=terminal-wrapper] .xterm-rows > div')).map(e => e.textContent).join('\\n')" > "$work/lead-terminal.txt" 2> /dev/null || true
 }
 
-lead_mark() { lead_terminal_text; grep -cE "$1" "$work/lead-terminal.txt" > "$work/lead-mark.count" || true; }
-lead_refused() { # the real lead ran the command and Loom's refusal is in its transcript
-  local want="$1" before
-  before="$(cat "$work/lead-mark.count" 2> /dev/null || echo 0)"
-  seen() { lead_terminal_text; (( $(grep -cE "$want" "$work/lead-terminal.txt" || true) > before )); }
+lead_refused() { # the real lead ran the command and Loom's refusal follows that instruction in its transcript
+  local want="$1" marker
+  marker="$(cat "$work/lead-step.marker")"
+  seen() {
+    lead_terminal_text
+    python3 -c 'import json,re,sys; t=open(sys.argv[1]).read(); t=json.loads(t) if t.startswith("\"") else t; i=t.rfind(sys.argv[2]); sys.exit(0 if i >= 0 and re.search(sys.argv[3], t[i:]) else 1)' "$work/lead-terminal.txt" "$marker" "$want"
+  }
   wait_until $((90 * scale)) "the lead's transcript shows Loom refusing it (/$want/): $(tail -c 800 "$work/lead-terminal.txt" 2> /dev/null)" seen
   cp "$work/lead-terminal.txt" "$work/lead-refusal-$(date +%s).txt"
 }
@@ -610,7 +619,6 @@ lead-do)
     set-approve | set-merge) refusal='only a human can change workspace policy' ;;
     *) refusal='' ;;
   esac
-  [[ "$forge" == github && -n "$refusal" ]] && lead_mark "$refusal"
   if [[ "$forge" == fake ]]; then
     if [[ "$action" == cli-approve ]]; then
       set +e
