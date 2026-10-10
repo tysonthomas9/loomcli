@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/cli/config"
@@ -205,6 +206,10 @@ func FreezeAt(ctx context.Context, journalPath string, in Request) (loomgit.Revi
 		if err != nil {
 			return err
 		}
+		entries, err = withIgnored(ctx, runner, in.Worktree, entries)
+		if err != nil {
+			return err
+		}
 		complete := capture.Complete(entries)
 		if len(entries) > 0 {
 			if _, err := capture.SaveManifest(ctx, runner, in.Worktree, capture.Manifest{Workspace: in.Workspace,
@@ -225,6 +230,26 @@ func FreezeAt(ctx context.Context, journalPath string, in Request) (loomgit.Revi
 			Attempt: in.Attempt, Path: in.Worktree, SourceRepo: in.SourceRepo, Complete: complete})
 	})
 	return revision, err
+}
+
+// withIgnored adds the task copy's ignored files to the screened patch entries
+// (D18): they are listed, never captured, as in a cancel-time capture.
+func withIgnored(ctx context.Context, runner *gitexec.Runner, worktree string, entries []capture.Entry) ([]capture.Entry, error) {
+	ignored, err := capture.IgnoredEntries(ctx, runner, worktree)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		seen[entry.Path] = true
+	}
+	for _, entry := range ignored {
+		if !seen[entry.Path] {
+			entries = append(entries, entry)
+		}
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
+	return entries, nil
 }
 
 // stagePatch stages the flat patch on Base in a private index, then applies

@@ -76,6 +76,19 @@ func ignoredPaths(ctx context.Context, runner *gitexec.Runner, paths []string) (
 	return pathSet(lines(out)), nil
 }
 
+// IgnoredEntries lists the task copy's ignored files the way Capture records
+// them: listed with their size and never captured. An ignored path Capture
+// could not measure is incomplete.
+func IgnoredEntries(ctx context.Context, runner *gitexec.Runner, repo string) ([]Entry, error) {
+	out, err := runner.Run(ctx, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z")
+	if err != nil {
+		return nil, err
+	}
+	manifest := Manifest{Complete: true}
+	recordIgnored(&manifest, repo, lines(out), map[string]bool{})
+	return manifest.Entries, nil
+}
+
 // Complete reports whether entries leave every path captured or listed.
 func Complete(entries []Entry) bool {
 	for _, entry := range entries {

@@ -289,3 +289,49 @@ func TestIgnoredNonSecretPathIsListedNotCaptured(t *testing.T) {
 		t.Fatal("listed ignored path made the capture incomplete")
 	}
 }
+
+func TestOrdinaryIgnoredFilesInTaskCopyAreListedNotCaptured(t *testing.T) {
+	r := newSecretRepo(t, map[string]string{".gitignore": "*.log\nbuild/\n"})
+	r.write("debug.log", "12345\n")
+	r.write("build/out.bin", "binary\n")
+	r.write("work.txt", "work\n")
+	journalPath := filepath.Join(t.TempDir(), "journal.db")
+	rev, err := driverfreeze.FreezeAt(context.Background(), journalPath, driverfreeze.Request{
+		Workspace: "WS", Task: "TASK", Repo: "repo", Attempt: "ordinary", Worktree: r.dir,
+		Base: r.base, Patch: r.patch(), Outcome: "completed",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree := r.tree(rev.HeadSHA)
+	if rev.Incomplete || contains(tree, "debug.log") || contains(tree, "build/out.bin") || !contains(tree, "work.txt") {
+		t.Fatalf("ignored files: %+v tree %v", rev, tree)
+	}
+	data, err := os.ReadFile(filepath.Join(r.dir, ".git", "loom", "capture", "WS-ordinary.json"))
+	if err != nil {
+		t.Fatalf("capture manifest: %v", err)
+	}
+	var manifest struct {
+		Complete bool
+		Entries  []struct {
+			Path, Class string
+			Size        int64
+		}
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, entry := range manifest.Entries {
+		got[entry.Path] = entry.Class
+		if entry.Path == "debug.log" && entry.Size != 6 {
+			t.Fatalf("debug.log size = %d", entry.Size)
+		}
+	}
+	if !manifest.Complete || got["debug.log"] != "listed" || got["build/"] != "listed" || len(got) != 2 {
+		t.Fatalf("manifest = %+v", manifest)
+	}
+	if !retainedComplete(t, journalPath, "ordinary") {
+		t.Fatal("listed ignored files made the capture incomplete")
+	}
+}
