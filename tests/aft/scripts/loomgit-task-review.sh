@@ -276,6 +276,12 @@ rebuild)
   wait_status "$b" review True
   test "$(revision_field "$b" depends_on)" = "$a"
   test -z "$(revision_field "$b" lineage_state)"
+  # A task in code review only leaves it through Approve or Reject, so the
+  # suite's board teardown can close neither: reject both to reopen them.
+  verdict "$b" reject > "$work-reject-b.json"
+  wait_status "$b" open False
+  verdict "$a" reject > "$work-reject-a.json"
+  wait_status "$a" open False
   ;;
 no-changes)
   # no-changes <ws> <slot>: an empty attempt still closes its task.
