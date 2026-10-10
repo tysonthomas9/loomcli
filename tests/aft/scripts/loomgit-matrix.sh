@@ -704,10 +704,14 @@ lead-epic-midsession)
   python3 -c 'import json; print(json.dumps({"title":"matrix mid-session epic","issue_type":"epic","priority":2}))' |
     curl -fsS -X POST "$api/issues" -H 'Content-Type: application/json' -d @- > "$work/midsession-epic.json"
   epic="$(json "$work/midsession-epic.json" 'print(v["data"]["id"])')"
-  curl -fsS -X PATCH "$api/agents/lead" -H 'Content-Type: application/json' -d "{\"parent\":\"$epic\"}" > /dev/null
+  # The product path for a running lead: the epic-runner workflow binds the lead
+  # (update-agent-parent) and fires the deliver-lead-assignment op. A bare PATCH of
+  # the agent's parent only rebinds; nothing delivers it (seen on the real tier).
+  curl -fsS -X POST "$api/workflows/epic-runner" -H 'Content-Type: application/json' \
+    -d "{\"epicId\":\"$epic\",\"leadName\":\"lead\",\"runner\":\"local-task-runner\"}" > "$work/midsession-workflow.json"
   delivered() {
     curl -fsS "$AFT_BASE_URL/api/monitor/status?workspace=$workspace" > "$work/midsession-monitor.json"
-    json "$work/midsession-monitor.json" 'a=[x for x in v.get("agents",[]) if x.get("name")=="lead"][0]; assert a.get("parent")==sys.argv[2] and a.get("delivery_state")=="delivered", a' "$epic"
+    json "$work/midsession-monitor.json" 'a=[x for x in v.get("agents",[]) if x.get("name")=="lead"][0]; assert a.get("parent")==sys.argv[2] and a.get("delivery_state") in ("delivered","acknowledged"), a' "$epic"
   }
   wait_until 90 "epic assigned to the running lead was never delivered: $(cat "$work/midsession-monitor.json" 2> /dev/null | head -c 600)" delivered
   say "mid-session epic assignment delivered"
