@@ -30,20 +30,23 @@ def task(case, slot, after="-", red=""):
     dep = f", blocked by task {after}" if after != "-" else ""
     return run(f"task {case} {slot} {after}{extra}", f"API client creates task {slot}{dep} in its own epic and starts its run; it {what}") + wait_rev(case, slot)
 
-def build(case, specs, reviewed):
+def build(case, specs, reviewed, late=()):
     """Run the tasks in specs [(slot, after|"-", "FAIL"|"", [writes-slot])] and review them.
 
     Every task is created up front in one epic and runs before any review;
     reviewed maps a slot to the steps that review it (approve, PR, merge...),
-    always taken in specs order.
+    always taken in specs order. A slot in late is waited for just before its
+    own review: in PR per task a dependent runs only after its blocker is
+    approved (Tyson's cross-stack rule), so it cannot be awaited up front.
     """
     specs = [tuple(x) + ("",) * (4 - len(x)) for x in specs]
     spec = " ".join(slot + (f":{after}:{red}:{writes}" if writes else (f":{after}" if after != "-" or red else "") + (f":{red}" if red else "")) for slot, after, red, writes in specs)
     st = run(f"chain {case} {spec}", "API client creates the tasks (" + spec + ") in one epic and starts it once; a dependent runs when its blocker's agent finishes")
     for slot, *_ in specs:
-        st += wait_rev(case, slot)
+        if slot not in late:
+            st += wait_rev(case, slot)
     for slot, *_ in specs:
-        st += reviewed.get(slot, [])
+        st += (wait_rev(case, slot) if slot in late else []) + reviewed.get(slot, [])
     return st
 
 def reject_ui(case, slot):
@@ -182,7 +185,7 @@ def settings_cases():
     st = setup(c) + settings(c, "trunk", "on", "off")
     st += build(c, [("a", "-", ""), ("b", "-", ""), ("c", "a", "")], {
         "a": lead_create_pr(c, "a", "main"), "b": lead_create_pr(c, "b", "main"),
-        "c": lead(c, "approve", "c", "ok", "approves C, which depends on A") + run(f"no-pr {c} c 8", "C gets no PR while A is unmerged")})
+        "c": lead(c, "approve", "c", "ok", "approves C, which depends on A") + run(f"no-pr {c} c 8", "C gets no PR while A is unmerged")}, late=("c",))
     st += human_merge(c, "a") + run(f"merged {c} a", "A lands") + run(f"pr {c} c main", "C now gets its own PR to main") + \
         run(f"rebuilt {c} c main", "C's PR changes only C") + run(f"ui {c} b open", "Task B shows its own PR")
     out += case("S5 PR per task, lead may approve on, lead may merge off", "Independent A and B get their own PRs to main; C, which depends on A, gets its PR once A lands", st)
@@ -192,7 +195,7 @@ def settings_cases():
     st += build(c, [("a", "-", ""), ("b", "-", "FAIL"), ("c", "a", "")], {
         "a": lead_create_pr(c, "a", "main") + run(f"merged {c} a", "A merges by itself"),
         "b": lead_create_pr(c, "b", "main") + run(f"checks {c} b red", "B is red"),
-        "c": lead_create_pr(c, "c", "main") + run(f"merged {c} c", "C merges by itself")})
+        "c": lead_create_pr(c, "c", "main") + run(f"merged {c} c", "C merges by itself")}, late=("c",))
     st += run(f"hold-open {c} 6 b", "Red B stays open and blocks nobody") + run(f"ui {c} b open", "Task B shows its PR open")
     out += case("S6 PR per task, lead may approve on, lead may merge when green", "Green PRs merge by themselves; red B stays open and never blocks A or C", st)
 
