@@ -194,13 +194,9 @@ until a human confirms it in the UI or with 'loom confirm-merge' within 30 minut
 		if err != nil {
 			return err
 		}
-		requester := publish.MergeActor{Kind: "lead", ID: os.Getenv("LOOM_AGENT_NAME")}
-		if requester.ID == "" {
-			requester, err = humanMergeActor()
-			if err != nil {
-				return err
-			}
-		}
+		// D42: the request records whoever runs it; a task agent is refused.
+		actor := resolveCommandActor(args[1])
+		requester := publish.MergeActor{Kind: actor.Kind, ID: actor.ID}
 		workspace := resolver.Config.Workspaces[resolver.WorkspaceName()]
 		request, err := prRequestMerge(cmd.Context(), workspace.ID, args[1], args[0], args[2], requester)
 		if err != nil {
@@ -264,18 +260,14 @@ func printMergeRequest(cmd *cobra.Command, request publish.MergeRequestView) err
 	return nil
 }
 
-// humanMergeActor refuses agent sessions; local mode trusts the OS user (D28).
+// humanMergeActor refuses agent sessions (the lead's or a task agent's);
+// local mode trusts the OS user (D28).
 func humanMergeActor() (publish.MergeActor, error) {
-	for _, name := range agentEnvMarkers {
-		if os.Getenv(name) != "" {
-			return publish.MergeActor{}, fmt.Errorf("merge confirmation refused: %s is set, so this looks like an agent session; a human must confirm", name)
-		}
+	actor, err := requireHumanCommand("merge confirmation")
+	if err != nil {
+		return publish.MergeActor{}, err
 	}
-	user := os.Getenv("USER")
-	if user == "" {
-		user = "local-user"
-	}
-	return publish.MergeActor{Kind: "human", ID: user}, nil
+	return publish.MergeActor{Kind: actor.Kind, ID: actor.ID}, nil
 }
 
 func confirmMergeUpTo(cmd *cobra.Command, target string) error {

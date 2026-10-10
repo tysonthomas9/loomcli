@@ -26,17 +26,27 @@ func ApproveLocal(ctx context.Context, workspace, lead, change string, revision 
 // ApproveLocalPublishing approves and follows; with publish it also records
 // the intent to open the change's PR once applied (D29).
 func ApproveLocalPublishing(ctx context.Context, workspace, lead, change string, revision int, actor review.Actor, publish bool) (FollowResult, error) {
+	return ApproveLocalPinned(ctx, workspace, lead, change, revision, "", actor, publish)
+}
+
+// ApproveLocalPinned approves exactly headSHA, the code the reviewer was
+// shown: a different head is refused as stale (S4). An empty headSHA approves
+// the revision's recorded head.
+func ApproveLocalPinned(ctx context.Context, workspace, lead, change string, revision int, headSHA string, actor review.Actor, publish bool) (FollowResult, error) {
 	path := filepath.Join(config.GetConfigDir(), "loomgit", "store.db")
 	store, err := journal.OpenSQLite(path)
 	if err != nil {
 		return FollowResult{}, err
 	}
-	r, err := store.GetRevision(ctx, workspace, change, revision)
-	if err != nil {
-		_ = store.Close()
-		return FollowResult{}, err
+	if headSHA == "" {
+		r, err := store.GetRevision(ctx, workspace, change, revision)
+		if err != nil {
+			_ = store.Close()
+			return FollowResult{}, err
+		}
+		headSHA = r.HeadSHA
 	}
-	_, err = review.SubmitForLeadPublishing(ctx, store, workspace, change, revision, r.HeadSHA, "approve", "", actor, lead, publish)
+	_, err = review.SubmitForLeadPublishing(ctx, store, workspace, change, revision, headSHA, "approve", "", actor, lead, publish)
 	if closeErr := store.Close(); err == nil {
 		err = closeErr
 	}

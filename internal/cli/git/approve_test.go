@@ -25,9 +25,9 @@ func TestApproveCmdFollowsApprovedRevision(t *testing.T) {
 		}}, nil
 	}
 	called := false
-	approveLocal = func(_ context.Context, workspace, lead, change string, revision int, actor review.Actor) (apply.FollowResult, error) {
+	approveLocal = func(_ context.Context, workspace, lead, change string, revision int, headSHA string, actor review.Actor) (apply.FollowResult, error) {
 		called = true
-		if workspace != "workspace-1" || lead != "lead-1" || change != "change-1" || revision != 2 ||
+		if workspace != "workspace-1" || lead != "lead-1" || change != "change-1" || revision != 2 || headSHA != "head-2" ||
 			actor.Kind != "human" || actor.ID == "" {
 			t.Fatalf("unexpected approval: %s %s %s %d %+v", workspace, lead, change, revision, actor)
 		}
@@ -62,9 +62,10 @@ func stubApprovePublish(t *testing.T, publisher func(context.Context, string, st
 			Workspaces: map[string]config.WorkspaceConfig{"workspace": {ID: "workspace-1"}},
 		}}, nil
 	}
-	approveLocal = func(_ context.Context, _, _, change string, _ int, _ review.Actor) (apply.FollowResult, error) {
+	approveLocal = func(_ context.Context, _, _, change string, _ int, _ string, _ review.Actor) (apply.FollowResult, error) {
 		return apply.FollowResult{Applied: []string{change}}, nil
 	}
+	stubVerdictStore(t, humanEnv())
 }
 
 func runApproveForTest(t *testing.T) string {
