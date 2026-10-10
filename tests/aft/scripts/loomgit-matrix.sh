@@ -1046,8 +1046,14 @@ cli-verdict)
     grep -qE "^(Approving|Rejecting) as $kind " "$out" || fail "loom $verb did not record $who as $kind: $(head -c 300 "$out")"
     want_verdict="$verb"
     [[ "$verb:$who" == approve:lead ]] && want_verdict=policy
-    recorded() { revisions "$1"; json "$work/rev-$1.json" 'assert v.get("verdict")==sys.argv[2], v' "$2"; }
-    wait_until 30 "a $want_verdict verdict on $slot" recorded "$slot" "$want_verdict"
+    # The verdict is on the revision the command decided; applying it may add a
+    # newer derived revision whose verdict is carried from it.
+    decided="${before%% *}"
+    recorded() {
+      revisions "$1"
+      json "$work/revisions-$1.json" 'r=[i for i in v["data"] if i["number"]==int(sys.argv[3])]; assert r and r[0].get("verdict")==sys.argv[2], r or v' "$2" "$3"
+    }
+    wait_until 30 "a $want_verdict verdict on $slot revision $decided" recorded "$slot" "$want_verdict" "$decided"
   fi
   say "$who's loom $verb on $slot: $want"
   ;;
