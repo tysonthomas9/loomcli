@@ -136,7 +136,9 @@ function StoreWiring({
       if (refreshTimer) clearTimeout(refreshTimer);
       refreshTimer = setTimeout(() => {
         refreshTimer = null;
-        void agentStore.getState().fetchData();
+        // Queue behind an in-flight fetch: it may have started before this
+        // mutation and would otherwise leave stale data until the next poll.
+        void agentStore.getState().fetchData({ queue: true });
       }, MONITOR_REFRESH_DEBOUNCE_MS);
     };
 

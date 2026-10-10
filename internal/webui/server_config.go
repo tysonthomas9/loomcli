@@ -42,6 +42,11 @@ type MonitorHandlers struct {
 	Metrics              http.HandlerFunc // GET /metrics (Prometheus)
 	ObservabilityMetrics http.HandlerFunc // GET /api/observability/metrics
 	ObservabilityEvents  http.HandlerFunc // GET /api/observability/events
+
+	// InvalidateWorkspace drops cached monitor data for a workspace. The server
+	// calls it for each realtime mutation before clients see it, so the
+	// refresh a client makes in response reads fresh state.
+	InvalidateWorkspace func(workspaceID string)
 }
 
 // ServerConfig holds configuration for the web UI server.

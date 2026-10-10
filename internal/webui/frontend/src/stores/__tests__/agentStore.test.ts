@@ -270,6 +270,32 @@ describe("agentStore", () => {
 
       expect(mockFetchStatus).toHaveBeenCalledOnce();
     });
+
+    it("runs a queued fetch requested during an in-flight fetch once it settles", async () => {
+      let resolve!: (value: FetchStatusResult) => void;
+      mockFetchStatus.mockReturnValueOnce(
+        new Promise<FetchStatusResult>((r) => {
+          resolve = r;
+        }),
+      );
+      mockFetchStatus.mockResolvedValueOnce(
+        makeStatusResult({
+          agents: [makeAgent({ role: "lead", parent: "WS-1" })],
+        }),
+      );
+
+      // A pre-assignment fetch is in flight when the mutation-driven refresh
+      // arrives; that refresh must still run and replace the stale result.
+      const p1 = store.getState().fetchData();
+      const p2 = store.getState().fetchData({ queue: true });
+      resolve(makeStatusResult());
+      await p1;
+      await p2;
+      await vi.waitFor(() =>
+        expect(store.getState().agents[0]?.parent).toBe("WS-1"),
+      );
+      expect(mockFetchStatus).toHaveBeenCalledTimes(2);
+    });
   });
 
   // -----------------------------------------------------------------------

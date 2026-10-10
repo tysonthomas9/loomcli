@@ -113,7 +113,11 @@ export interface AgentStoreState {
 }
 
 export interface AgentStoreActions {
-  fetchData: () => Promise<void>;
+  /**
+   * `queue`: if a fetch is already in flight, run another once it settles
+   * instead of dropping this call (the in-flight one may predate a mutation).
+   */
+  fetchData: (options?: { queue?: boolean }) => Promise<void>;
   startPolling: (options?: PollingOptions) => void;
   stopPolling: () => void;
   retryNow: () => void;
@@ -203,6 +207,7 @@ export function createAgentStore(
   let activeWorkspaceId: string | undefined;
   let staleBannerTimeoutId: ReturnType<typeof setTimeout> | null = null;
   let fetchInProgress = false;
+  let queuedFetch = false;
   let fetchStartTime = 0;
   let currentRetryDelay = INITIAL_RETRY_DELAY_S;
   let consecutiveFailuresAtCeiling = 0;
@@ -321,8 +326,11 @@ export function createAgentStore(
   const store = createStore<AgentStore>((set, get) => ({
     ...INITIAL_STATE,
 
-    async fetchData(): Promise<void> {
-      if (fetchInProgress) return;
+    async fetchData(options?: { queue?: boolean }): Promise<void> {
+      if (fetchInProgress) {
+        if (options?.queue) queuedFetch = true;
+        return;
+      }
 
       fetchInProgress = true;
       fetchStartTime = Date.now();
@@ -385,6 +393,10 @@ export function createAgentStore(
         });
       } finally {
         fetchInProgress = false;
+        if (queuedFetch) {
+          queuedFetch = false;
+          void get().fetchData();
+        }
       }
     },
 
@@ -476,6 +488,7 @@ export function createAgentStore(
       get().stopPolling();
 
       fetchInProgress = false;
+      queuedFetch = false;
       fetchStartTime = 0;
       currentRetryDelay = INITIAL_RETRY_DELAY_S;
       consecutiveFailuresAtCeiling = 0;

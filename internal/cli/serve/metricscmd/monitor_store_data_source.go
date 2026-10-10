@@ -84,6 +84,23 @@ func (s *MonitorStoreDataSource) Resolve(ctx context.Context, workspaceHint stri
 	return data
 }
 
+// Invalidate drops cached metadata for workspaceID (and the active-workspace
+// entry, which may resolve to it) so the next Resolve re-reads the store. The
+// server calls it when it publishes a workspace mutation, e.g. a lead's epic
+// assignment, so the UI's refresh does not get the pre-mutation copy.
+func (s *MonitorStoreDataSource) Invalidate(workspaceID string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for key := range s.entries {
+		if key == monitorStoreCacheKey("") || strings.EqualFold(key, workspaceID) {
+			delete(s.entries, key)
+		}
+	}
+}
+
 func (s *MonitorStoreDataSource) cacheEntry(cacheKey string) *monitorStoreCacheEntry {
 	s.mu.Lock()
 	defer s.mu.Unlock()
