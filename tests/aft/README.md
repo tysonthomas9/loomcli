@@ -301,7 +301,7 @@ cover this directly. Cases that need it are named `[needs #943 dependents run]`
 and fail on builds without that change. `build()` in
 `scripts/gen-matrix-suites.py` is the one place that orders runs and reviews.
 
-- Each run creates a NEW private repo `tysonthomas9/loom-aft-git-<yyyymmdd-hhmm>`
+- Each run creates a NEW public, fixture-only repo (README + check workflow, never a token; private needs GitHub Pro for the required check) `tysonthomas9/loom-aft-git-<yyyymmdd-hhmm>`
   with the operator's `gh` login (needs `repo` and `workflow` scopes), seeds `main`
   with a README and the required Actions check `check` (red when a file contains
   `FAIL`), and protects `main` with it (admins included). No other repo is touched.

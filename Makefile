@@ -503,7 +503,7 @@ test-aft-heal:
 test-aft-real:
 	@AFT_REAL_CODEX=1 tests/aft/run-aft.sh --no-agent $(AFT_ARGS)
 
-# PX.7 real-GitHub tier: a new private sandbox repo per run, real codex, the
+# PX.7 real-GitHub tier: a new public, fixture-only sandbox repo per run, real codex, the
 # operator's gh login (server only). AFT_ARGS must carry --max-real-cases.
 test-aft-real-github:
 	@tests/aft/run-aft.sh --real-github --no-agent $(AFT_ARGS)

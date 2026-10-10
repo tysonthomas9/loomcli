@@ -111,7 +111,7 @@ if [[ -n "$AFT_WITH_DAEMON" && -z "$AFT_LIVE" ]]; then
     exit 1
 fi
 # Real-GitHub tier (PX.7): real codex writes the task code and the Loom server
-# publishes and merges on a NEW private sandbox repo created for this run
+# publishes and merges on a NEW public, fixture-only sandbox repo created for this run
 # (tysonthomas9/loom-aft-git-<yyyymmdd-hhmm>). Gated like the live tier: explicit
 # flag, deterministic AFT (--no-agent), a mandatory case cap, suites only from
 # real-github-suites/. The token reaches only the server process.

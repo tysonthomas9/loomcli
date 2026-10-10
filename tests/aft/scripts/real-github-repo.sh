@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# PX.7 real-GitHub tier: the run's private sandbox repository.
+# PX.7 real-GitHub tier: the run's public, fixture-only sandbox repository
+# (README + check workflow, never a token). Public because branch protection
+# on a private repo needs GitHub Pro (Tyson, 2026-10-10).
 #
 #   real-github-repo.sh create            creates tysonthomas9/loom-aft-git-<yyyymmdd-hhmm>,
 #                                         seeds main with a README and the required
@@ -34,7 +36,7 @@ create)
     echo "refusing: $repo already exists (one new sandbox per run; retry in a minute)" >&2
     exit 1
   fi
-  env -u GITHUB_TOKEN -u GH_TOKEN gh repo create "$repo" --private \
+  env -u GITHUB_TOKEN -u GH_TOKEN gh repo create "$repo" --public \
     --description "Loom AFT real-GitHub sandbox (PX.7). Created by the test harness; safe to delete." > /dev/null
   seed="$(mktemp -d /tmp/loom-aft-git-seed.XXXXXX)"
   git init -q -b main "$seed"
