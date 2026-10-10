@@ -225,9 +225,11 @@ def settings_cases():
 
 def variants(real=False):
     out = []
-    c = "l1"
-    st = setup(c) + run(f"lead-epic-midsession {c}", "Real tier: an epic assigned to the ALREADY RUNNING lead is delivered to it mid-session (fake tier: no running lead, skipped)")
-    out += case("L1 Mid-session epic assignment to a running lead", "The seam live-interactive ll-lead-assignment leaves open: assignment delivered into a lead that is already running", st)
+    if real:
+        # Real tier only: the fake tier has no running lead, and a skipped step would read as a pass.
+        c = "l1"
+        st = setup(c) + run(f"lead-epic-midsession {c}", "An epic assigned to the ALREADY RUNNING real lead is delivered to it mid-session")
+        out += case("L1 Mid-session epic assignment to a running lead", "The seam live-interactive ll-lead-assignment leaves open: assignment delivered into a lead that is already running", st)
 
     c = "n1"
     st = setup(c) + settings(c, "stack", "off", "off")
@@ -348,9 +350,10 @@ def main(root):
                                      ("matrix-variants", ": lead, negative, recovery and dependent-run variants L1, N1-N4, R1, D1-D3, X1-X2", ["l1", "n1", "n2", "n3", "n4", "r1", "d1", "d2", "d3", "x1", "x2"], None)):
         fake_body = body if body is not None else variants()
         real_body = body if body is not None else variants(real=True)
-        emit(root / "suites" / f"loomgit-{suite}.test.yaml", f"loomgit-{suite}", what, fake, cases, fake_body)
+        fake_cases = [c for c in cases if c != "l1"]  # L1 is real-tier only
+        emit(root / "suites" / f"loomgit-{suite}.test.yaml", f"loomgit-{suite}", what.replace("L1, ", ""), fake, fake_cases if body is None else cases, fake_body)
         real_cases = [c for c in cases if c != "n4"]  # N4 is fake-tier only
-        emit(root / "real-github-suites" / f"real-github-{suite}.test.yaml", f"real-github-{suite}", what.replace("N1-N4", "N1-N3"), real, real_cases, real_body)
+        emit(root / "real-github-suites" / f"real-github-{suite}.test.yaml", f"real-github-{suite}", what.replace("N1-N4", "N1-N3"), real, real_cases if body is None else cases, real_body)
 
 def check(root):
     """Exit 1 when the committed suites differ from what the generator writes."""

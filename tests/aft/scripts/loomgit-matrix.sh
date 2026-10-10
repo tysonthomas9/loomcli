@@ -658,7 +658,7 @@ lead-epic-midsession)
   # Real tier only: assign an epic to the ALREADY RUNNING lead and wait for the
   # lead process to mark it delivered (the mid-session seam ll-lead-assignment
   # leaves uncovered).
-  [[ "$forge" == github ]] || { say "fake tier: no running lead; skipped"; exit 0; }
+  [[ "$forge" == github ]] || fail "lead-epic-midsession needs the real tier's running lead (a skip must not read as a pass)"
   python3 -c 'import json; print(json.dumps({"title":"matrix mid-session epic","issue_type":"epic","priority":2}))' |
     curl -fsS -X POST "$api/issues" -H 'Content-Type: application/json' -d @- > "$work/midsession-epic.json"
   epic="$(json "$work/midsession-epic.json" 'print(v["data"]["id"])')"

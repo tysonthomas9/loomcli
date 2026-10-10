@@ -14,7 +14,7 @@ tests:
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" lead-start l1"
         intent: "Real tier: the workspace's real codex lead is started from its agent page and its controlled runtime comes up"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" lead-epic-midsession l1"
-        intent: "Real tier: an epic assigned to the ALREADY RUNNING lead is delivered to it mid-session (fake tier: no running lead, skipped)"
+        intent: "An epic assigned to the ALREADY RUNNING real lead is delivered to it mid-session"
   - name: "N1 The lead's CLI approve cannot bypass Lead may approve off [needs P2.25]"
     intent: "loom approve run by the lead must be refused with 'lead approval policy is off', record no verdict and leave the task in review. Expected to fail until P2.25: the CLI records a human actor whoever runs it."
     steps:
