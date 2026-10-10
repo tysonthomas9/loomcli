@@ -603,6 +603,7 @@ func buildMonitorHandlers(collectDataFn metricscmd.CollectDataFn, staleDetectorH
 		Metrics:              metricscmd.HandleMetrics(collectDataFn),
 		ObservabilityMetrics: observability.HandleMetrics(eventsDir, observability.NewMetricsCache(eventsDir)),
 		ObservabilityEvents:  observability.HandleEvents(eventsDir),
+		InvalidateWorkspace:  monitorStoreDataSource.Invalidate,
 	}
 }
 

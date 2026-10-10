@@ -71,6 +71,7 @@ type Hub struct {
 	retryMu      sync.Mutex
 	droppedCount int64 // For metrics
 	startedAt    time.Time
+	observer     func(workspaceID string)
 }
 
 // Client represents a single SSE connection.
@@ -148,6 +149,13 @@ func NewHub() *Hub {
 	}
 }
 
+// SetMutationObserver registers fn to run with the workspace of each mutation
+// before it is fanned out to clients, so server-side caches can drop state the
+// clients are about to refetch. Call it before Run.
+func (h *Hub) SetMutationObserver(fn func(workspaceID string)) {
+	h.observer = fn
+}
+
 // Run starts the hub's main loop for managing clients and broadcasts.
 func (h *Hub) Run() {
 	retryTicker := time.NewTicker(100 * time.Millisecond)
@@ -194,6 +202,9 @@ func (h *Hub) fanOutMutation(mutation *MutationPayload) {
 	if mutation.WorkspaceID == "" {
 		slog.Warn("SSE: dropping mutation with empty workspace_id", "type", mutation.Type, "issue_id", mutation.IssueID)
 		return
+	}
+	if h.observer != nil {
+		h.observer(mutation.WorkspaceID)
 	}
 	h.mu.RLock()
 	var slow []*Client

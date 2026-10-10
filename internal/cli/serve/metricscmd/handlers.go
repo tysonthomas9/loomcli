@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -138,12 +137,7 @@ func HandleStatusWithSources(dataSource *MonitorDataSource, storeDataSource *Mon
 			_, _ = w.Write([]byte(`{"error":"data collection unavailable"}`))
 			return
 		}
-		var storeData monitorStoreData
-		if requestsFreshData(r) {
-			storeData = storeDataSource.ResolveFresh(ctx, workspaceHint)
-		} else {
-			storeData = storeDataSource.Resolve(ctx, workspaceHint)
-		}
+		storeData := storeDataSource.Resolve(ctx, workspaceHint)
 		agents := mergeStoreAgentsWithRuntime(storeData.Agents, data.Agents, data.AgentTasks)
 		span.SetAttributes(attribute.Int("result.count", len(agents)))
 		writeJSON(w, StatusResponse{
@@ -163,17 +157,6 @@ func HandleStatusWithSources(dataSource *MonitorDataSource, storeDataSource *Mon
 			Timestamp:        data.Timestamp,
 		})
 	}
-}
-
-// requestsFreshData reports whether the client asked the status endpoint to
-// skip cached store metadata via Cache-Control: no-cache.
-func requestsFreshData(r *http.Request) bool {
-	for _, directive := range strings.Split(r.Header.Get("Cache-Control"), ",") {
-		if strings.EqualFold(strings.TrimSpace(directive), "no-cache") {
-			return true
-		}
-	}
-	return false
 }
 
 // HandleAgents returns an HTTP handler for the agents endpoint.

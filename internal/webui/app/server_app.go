@@ -189,6 +189,9 @@ func NewServer(ctx context.Context, config webui.ServerConfig) (_ *Server, retEr
 
 	// Create SSE hub for real-time push notifications
 	app.hub = appstores.NewHub()
+	if invalidate := config.MonitorHandlers.InvalidateWorkspace; invalidate != nil {
+		app.hub.SetMutationObserver(invalidate)
+	}
 	go app.hub.Run()
 	cleanups = append(cleanups, func() { app.hub.Stop() })
 	app.stopLoomGitEvents = appstores.StartLoomGitEvents(ctx, app.hub, config.Logger)

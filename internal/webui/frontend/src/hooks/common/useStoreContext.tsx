@@ -136,8 +136,7 @@ function StoreWiring({
       if (refreshTimer) clearTimeout(refreshTimer);
       refreshTimer = setTimeout(() => {
         refreshTimer = null;
-        // Fresh: the server's monitor cache can predate this mutation.
-        void agentStore.getState().fetchData({ fresh: true });
+        void agentStore.getState().fetchData();
       }, MONITOR_REFRESH_DEBOUNCE_MS);
     };
 

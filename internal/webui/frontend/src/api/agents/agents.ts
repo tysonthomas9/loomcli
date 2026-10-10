@@ -82,32 +82,18 @@ export interface FetchStatusResult {
   timestamp: string;
 }
 
-export interface FetchStatusOptions {
-  /**
-   * Ask the server to skip its cached store metadata (Cache-Control:
-   * no-cache). Used for refreshes triggered by mutation events, which the
-   * server's short-lived cache may predate.
-   */
-  fresh?: boolean;
-}
-
 /**
  * Fetch full status from the loom server.
  * Throws on network errors or invalid responses so callers can handle connection state.
  */
 export async function fetchStatus(
   workspaceId?: string,
-  options?: FetchStatusOptions,
 ): Promise<FetchStatusResult> {
-  const freshHeaders = options?.fresh
-    ? { headers: { "Cache-Control": "no-cache" } }
-    : {};
   if (workspaceId) {
     const d = await get<LoomStatusResponse>(
       wsUrl(workspaceId, "/monitor/status"),
       {
         signal: AbortSignal.timeout(15000),
-        ...freshHeaders,
       },
     );
     return statusResponseToResult(d);
@@ -115,7 +101,6 @@ export async function fetchStatus(
 
   const { data, error, response } = await api.GET("/api/monitor/status", {
     signal: AbortSignal.timeout(15000),
-    ...freshHeaders,
   });
   if (error) throw apiErrorFromResponse(error, response);
   return statusResponseToResult(data! as unknown as LoomStatusResponse);
