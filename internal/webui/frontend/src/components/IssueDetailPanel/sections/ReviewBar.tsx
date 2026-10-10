@@ -708,6 +708,7 @@ export function ReviewBar({
           </label>
           <textarea
             id={`review-reason-${taskId}`}
+            data-testid="review-reason"
             rows={2}
             value={reason}
             onChange={(e) => setReason(e.target.value)}
