@@ -111,4 +111,3 @@ func setupOutsideWorkspaceForPR(t *testing.T) {
 		t.Fatalf("outside workspace resolver error = %v", err)
 	}
 }
-

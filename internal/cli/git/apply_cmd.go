@@ -25,8 +25,8 @@ var applyCmd = &cobra.Command{
 	GroupID: "git",
 	// Plumbing: approve applies; this repairs and tests (S3).
 	Hidden: true,
-	Args:    cobra.ExactArgs(2),
-	RunE:    runApply,
+	Args:   cobra.ExactArgs(2),
+	RunE:   runApply,
 }
 
 func init() {
