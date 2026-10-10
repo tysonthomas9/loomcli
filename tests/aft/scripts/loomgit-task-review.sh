@@ -238,7 +238,7 @@ chain)
 approve-first)
   # approve-first <ws> <slot>: approving B before A waits, with the reason.
   a="$(cat "$work-$3-a")" b="$(cat "$work-$3-b")"
-  verdict "$b" approve ',"approve_only":true' > "$work-approve-b.json"
+  verdict "$b" approve '' > "$work-approve-b.json"
   json "$work-approve-b.json" 'assert v.get("status")=="approved_waiting_for_dependency" and v.get("reason")=="waiting for "+sys.argv[2]+" to be approved", v' "$a"
   test "$(revision_field "$b" follow_status)" = waiting_for_dependency
   test "$(revision_field "$b" follow_reason)" = "waiting for $a to be approved"
@@ -248,8 +248,9 @@ approve-blocker)
   # approve-blocker <ws> <slot>: approving A applies A, then B in order, and
   # closes both.
   a="$(cat "$work-$3-a")" b="$(cat "$work-$3-b")"
-  verdict "$a" approve ',"approve_only":true' > "$work-approve-a.json"
-  grep -q '"status":"applied"' "$work-approve-a.json" || { cat "$work-approve-a.json" >&2; exit 1; }
+  verdict "$a" approve '' > "$work-approve-a.json"
+  # D40: Approve applies and, with a provider, also opens the PR.
+  grep -Eq '"status":"(applied|published)"' "$work-approve-a.json" || { cat "$work-approve-a.json" >&2; exit 1; }
   wait_status "$a" closed False
   wait_field "$b" applied True
   wait_status "$b" closed False
@@ -268,7 +269,7 @@ stale)
   test -z "$(revision_field "$b" rebuild_on)"
   read -r change number sha < <(newest "$b")
   code="$(curl -sS -o "$work-approve-stale.json" -w '%{http_code}' -X POST "$api/changes/$change/revisions/$number/verdict" -H 'Content-Type: application/json' \
-    -d "{\"head_sha\":\"$sha\",\"verdict\":\"approve\",\"approve_only\":true,\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}")"
+    -d "{\"head_sha\":\"$sha\",\"verdict\":\"approve\",\"actor\":{\"kind\":\"human\",\"id\":\"aft-operator\"}}")"
   test "$code" = 409
   json "$work-approve-stale.json" 'assert v["error"]=="stale" and v["message"]=="approve is refused: "+sys.argv[2], v' "$reason"
   wait_status "$b" review True

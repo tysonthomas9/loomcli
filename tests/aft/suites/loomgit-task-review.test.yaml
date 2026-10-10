@@ -168,7 +168,7 @@ tests:
           fn: "(document.querySelector('[data-testid=revision-stale]')?.textContent || '').includes('which was rejected')"
         intent: B's revision says it was built on a rejected revision
       - wait:
-          fn: "[...document.querySelectorAll('[data-testid=task-changes-tab] button')].some(b => b.textContent === 'Approve and create PR' && b.disabled) && !document.querySelector('[data-testid=rebuild]')"
+          fn: "[...document.querySelectorAll('[data-testid=task-changes-tab] button')].some(b => b.textContent === 'Approve code & create PR' && b.disabled) && !document.querySelector('[data-testid=rebuild]')"
         intent: Approve is disabled, and there is no Rebuild until A has a new revision
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-task-review.sh" next-a E2E-WS-TREV stale
         intent: A's next attempt offers B a rebuild on it, and an agent may not Rebuild

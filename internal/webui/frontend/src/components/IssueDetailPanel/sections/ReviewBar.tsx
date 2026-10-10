@@ -15,6 +15,7 @@ import {
   approveRevisionMerge,
   cancelRevisionMerge,
   getTaskRevisions,
+  rebuildTask,
   submitRevisionVerdict,
   approveTask,
   updateIssue,
@@ -214,6 +215,14 @@ export function statusLine(
     return line;
   }
   switch (revision.follow_status) {
+    case "waiting_for_dependency":
+      // Approved before the task it was built on: it applies on its own once
+      // that task's code applies (P1.26).
+      return {
+        tone: "plain",
+        text: "Approved, not applied yet",
+        detail: revision.follow_reason,
+      };
     case "conflict":
       return {
         tone: "warn",
@@ -254,6 +263,9 @@ export function statusLine(
       label: "Retry",
     };
   }
+  // A stale base says why once, with its Rebuild, above the status lines.
+  if (revision.follow_status === "spent" && revision.lineage_state)
+    return { tone: "plain", text: "Approved · not applied" };
   if (revision.follow_status === "spent")
     return {
       tone: "plain",
@@ -472,6 +484,9 @@ export function ReviewBar({
     );
   const incomplete = undecided.some((r) => r.incomplete);
   const disabled = busy || !ready || incomplete;
+  // Built on code of the task it depends on that was rejected or replaced:
+  // Approve is refused until a Rebuild (Reject and Override are not, P1.26).
+  const stale = undecided.some((r) => Boolean(r.lineage_state));
   // An open PR makes the primary approve its merge too (D29); while a merge
   // of the PR is already under way there is nothing to approve here.
   const onPR = undecided.filter((r) => r.pr_number);
@@ -594,6 +609,13 @@ export function ReviewBar({
     });
   }
 
+  // Rebuild a dependent whose base was rejected or replaced (never automatic).
+  function rebuild() {
+    void run(async () => {
+      await rebuildTask(workspaceId, taskId);
+    });
+  }
+
   return (
     <section
       className={styles.bar}
@@ -602,6 +624,48 @@ export function ReviewBar({
     >
       <Header current={shown} diffs={diffs} />
       {shown.map((r) => {
+        const undecidedRevision = statusLine(r, taskStatus) === null;
+        if (r.lineage_state)
+          return (
+            <div
+              key={`stale-${keyOf(r)}`}
+              className={styles.line}
+              data-tone="warn"
+              data-testid="revision-stale"
+              role="status"
+            >
+              <span>
+                {multi && <strong>{r.repo}: </strong>}
+                Out of date: {r.lineage_reason}
+              </span>
+              {r.lineage_state === "stale" && Boolean(r.rebuild_on) && (
+                <button
+                  type="button"
+                  className={styles.primary}
+                  data-testid="rebuild"
+                  disabled={busy}
+                  onClick={rebuild}
+                >
+                  Rebuild on {r.depends_on}&apos;s new code
+                </button>
+              )}
+            </div>
+          );
+        if (r.depends_on && undecidedRevision)
+          return (
+            <div
+              key={`depends-${keyOf(r)}`}
+              className={styles.line}
+              data-tone="plain"
+              data-testid="revision-depends-on"
+            >
+              {multi && <strong>{r.repo}: </strong>}
+              Built on {r.depends_on}&apos;s code before it was reviewed
+            </div>
+          );
+        return null;
+      })}
+      {shown.map((r) => {
         const line = statusLine(r, taskStatus);
         if (!line) return null;
         return (
@@ -609,7 +673,14 @@ export function ReviewBar({
             key={keyOf(r)}
             className={styles.line}
             data-tone={line.tone}
-            data-testid={r.no_changes ? "revision-no-changes" : "review-status"}
+            data-testid={
+              r.no_changes
+                ? "revision-no-changes"
+                : r.follow_status === "waiting_for_dependency" &&
+                    isApproval(r.verdict)
+                  ? "revision-waiting-dependency"
+                  : "review-status"
+            }
             role="status"
           >
             <span>
@@ -688,7 +759,7 @@ export function ReviewBar({
               type="button"
               className={styles.primary}
               data-testid={withPR ? "approve-merge" : "approve-create-pr"}
-              disabled={disabled}
+              disabled={disabled || stale}
               onClick={() => decide("approve")}
             >
               {primary}
