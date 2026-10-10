@@ -1,7 +1,6 @@
-package retention
+package doctor
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"os"
@@ -18,7 +17,7 @@ import (
 	loomretention "github.com/tysonthomas9/loomcli/internal/loomgit/retention"
 )
 
-func TestRetentionCLIDefaultReportsEligibleCloneForRemoval(t *testing.T) {
+func TestDoctorReportsEligibleCloneAndFixRemovesIt(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	source, copyPath, path := filepath.Join(root, "source"), filepath.Join(root, "A"), filepath.Join(root, "store.db")
@@ -66,28 +65,24 @@ func TestRetentionCLIDefaultReportsEligibleCloneForRemoval(t *testing.T) {
 		time.Now().Add(-8*24*time.Hour).UTC().Format(time.RFC3339Nano)); err != nil {
 		t.Fatal(err)
 	}
-	var output bytes.Buffer
-	cmd := *retentionCmd
-	cmd.SetOut(&output)
-	if err := runRetention(ctx, path, false, &cmd); err != nil {
-		t.Fatal(err)
+	report := checkLoomGitRetention(ctx, path, false)
+	if report.Status != StatusWarn || !strings.Contains(report.Summary, "loom doctor --fix") ||
+		!strings.Contains(report.Detail, "remove W "+revision.Change+" "+copyPath+": dry run") {
+		t.Fatalf("doctor report omitted eligible removal: %+v", report)
 	}
-	if !strings.Contains(output.String(), "remove W "+revision.Change+" "+copyPath+": dry run") {
-		t.Fatalf("default report omitted eligible removal: %q", output.String())
+	if _, err := os.Stat(copyPath); err != nil {
+		t.Fatalf("report alone removed the clone: %v", err)
 	}
-	output.Reset()
-	if err := runRetention(ctx, path, true, &cmd); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(output.String(), "remove W "+revision.Change+" "+copyPath) {
-		t.Fatalf("apply report omitted removal: %q", output.String())
+	fixed := checkLoomGitRetention(ctx, path, true)
+	if fixed.Status != StatusPass || !strings.Contains(fixed.Detail, "remove W "+revision.Change+" "+copyPath) {
+		t.Fatalf("doctor --fix omitted removal: %+v", fixed)
 	}
 	if _, err := os.Stat(copyPath); !os.IsNotExist(err) {
 		t.Fatalf("apply retained eligible clone: %v", err)
 	}
 }
 
-func TestRetentionCLIReportsIncompleteCopyWithoutRemovingIt(t *testing.T) {
+func TestDoctorFixKeepsIncompleteCopy(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "store.db")
 	if _, err := loomretention.RunAt(ctx, path, false); err != nil {
@@ -106,13 +101,15 @@ func TestRetentionCLIReportsIncompleteCopyWithoutRemovingIt(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO landed_changes(workspace,change_id) VALUES('W','C')`); err != nil {
 		t.Fatal(err)
 	}
-	var output bytes.Buffer
-	cmd := *retentionCmd
-	cmd.SetOut(&output)
-	if err := runRetention(ctx, path, true, &cmd); err != nil {
-		t.Fatal(err)
+	report := checkLoomGitRetention(ctx, path, true)
+	if !strings.Contains(report.Detail, "keep W C /missing/copy: capture incomplete") {
+		t.Fatalf("unexpected report: %+v", report)
 	}
-	if !strings.Contains(output.String(), "keep W C /missing/copy: capture incomplete") {
-		t.Fatalf("unexpected report: %q", output.String())
+}
+
+func TestDoctorRetentionWithoutAStore(t *testing.T) {
+	report := checkLoomGitRetention(context.Background(), filepath.Join(t.TempDir(), "store.db"), false)
+	if report.Status != StatusPass || report.Summary != "Loom Git retention: no records" {
+		t.Fatalf("report=%+v", report)
 	}
 }

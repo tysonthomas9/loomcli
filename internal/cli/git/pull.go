@@ -26,6 +26,7 @@ var pullCmd = &cobra.Command{
 	Use:               "pull [worktree] [branch]",
 	Short:             "Restack working area onto its recorded trunk",
 	GroupID:           "git",
+	Hidden:            true, // plumbing for tests and repair (S3)
 	ValidArgsFunction: cli.WorktreeThenBranchCompletion,
 	Long: `Pull latest changes from a branch into worktree(s).
 
@@ -108,6 +109,7 @@ var restackCmd = &cobra.Command{
 	Use:     "restack <working-area> <base-sha> [change-id ...]",
 	Short:   "Restack a working area's layers onto an explicit commit",
 	GroupID: "git",
+	Hidden:  true, // plumbing for tests and repair (S3)
 	Args:    cobra.MinimumNArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		workspace, _ := cmd.Flags().GetString("workspace")

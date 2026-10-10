@@ -16,10 +16,8 @@ import {
   gitPull,
   gitSync,
   gitCreatePR,
-  gitMergePreview,
-  gitMergeUpTo,
-  gitMergeRequests,
-  gitConfirmMergeRequest,
+  queueMergeUpTo,
+  fetchMergeQueue,
   gitReset,
   gitResetPreview,
   gitUpdateTarget,
@@ -209,50 +207,20 @@ describe("git API functions", () => {
     });
   });
 
-  describe("gitMergeUpTo", () => {
-    it("previews and submits the exact four confirmed heads", async () => {
-      const preview = {
-        stack_id: "feature",
-        target: "C",
-        backend: "loom",
-        phase: "",
-        layers: [
-          { change: "A", head: "a", pr_url: "", state: "pending" },
-          { change: "B", head: "b", pr_url: "", state: "pending" },
-          { change: "C", head: "c", pr_url: "", state: "pending" },
-          { change: "D", head: "d", pr_url: "", state: "pending" },
-        ],
-      };
-      mockGet.mockResolvedValue(preview);
-      mockPost.mockResolvedValue({ ...preview, phase: "ready" });
-      await gitMergePreview("W", "L", "feature", "C");
-      await gitMergeUpTo("W", "L", preview);
-      expect(mockGet).toHaveBeenCalledWith(
-        "/api/workspaces/W/agents/L/git/merge-up-to?stack_id=feature&target=C",
-      );
+  describe("merge queue", () => {
+    it("queues merge up to a change as the local human", async () => {
+      mockPost.mockResolvedValue({ phase: "ready" });
+      await queueMergeUpTo("W", "C");
       expect(mockPost).toHaveBeenCalledWith(
-        "/api/workspaces/W/agents/L/git/merge-up-to",
-        {
-          stack_id: "feature",
-          target: "C",
-          heads: ["a", "b", "c", "d"],
-          actor: { kind: "human" },
-        },
+        "/api/workspaces/W/changes/C/merge-up-to",
+        { actor: { kind: "human" } },
       );
     });
 
-    it("lists merge requests and confirms one as a human", async () => {
+    it("reads the workspace merge queue", async () => {
       mockGet.mockResolvedValue([]);
-      mockPost.mockResolvedValue({ phase: "ready" });
-      await gitMergeRequests("W", "L");
-      await gitConfirmMergeRequest("W", "L", "R1");
-      expect(mockGet).toHaveBeenCalledWith(
-        "/api/workspaces/W/agents/L/git/merge-requests",
-      );
-      expect(mockPost).toHaveBeenCalledWith(
-        "/api/workspaces/W/agents/L/git/merge-requests/R1/confirm",
-        { actor: { kind: "human" } },
-      );
+      await fetchMergeQueue("W");
+      expect(mockGet).toHaveBeenCalledWith("/api/workspaces/W/git/merge-queue");
     });
   });
 

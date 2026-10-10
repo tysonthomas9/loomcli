@@ -87,9 +87,9 @@ EXAMPLES
   loom task falcon --auto       # Continuous implementation mode
   loom lead                     # Interactive backlog management
   loom monitor                  # Watch agent progress
-  loom push --all               # Push all worktrees to main
-  loom pull --all               # Pull main into all worktrees
-  loom sync                     # Full sync: push all + pull all`,
+  loom approve <task>           # Approve a task's work and apply it
+  loom sync                     # Restack all working areas; never push
+  loom git-settings             # Show delivery, auto-merge and lead approval`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if v, _ := cmd.Flags().GetBool("version"); v {
 			fmt.Printf("loom version %s (%s)\n", Version, Build)

@@ -93,6 +93,8 @@ func nativeMergeAuthority(authority MergeAuthority) (string, string) {
 		return leadMergeAuthority, authority.SetBy
 	case approvedMerge:
 		return humanApprovalAuthority, authority.Approval.ActorID
+	case queuedMerge:
+		return authority.recorded()
 	}
 	return "", ""
 }

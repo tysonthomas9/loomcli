@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 )
 
@@ -57,7 +56,7 @@ func loomMergeLandedThroughB(t *testing.T) (fixture, *mergeForgeFake, []string) 
 	oldProvider := localPublishProvider
 	localPublishProvider = func() (Forge, string, string) { return forge, "fixture-token", "owner/repo" }
 	t.Cleanup(func() { localPublishProvider = oldProvider })
-	if _, err := MergeStackLocal(context.Background(), "W", "L", "feature", "B", heads, tyson); err != nil {
+	if _, err := QueueMergeUpToLocal(context.Background(), "W", "B", tyson); err != nil {
 		t.Fatal(err)
 	}
 	landLoomMergeThroughB(t, item, forge, nil)
@@ -71,16 +70,12 @@ func TestLoomMergeUpToHigherLayerAfterEarlierMergeLanded(t *testing.T) {
 	if err != nil || current.Head == heads[2] {
 		t.Fatalf("C was not restacked: %+v, %v", current, err)
 	}
-	view, err := MergeStackPreviewLocal(ctx, "W", "L", "feature", "C")
+	view, err := MergeUpToViewLocal(ctx, "W", "C")
 	if err != nil || view.Phase != "" || len(view.Layers) != 2 || view.Layers[0].Change != "C" ||
 		view.Layers[0].Head != current.Head || view.Layers[0].State != "pending" {
 		t.Fatalf("view after B landed = %+v, %v", view, err)
 	}
-	request, err := RequestMergeLocal(ctx, "W", "L", "feature", "C", leadL)
-	if err != nil || len(request.Layers) != 1 || request.Layers[0].Change != "C" || request.Layers[0].Head != current.Head {
-		t.Fatalf("request = %+v, %v; want C pinned at %s", request, err, current.Head)
-	}
-	if _, err := ConfirmMergeRequestLocal(ctx, "W", "L", request.ID, tyson); err != nil {
+	if _, err := QueueMergeUpToLocal(ctx, "W", "C", tyson); err != nil {
 		t.Fatal(err)
 	}
 	merge := leadMerge(t, item)
@@ -95,13 +90,9 @@ func TestLoomMergeUpToHigherLayerAfterEarlierMergeLanded(t *testing.T) {
 	}
 }
 
-func TestLoomMergeUpToHigherLayerStillGoesStaleWhenHeadMoves(t *testing.T) {
+func TestLoomMergeUpToHigherLayerRefusedWhenHeadMoves(t *testing.T) {
 	item, _, _ := loomMergeLandedThroughB(t)
 	ctx := context.Background()
-	request, err := RequestMergeLocal(ctx, "W", "L", "feature", "C", leadL)
-	if err != nil {
-		t.Fatal(err)
-	}
 	moved, _, err := item.store.Publication(ctx, "W", "C")
 	if err != nil {
 		t.Fatal(err)
@@ -110,10 +101,12 @@ func TestLoomMergeUpToHigherLayerStillGoesStaleWhenHeadMoves(t *testing.T) {
 		map[string]string{"C": strings.Repeat("c", 40)}); err != nil {
 		t.Fatal(err)
 	}
-	_, err = ConfirmMergeRequestLocal(ctx, "W", "L", request.ID, tyson)
-	requireCode(t, err, loomgit.Stale, "request the merge again")
+	_, err = QueueMergeUpToLocal(ctx, "W", "C", tyson)
+	if err == nil {
+		t.Fatal("queued a merge of C after its head moved away from the provider's")
+	}
 	if merge := leadMerge(t, item); merge.Target != "B" || merge.Phase != "done" {
-		t.Fatalf("stale request started a merge: %+v", merge)
+		t.Fatalf("moved head started a merge: %+v", merge)
 	}
 }
 

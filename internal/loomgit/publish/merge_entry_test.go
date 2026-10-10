@@ -7,7 +7,6 @@ import (
 	"os"
 	"testing"
 
-	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/internal/journal"
 )
 
@@ -47,10 +46,10 @@ func fourLayerMergeEntryFixture(t *testing.T, backend string) (fixture, *mergeFo
 	return item, forge, heads
 }
 
-func TestFourLayerMergeEntryUsesRecordedBackendAndExactHeads(t *testing.T) {
+func TestFourLayerMergeEntryUsesRecordedBackend(t *testing.T) {
 	for _, backend := range []string{"loom", "native"} {
 		t.Run(backend, func(t *testing.T) {
-			item, forge, heads := fourLayerMergeEntryFixture(t, backend)
+			item, forge, _ := fourLayerMergeEntryFixture(t, backend)
 			ctx := context.Background()
 			var mergeForge Forge = forge
 			if backend == "native" {
@@ -59,27 +58,20 @@ func TestFourLayerMergeEntryUsesRecordedBackendAndExactHeads(t *testing.T) {
 			oldProvider := localPublishProvider
 			localPublishProvider = func() (Forge, string, string) { return mergeForge, "fixture-token", "owner/repo" }
 			t.Cleanup(func() { localPublishProvider = oldProvider })
-			view, err := MergeStackPreviewLocal(ctx, "W", "L", "feature", "C")
+			view, err := MergeUpToViewLocal(ctx, "W", "C")
 			if err != nil || len(view.Layers) != 4 || view.Backend != backend {
 				t.Fatalf("preview=%+v err=%v", view, err)
 			}
-			wrong := append([]string(nil), heads...)
-			wrong[2] = "changed"
-			_, err = MergeStackLocal(ctx, "W", "L", "feature", "C", wrong, tyson)
-			var coded *loomgit.Error
-			if !errors.As(err, &coded) || coded.Kind != loomgit.Stale {
-				t.Fatalf("moved head: %v", err)
-			}
-			view, err = MergeStackLocal(ctx, "W", "L", "feature", "C", heads, tyson)
+			view, err = QueueMergeUpToLocal(ctx, "W", "C", tyson)
 			if err != nil || (view.Phase != "ready" && view.Phase != "sent") {
 				t.Fatalf("request=%+v err=%v", view, err)
 			}
-			assertBlockedMergeEntry(t, item, backend, heads)
+			assertBlockedMergeEntry(t, item, backend)
 		})
 	}
 }
 
-func assertBlockedMergeEntry(t *testing.T, item fixture, backend string, heads []string) {
+func assertBlockedMergeEntry(t *testing.T, item fixture, backend string) {
 	t.Helper()
 	ctx := context.Background()
 	if backend == "native" {
@@ -99,16 +91,12 @@ func assertBlockedMergeEntry(t *testing.T, item fixture, backend string, heads [
 			t.Fatal(err)
 		}
 	}
-	view, err := MergeStackPreviewLocal(ctx, "W", "L", "feature", "C")
+	view, err := MergeUpToViewLocal(ctx, "W", "C")
 	if err != nil || view.Phase != "blocked" || view.Reason == "" {
 		t.Fatalf("blocked view=%+v err=%v", view, err)
 	}
 	if backend == "loom" && view.Layers[0].State != "review_required" {
 		t.Fatalf("review state=%+v", view.Layers[0])
-	}
-	view, err = MergeStackLocal(ctx, "W", "L", "feature", "C", heads, tyson)
-	if err != nil || view.Phase != "blocked" {
-		t.Fatalf("replayed blocked request=%+v err=%v", view, err)
 	}
 	if _, err := item.store.NativeMerge(ctx, "W", "missing"); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("missing cursor: %v", err)
@@ -116,7 +104,7 @@ func assertBlockedMergeEntry(t *testing.T, item fixture, backend string, heads [
 	if err := os.Rename(item.repo, item.repo+"-away"); err != nil {
 		t.Fatal(err)
 	}
-	view, err = MergeStackPreviewLocal(ctx, "W", "L", "feature", "C")
+	view, err = MergeUpToViewLocal(ctx, "W", "C")
 	if err != nil || view.Phase != "blocked" || len(view.Layers) != 4 {
 		t.Fatalf("durable view=%+v err=%v", view, err)
 	}

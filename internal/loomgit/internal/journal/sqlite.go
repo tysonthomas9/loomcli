@@ -295,6 +295,19 @@ func (s *SQLite) LeadMergeStacks(ctx context.Context) ([]LeadMergeStack, error) 
 	return stacks, rows.Err()
 }
 
+// StackLead names the lead whose working area last applied a layer of the
+// stack ("" when none has).
+func (s *SQLite) StackLead(ctx context.Context, workspace, stackID string) (string, error) {
+	var lead string
+	err := s.db.QueryRowContext(ctx, `SELECT a.lead FROM applied_layers a JOIN change_publications p
+		ON p.workspace=a.workspace AND p.change_id=a.change_id
+		WHERE p.workspace=? AND p.stack_id=? AND a.phase='done' ORDER BY a.rowid DESC LIMIT 1`, workspace, stackID).Scan(&lead)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return lead, err
+}
+
 // AutoCommit defaults on for workspaces without an explicit setting.
 func (s *SQLite) AutoCommit(ctx context.Context, workspace string) (bool, error) {
 	if workspace == "" {
