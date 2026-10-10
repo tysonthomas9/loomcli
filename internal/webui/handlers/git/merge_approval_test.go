@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -63,5 +64,23 @@ func TestMergeApprovalHTTPRefusesALeadWithConflict(t *testing.T) {
 	response := serveMergeApproval(http.MethodPost, `{"lead":"L","head_sha":"h1","actor":{"kind":"lead","id":"L"}}`)
 	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "only a human") {
 		t.Fatalf("lead approve %d %s", response.Code, response.Body.String())
+	}
+}
+
+// S1 (D38): while Lead may merge is off, the lead's Approve and merge gets the
+// same refusal as `loom merge`; with it on, the lead still cannot approve a merge (D15).
+func TestMergeApprovalHTTPLeadRefusalFollowsLeadMayMerge(t *testing.T) {
+	useGitSettingsStore(t)
+	lead := `{"lead":"L","head_sha":"h1","actor":{"kind":"lead","id":"L"}}`
+	response := serveMergeApproval(http.MethodPost, lead)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "Lead may merge is off") {
+		t.Fatalf("lead approve with Lead may merge off = %d %s", response.Code, response.Body.String())
+	}
+	if code, got := serveGitSettings(t, http.MethodPut, `{"actor":{"kind":"human"},"lead_may_merge":"when_green"}`); code != http.StatusOK || !strings.Contains(fmt.Sprint(got["settings"]), "lead_may_merge:when_green") {
+		t.Fatalf("turn Lead may merge on = %d %v", code, got)
+	}
+	response = serveMergeApproval(http.MethodPost, lead)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "only a human can approve a merge") {
+		t.Fatalf("lead approve with Lead may merge on = %d %s", response.Code, response.Body.String())
 	}
 }

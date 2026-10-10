@@ -82,9 +82,23 @@ func ApproveMergeLocal(ctx context.Context, workspace, lead, change, head string
 	return approveMerge(ctx, store, approvalForge(ctx), workspace, lead, change, head, actor)
 }
 
+// leadMayMergeOffRefusal is D38's refusal while Lead may merge is off, the same
+// text the merge queue's LeadMayMergeOff (P3.16) gives `loom merge`.
+const leadMayMergeOffRefusal = "Lead may merge is off"
+
 func approveMerge(ctx context.Context, store *journal.SQLite, forge mergeApprovalForge,
 	workspace, lead, change, head string, actor MergeActor) (MergeApprovalView, error) {
 	if actor.Kind != "human" || actor.ID == "" || actor.ID == lead {
+		if workspace != "" {
+			policy, err := store.LeadMayMerge(ctx, workspace)
+			if err != nil {
+				return MergeApprovalView{}, err
+			}
+			if policy.Value != "when_green" {
+				// D38: the same refusal and words as `loom merge` while the human has it off.
+				return MergeApprovalView{}, loomgit.NewError(loomgit.MergeNotAuthorized, leadMayMergeOffRefusal, nil)
+			}
+		}
 		// D15/D29 (5): the lead never merges on its own approval.
 		return MergeApprovalView{}, loomgit.NewError(loomgit.MergeNotAuthorized, "only a human can approve a merge", nil)
 	}
