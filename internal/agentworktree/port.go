@@ -47,6 +47,16 @@ func (p Port) Checkpoint(ctx context.Context, s loomagent.WorkspaceSpec, ref str
 	return p.W.Checkpoint(ctx, Spec(s), ref)
 }
 
+// CheckpointDiff implements loomagent.Workspace with Worktrees.CheckpointDiff.
+func (p Port) CheckpointDiff(ctx context.Context, repo, from, to string) (loomagent.CheckpointDiff, error) {
+	return p.W.CheckpointDiff(ctx, repo, from, to)
+}
+
+// DropCheckpoints implements loomagent.Workspace with Worktrees.DropCheckpoints.
+func (p Port) DropCheckpoints(ctx context.Context, repo, prefix string) error {
+	return p.W.DropCheckpoints(ctx, repo, prefix)
+}
+
 // Publish implements loomagent.Workspace; ticket 2.10 completes it.
 func (Port) Publish(context.Context, loomagent.PublishRequest) (loomagent.PublishResult, error) {
 	return loomagent.PublishResult{}, ErrNotImplemented

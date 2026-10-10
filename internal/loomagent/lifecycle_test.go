@@ -185,6 +185,8 @@ func (f *deleteWorkspace) Status(context.Context, WorkspaceSpec) (WorkspaceStatu
 	return f.status, nil
 }
 
+func (f *deleteWorkspace) DropCheckpoints(context.Context, string, string) error { return nil }
+
 func (f *deleteWorkspace) Remove(_ context.Context, s WorkspaceSpec) error {
 	f.removed = append(f.removed, s)
 	return nil

@@ -30,6 +30,7 @@ func TestAgentWireMatchesOpenAPI(t *testing.T) {
 		{SendBody{}, gen.AgentV1SendBody{}}, {SendResult{}, gen.AgentV1SendResult{}},
 		{WithdrawResult{}, gen.AgentV1WithdrawResult{}}, {RespondBody{}, gen.AgentV1RespondBody{}},
 		{Event{}, gen.AgentV1Event{}}, {EventPage{}, gen.AgentV1EventPage{}},
+		{TurnDiff{}, gen.AgentV1TurnDiff{}}, {ChangedFile{}, gen.AgentV1ChangedFile{}},
 		{PermissionRule{}, gen.AgentV1PermissionRule{}}, {Preset{}, gen.AgentV1Preset{}},
 		{PresetList{}, gen.AgentV1PresetList{}}, {Error{}, gen.AgentV1Error{}},
 		{ModelCatalog{}, gen.AgentV1ModelCatalog{}}, {ModelProvider{}, gen.AgentV1ModelProvider{}},

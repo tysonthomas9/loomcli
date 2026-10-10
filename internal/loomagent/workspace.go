@@ -26,6 +26,11 @@ type Workspace interface {
 	// as the commit at ref, unless ref exists already. The branch, index and
 	// log are left as they are.
 	Checkpoint(ctx context.Context, s WorkspaceSpec, ref string) error
+	// CheckpointDiff is the change in repo from checkpoint ref from to ref
+	// to; a ref that does not exist fails with ErrNoCheckpoint.
+	CheckpointDiff(ctx context.Context, repo, from, to string) (CheckpointDiff, error)
+	// DropCheckpoints deletes every ref under prefix in repo.
+	DropCheckpoints(ctx context.Context, repo, prefix string) error
 	// Publish pushes the agent's branch and opens or updates its one PR.
 	Publish(ctx context.Context, req PublishRequest) (PublishResult, error)
 }
@@ -34,6 +39,22 @@ type Workspace interface {
 // holds something its spec does not own, such as a worktree the agent moved
 // to another branch. It lasts until someone fixes the path by hand.
 var ErrWorkspaceNotOwned = errors.New("loomagent: working copy not owned by its spec")
+
+// ErrNoCheckpoint is the CheckpointDiff failure for a ref that does not exist.
+var ErrNoCheckpoint = errors.New("loomagent: no such checkpoint")
+
+// CheckpointDiff is the change between two checkpoints: each file added,
+// modified, deleted or type_changed (no rename detection), and the patch.
+type CheckpointDiff struct {
+	Files []ChangedFile
+	Patch string
+}
+
+// ChangedFile is one path a CheckpointDiff changes.
+type ChangedFile struct {
+	Path   string
+	Status string
+}
 
 // WorkspaceSpec names the working copy an agent needs.
 type WorkspaceSpec struct {

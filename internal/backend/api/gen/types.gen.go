@@ -51,6 +51,30 @@ func (e AgentStatusResponseAgentState) Valid() bool {
 	}
 }
 
+// Defines values for AgentV1ChangedFileStatus.
+const (
+	Added       AgentV1ChangedFileStatus = "added"
+	Deleted     AgentV1ChangedFileStatus = "deleted"
+	Modified    AgentV1ChangedFileStatus = "modified"
+	TypeChanged AgentV1ChangedFileStatus = "type_changed"
+)
+
+// Valid indicates whether the value is a known member of the AgentV1ChangedFileStatus enum.
+func (e AgentV1ChangedFileStatus) Valid() bool {
+	switch e {
+	case Added:
+		return true
+	case Deleted:
+		return true
+	case Modified:
+		return true
+	case TypeChanged:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AgentV1HarnessInfoAccountKind.
 const (
 	ApiKey       AgentV1HarnessInfoAccountKind = "api_key"
@@ -1829,6 +1853,15 @@ type AgentV1AskQuestion struct {
 	Question string `json:"question"`
 }
 
+// AgentV1ChangedFile defines model for AgentV1ChangedFile.
+type AgentV1ChangedFile struct {
+	Path   string                   `json:"path"`
+	Status AgentV1ChangedFileStatus `json:"status"`
+}
+
+// AgentV1ChangedFileStatus defines model for AgentV1ChangedFile.Status.
+type AgentV1ChangedFileStatus string
+
 // AgentV1Completion One child attempt whose task_completed record a message carries.
 type AgentV1Completion struct {
 	Attempt int64  `json:"attempt"`
@@ -2087,6 +2120,15 @@ type AgentV1Subject struct {
 	Id      *string `json:"id,omitempty"`
 	Type    *string `json:"type,omitempty"`
 	Version *string `json:"version,omitempty"`
+}
+
+// AgentV1TurnDiff defines model for AgentV1TurnDiff.
+type AgentV1TurnDiff struct {
+	Files []AgentV1ChangedFile `json:"files"`
+
+	// Patch git diff of the turn, no external diff or textconv
+	Patch string `json:"patch"`
+	Turn  int    `json:"turn"`
 }
 
 // AgentV1UpdateBody Empty fields are unchanged. effort is shorthand for the effort option; options set the model's options by id, keeping the others. Model, effort and options apply from the next turn and are checked against the harness catalog (an unknown model, option or value is a 400 preset_invalid listing the allowed values).

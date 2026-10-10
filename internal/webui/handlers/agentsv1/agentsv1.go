@@ -65,6 +65,7 @@ func (h *Handler) Register(mux *http.ServeMux, workspace middleware.Middleware,
 		"DELETE " + p + "agents/{id}/messages/waiting": withdraw,
 		"POST " + p + "agents/{id}/asks/{askId}":       respond,
 		"GET " + p + "agents/{id}/events":              listEvents,
+		"GET " + p + "agents/{id}/turns/{n}/diff":      turnDiff,
 		"GET " + p + "presets":                         h.listPresets,
 		"GET " + p + "presets/{name}":                  h.getPreset,
 		"GET " + p + "harnesses/{harness}":             h.getHarness,
@@ -261,6 +262,19 @@ func listEvents(_ http.ResponseWriter, r *http.Request, s *loomagent.Service) (i
 	return http.StatusOK, eventPageOut(page), err
 }
 
+func turnDiff(_ http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
+	n, err := strconv.Atoi(r.PathValue("n"))
+	if err != nil {
+		return 0, nil, service.ErrValidation("invalid turn: " + r.PathValue("n"))
+	}
+	d, err := s.TurnDiff(r.Context(), r.PathValue("id"), n)
+	out := TurnDiff{Turn: n, Files: []ChangedFile{}, Patch: d.Patch}
+	for _, f := range d.Files {
+		out.Files = append(out.Files, ChangedFile(f))
+	}
+	return http.StatusOK, out, err
+}
+
 func (h *Handler) listPresets(_ http.ResponseWriter, r *http.Request, s *loomagent.Service) (int, any, error) {
 	ps, err := h.presets.List(r.Context())
 	out := []Preset{}
@@ -291,6 +305,7 @@ var statusOf = map[loomagent.Code]int{
 	loomagent.CodeAgentNotFound:       http.StatusNotFound,
 	loomagent.CodePresetNotFound:      http.StatusNotFound,
 	loomagent.CodeAskNotFound:         http.StatusNotFound,
+	loomagent.CodeTurnNotFound:        http.StatusNotFound,
 	loomagent.CodeAgentNameTaken:      http.StatusConflict,
 	loomagent.CodeAgentArchived:       http.StatusConflict,
 	loomagent.CodeAgentBusy:           http.StatusConflict,

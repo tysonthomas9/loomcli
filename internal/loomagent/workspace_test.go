@@ -81,6 +81,12 @@ func (f *fakeWorkspace) Checkpoint(_ context.Context, _ WorkspaceSpec, ref strin
 	return nil
 }
 
+func (f *fakeWorkspace) CheckpointDiff(context.Context, string, string, string) (CheckpointDiff, error) {
+	return CheckpointDiff{}, nil
+}
+
+func (f *fakeWorkspace) DropCheckpoints(context.Context, string, string) error { return nil }
+
 // setEnsureErr makes every Ensure fail with err; nil restores it.
 func (f *fakeWorkspace) setEnsureErr(err error) {
 	f.mu.Lock()

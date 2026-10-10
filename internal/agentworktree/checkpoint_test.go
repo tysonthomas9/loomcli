@@ -258,3 +258,28 @@ func TestCheckpointNestedRepoLeadingSpace(t *testing.T) {
 		t.Fatalf("turn/1 top level = %q; want only base.txt", got)
 	}
 }
+
+// TestDropCheckpointsOnlyOneAgent: DropCheckpoints refuses any prefix but one
+// agent's checkpoint refs, so a blank agent never drops every ref; a repo
+// that is gone has nothing to drop.
+func TestDropCheckpointsOnlyOneAgent(t *testing.T) {
+	ctx := context.Background()
+	w, s, path := agentTree(t)
+	if err := w.Checkpoint(ctx, s, turn1); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"", "refs/", "refs/heads/", "refs/loom/checkpoints/", "refs/loom/checkpoints/agt_1"} {
+		if err := w.DropCheckpoints(ctx, s.Repo, p); err == nil {
+			t.Errorf("DropCheckpoints(%q) succeeded", p)
+		}
+	}
+	if run(t, path, "rev-parse", "--verify", "--quiet", "refs/heads/main") == "" || tree(t, path, turn1) == "" {
+		t.Fatal("a refused drop deleted refs")
+	}
+	if err := w.DropCheckpoints(ctx, filepath.Join(t.TempDir(), "gone"), "refs/loom/checkpoints/agt_1/"); err != nil {
+		t.Fatalf("drop in a missing repo: %v", err)
+	}
+	if _, err := w.CheckpointDiff(ctx, s.Repo, "refs/heads/main", turn1); err == nil {
+		t.Fatal("CheckpointDiff accepted a branch")
+	}
+}

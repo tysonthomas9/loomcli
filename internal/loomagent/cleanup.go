@@ -55,7 +55,8 @@ func (s *Service) mine(ctx context.Context, id string, now time.Time,
 	return a, ok, err
 }
 
-// expire purges id's recorded native sessions, then marks its history purged.
+// expire purges id's recorded native sessions and checkpoint refs, then
+// marks its history purged.
 func (s *Service) expire(ctx context.Context, id string, now time.Time) error {
 	defer s.lock(id)()
 	a, ok, err := s.mine(ctx, id, now, s.store.Due)
@@ -66,7 +67,7 @@ func (s *Service) expire(ctx context.Context, id string, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	if err := s.purge(ctx, a, owned); err != nil {
+	if err := errors.Join(s.purge(ctx, a, owned), s.dropCheckpoints(ctx, a)); err != nil {
 		return errors.Join(err, s.store.MarkPurgeFailed(ctx, id, now))
 	}
 	if err := s.store.MarkHistoryPurged(ctx, id, now); err != nil && !errors.Is(err, loomstore.ErrNotDue) {
