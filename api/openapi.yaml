@@ -3690,66 +3690,6 @@ paths:
                     type: string
                   message:
                     type: string
-  /api/workspaces/{ws}/changes/{change}/revisions/{r}/verdict:
-    post:
-      operationId: submitRevisionVerdict
-      tags: [git]
-      summary: Record a verdict for an exact revision head
-      parameters:
-        - $ref: "#/components/parameters/WorkspaceId"
-        - name: change
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: r
-          in: path
-          required: true
-          schema:
-            type: integer
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [head_sha, verdict, actor]
-              properties:
-                head_sha:
-                  type: string
-                verdict:
-                  type: string
-                  enum: [approve, reject, override]
-                reason:
-                  type: string
-                lead:
-                  type: string
-                merge:
-                  type: boolean
-                  description: Approve and merge for a task whose PR is already open and whose newest version needs approving again. Human only; the merge is approved at this revision's head and waits for the PR to carry it (D29).
-                actor:
-                  type: object
-                  required: [kind, id]
-                  properties:
-                    kind:
-                      type: string
-                      enum: [human, agent, lead]
-                    id:
-                      type: string
-      responses:
-        "200":
-          description: Recorded SHA-bound verdict. `status` is published when the PR opened; `publish` reports the PR outcome (published, not_published with the reason, waiting, pending).
-          content:
-            application/json:
-              schema:
-                type: object
-        "409":
-          description: Loom refused the verdict and recorded nothing. `error` is the stable code (for example review_required or stale_subject) and `message` the reason (for example "lead approval policy is off").
-          content:
-            application/json:
-              schema:
-                type: object
-
   /api/workspaces/{ws}/issues/{id}/approval:
     post:
       operationId: approveTask
@@ -3820,6 +3760,66 @@ paths:
             task still without a PR), no_working_area (several repos and the
             lead has no working area for one of them, named in `repo`; nothing
             is recorded), or publish_failed.
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/workspaces/{ws}/changes/{change}/revisions/{r}/verdict:
+    post:
+      operationId: submitRevisionVerdict
+      tags: [git]
+      summary: Record a verdict for an exact revision head
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: change
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: r
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [head_sha, verdict, actor]
+              properties:
+                head_sha:
+                  type: string
+                verdict:
+                  type: string
+                  enum: [approve, reject, override]
+                reason:
+                  type: string
+                lead:
+                  type: string
+                merge:
+                  type: boolean
+                  description: Approve and merge for a task whose PR is already open and whose newest version needs approving again. Human only; the merge is approved at this revision's head and waits for the PR to carry it (D29).
+                actor:
+                  type: object
+                  required: [kind, id]
+                  properties:
+                    kind:
+                      type: string
+                      enum: [human, agent, lead]
+                    id:
+                      type: string
+      responses:
+        "200":
+          description: Recorded SHA-bound verdict. `status` is published when the PR opened; `publish` reports the PR outcome (published, not_published with the reason, waiting, pending).
+          content:
+            application/json:
+              schema:
+                type: object
+        "409":
+          description: Loom refused the verdict and recorded nothing. `error` is the stable code (for example review_required or stale_subject) and `message` the reason (for example "lead approval policy is off").
           content:
             application/json:
               schema:

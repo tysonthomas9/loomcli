@@ -1871,23 +1871,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/workspaces/{ws}/changes/{change}/revisions/{r}/verdict": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** Record a verdict for an exact revision head */
-    post: operations["submitRevisionVerdict"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/workspaces/{ws}/issues/{id}/approval": {
     parameters: {
       query?: never;
@@ -1902,6 +1885,23 @@ export interface paths {
      * @description Records each repo's approval, applies them all, and opens the PRs only when every repo applied. If any repo does not apply, no repo is published and the reply names that repo (P2.23). A repo that applied stays applied in the lead's working area with no PR until the task is approved again.
      */
     post: operations["approveTask"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/workspaces/{ws}/changes/{change}/revisions/{r}/verdict": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Record a verdict for an exact revision head */
+    post: operations["submitRevisionVerdict"];
     delete?: never;
     options?: never;
     head?: never;
@@ -8227,57 +8227,6 @@ export interface operations {
       };
     };
   };
-  submitRevisionVerdict: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Workspace identifier */
-        ws: components["parameters"]["WorkspaceId"];
-        change: string;
-        r: number;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": {
-          head_sha: string;
-          /** @enum {string} */
-          verdict: "approve" | "reject" | "override";
-          reason?: string;
-          lead?: string;
-          /** @description Approve and merge for a task whose PR is already open and whose newest version needs approving again. Human only; the merge is approved at this revision's head and waits for the PR to carry it (D29). */
-          merge?: boolean;
-          actor: {
-            /** @enum {string} */
-            kind: "human" | "agent" | "lead";
-            id: string;
-          };
-        };
-      };
-    };
-    responses: {
-      /** @description Recorded SHA-bound verdict. `status` is published when the PR opened; `publish` reports the PR outcome (published, not_published with the reason, waiting, pending). */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": Record<string, never>;
-        };
-      };
-      /** @description Loom refused the verdict and recorded nothing. `error` is the stable code (for example review_required or stale_subject) and `message` the reason (for example "lead approval policy is off"). */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": Record<string, never>;
-        };
-      };
-    };
-  };
   approveTask: {
     parameters: {
       query?: never;
@@ -8321,6 +8270,57 @@ export interface operations {
         };
       };
       /** @description not_all_applied (the approvals are recorded, no repo is published, and `repo` and `message` name the repo that did not apply), stale_revision, missing_repo (the request leaves out a repo of the task still without a PR), no_working_area (several repos and the lead has no working area for one of them, named in `repo`; nothing is recorded), or publish_failed. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": Record<string, never>;
+        };
+      };
+    };
+  };
+  submitRevisionVerdict: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        change: string;
+        r: number;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          head_sha: string;
+          /** @enum {string} */
+          verdict: "approve" | "reject" | "override";
+          reason?: string;
+          lead?: string;
+          /** @description Approve and merge for a task whose PR is already open and whose newest version needs approving again. Human only; the merge is approved at this revision's head and waits for the PR to carry it (D29). */
+          merge?: boolean;
+          actor: {
+            /** @enum {string} */
+            kind: "human" | "agent" | "lead";
+            id: string;
+          };
+        };
+      };
+    };
+    responses: {
+      /** @description Recorded SHA-bound verdict. `status` is published when the PR opened; `publish` reports the PR outcome (published, not_published with the reason, waiting, pending). */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": Record<string, never>;
+        };
+      };
+      /** @description Loom refused the verdict and recorded nothing. `error` is the stable code (for example review_required or stale_subject) and `message` the reason (for example "lead approval policy is off"). */
       409: {
         headers: {
           [name: string]: unknown;
