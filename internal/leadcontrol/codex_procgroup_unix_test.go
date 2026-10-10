@@ -81,7 +81,8 @@ func TestStopCodexAppServerStopsAChildThatOutlivesTheLauncher(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "codex")
 	childPIDFile := filepath.Join(dir, "child.pid")
-	script := "#!/bin/sh\n/bin/sh -c 'trap \"\" TERM; while :; do sleep 1; done' &\necho $! > " + childPIDFile + "\nwait\n"
+	// The child reports its pid only once it ignores SIGTERM.
+	script := "#!/bin/sh\n/bin/sh -c 'trap \"\" TERM; echo $$ > " + childPIDFile + "; while :; do sleep 1; done' &\nwait\n"
 	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
