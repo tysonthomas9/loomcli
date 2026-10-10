@@ -16,6 +16,11 @@ import styles from "./NavRail.module.css";
 /** Aether wireframe pin 5: ~5 workspace dots visible, then scroll. */
 export const WORKSPACE_SWITCHER_LIST_MAX_HEIGHT_PX = 210;
 
+/** One avatar plus the gap after it, as laid out in NavRail.module.css. */
+const SWITCHER_ITEM_PITCH_PX = 41;
+/** The switcher slot width that fits two 44px chevron buttons and an item. */
+const CHEVRON_BUTTONS_MIN_SLOT_PX = 126;
+
 export interface NavRailWorkspace {
   id: string;
   name: string;
@@ -288,6 +293,26 @@ export function NavRail({
   const activeWorkspaceRef = useRef<HTMLButtonElement>(null);
   const workspaceListRef = useRef<HTMLDivElement>(null);
   const switcherRef = useRef<HTMLElement>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
+  const chevronRefs = {
+    left: useRef<HTMLButtonElement>(null),
+    right: useRef<HTMLButtonElement>(null),
+  };
+  // The chevron to focus once the one the keyboard pressed goes away.
+  const refocusChevron = useRef<"left" | "right" | null>(null);
+
+  const hasAdd = Boolean(onAddWorkspace);
+  // Which ends of the sideways (mobile) switcher have workspaces scrolled out
+  // of view, so the rail can hint at them, and whether its slot has room for
+  // the hints to be 44px buttons.
+  const [more, setMore] = useState({
+    left: false,
+    right: false,
+    buttons: false,
+  });
+  // Keyed on the workspaces' ids, not the array: App passes a new array each
+  // render, and re-running would undo the user's own scrolling.
+  const workspaceIds = workspaces?.map((w) => w.id).join("\n");
 
   // Keep the active workspace in view (like block: "nearest") by scrolling the
   // list itself. scrollIntoView would also move the browser's Tab starting
@@ -308,20 +333,20 @@ export function NavRail({
     if (b.left - 6 < w.left) switcher.scrollLeft -= w.left - b.left + 6;
     else if (b.right + 6 > w.right)
       switcher.scrollLeft += b.right - w.right + 6;
-  }, [activeWorkspaceId, workspaces]);
+  }, [activeWorkspaceId, workspaceIds, more.buttons]);
 
-  const hasAdd = Boolean(onAddWorkspace);
-  // Which ends of the sideways (mobile) switcher have workspaces scrolled out
-  // of view, so the rail can hint at them.
-  const [more, setMore] = useState({ left: false, right: false });
   const updateMore = useCallback(() => {
     const s = switcherRef.current;
     if (!s) return;
     // Within the 4px padding nothing is hidden (a snap can stop there).
     const left = s.scrollLeft > 4;
     const right = s.scrollLeft + s.clientWidth < s.scrollWidth - 4;
+    const buttons =
+      (frameRef.current?.clientWidth ?? 0) >= CHEVRON_BUTTONS_MIN_SLOT_PX;
     setMore((m) =>
-      m.left === left && m.right === right ? m : { left, right },
+      m.left === left && m.right === right && m.buttons === buttons
+        ? m
+        : { left, right, buttons },
     );
   }, []);
   useEffect(() => {
@@ -330,8 +355,60 @@ export function NavRail({
     if (!s || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(updateMore);
     ro.observe(s);
+    if (frameRef.current) ro.observe(frameRef.current);
     return () => ro.disconnect();
   }, [updateMore, workspaces, hasAdd]);
+  useEffect(() => {
+    const side = refocusChevron.current;
+    refocusChevron.current = null;
+    if (side) chevronRefs[side].current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [more]);
+
+  const scrollByItem = (side: "left" | "right", focused: boolean) => {
+    const s = switcherRef.current;
+    if (!s) return;
+    s.scrollBy({
+      left: side === "left" ? -SWITCHER_ITEM_PITCH_PX : SWITCHER_ITEM_PITCH_PX,
+    });
+    updateMore();
+    // At the end this chevron goes away: keep the keyboard on the other one.
+    const end =
+      side === "left"
+        ? s.scrollLeft <= 4
+        : s.scrollLeft + s.clientWidth >= s.scrollWidth - 4;
+    if (focused && end)
+      refocusChevron.current = side === "left" ? "right" : "left";
+  };
+
+  const renderChevron = (side: "left" | "right") => {
+    if (!more[side]) return null;
+    const glyph = side === "left" ? "‹" : "›";
+    if (!more.buttons)
+      return (
+        <span
+          className={styles.moreHint}
+          data-more-hint={side}
+          aria-hidden="true"
+        >
+          {glyph}
+        </span>
+      );
+    return (
+      <button
+        ref={chevronRefs[side]}
+        type="button"
+        className={styles.moreHint}
+        data-more-hint={side}
+        aria-label={`Scroll workspaces ${side}`}
+        onClick={(e) =>
+          scrollByItem(side, document.activeElement === e.currentTarget)
+        }
+      >
+        {glyph}
+      </button>
+    );
+  };
 
   const renderButton = (item: NavItem) => {
     const isActive = (item.activeForViews ?? [item.id]).includes(activeView);
@@ -416,16 +493,12 @@ export function NavRail({
       {hasWorkspaceAvatars && (
         <>
           <div className={styles.wsDivider} aria-hidden="true" />
-          <div className={styles.switcherFrame}>
-            {more.left && (
-              <span
-                className={styles.moreHint}
-                data-more-hint="left"
-                aria-hidden="true"
-              >
-                ‹
-              </span>
-            )}
+          <div
+            ref={frameRef}
+            className={styles.switcherFrame}
+            data-chevrons={more.buttons ? "buttons" : undefined}
+          >
+            {renderChevron("left")}
             <section
               ref={switcherRef}
               className={styles.workspaceSwitcher}
@@ -479,15 +552,7 @@ export function NavRail({
                 </CompactRailHost>
               )}
             </section>
-            {more.right && (
-              <span
-                className={styles.moreHint}
-                data-more-hint="right"
-                aria-hidden="true"
-              >
-                ›
-              </span>
-            )}
+            {renderChevron("right")}
           </div>
           <div className={styles.wsDivider} aria-hidden="true" />
         </>

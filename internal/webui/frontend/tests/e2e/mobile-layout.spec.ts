@@ -305,6 +305,31 @@ function switcherView(page: Page) {
         )
         .map((m) => `${h.dataset.moreHint} hint over ${m.label}`);
     });
+    // MB1c: a hint is either a 44px button clear of every other button's tap
+    // area, or lets taps through to whatever is under it.
+    const buttons = Array.from(nav.querySelectorAll("button"));
+    for (const h of hints) {
+      const r = h.getBoundingClientRect();
+      const side = h.dataset.moreHint;
+      if (h.tagName !== "BUTTON") {
+        const top = document.elementFromPoint(
+          r.left + r.width / 2,
+          r.top + r.height / 2,
+        );
+        if (top && h.contains(top)) covered.push(`${side} hint takes taps`);
+        continue;
+      }
+      if (r.width < 43.5 || r.height < 43.5)
+        covered.push(`${side} button is ${r.width}x${r.height}`);
+      for (const b of buttons) {
+        if (b === h) continue;
+        const o = b.getBoundingClientRect();
+        const left = s.contains(b) ? Math.max(o.left, w.left) : o.left;
+        const right = s.contains(b) ? Math.min(o.right, w.right) : o.right;
+        if (r.left < right - 0.5 && r.right > left + 0.5)
+          covered.push(`${side} button over ${b.getAttribute("aria-label")}`);
+      }
+    }
     return {
       covered,
       scrollLeft: s.scrollLeft,
@@ -319,6 +344,7 @@ function switcherView(page: Page) {
 // 360: a small phone, the switcher's slot is narrower than one item and its
 // padding. 470: two items show with more off-screen.
 for (const size of [
+  { width: 320, height: 640 },
   { width: 360, height: 800 },
   { width: 390, height: 844 },
   { width: 470, height: 844 },
@@ -385,8 +411,22 @@ for (const size of [
     });
     expect(overlaps, "rail buttons under the switcher").toEqual([]);
 
-    // As loaded, with the open workspace scrolled into view.
+    // As loaded, with the open workspace scrolled into view, its 4px ring
+    // (and the same-size focus ring) not clipped (MB1c).
     await settled("as loaded");
+    const sw = (await switcher.boundingBox())!;
+    const active = (await switcher
+      .getByRole("button", { name: "Switch to LOCALMODE" })
+      .boundingBox())!;
+    expect(active.x - 4, "ring cut on the left").toBeGreaterThanOrEqual(sw.x);
+    expect(
+      active.x + active.width + 4,
+      "ring cut on the right",
+    ).toBeLessThanOrEqual(sw.x + sw.width);
+    expect(active.y - 4, "ring cut on top").toBeGreaterThanOrEqual(sw.y);
+    expect(active.y + active.height + 4, "ring cut below").toBeLessThanOrEqual(
+      sw.y + sw.height,
+    );
 
     // Wherever a scroll leaves it (odd offsets included), once it settles no
     // avatar or Add is partly shown, and each side with hidden items says so.
@@ -400,6 +440,41 @@ for (const size of [
     if (size.width < 557) expect(max).toBeGreaterThan(0);
   });
 }
+
+// MB1c: where the slot has room, the chevrons are buttons that scroll the
+// switcher one item at a time, so a mouse or keyboard can reach every
+// workspace without swiping.
+test("switcher at 557px: the chevrons scroll one item at a time", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 557, height: 844 });
+  await open(page);
+  const rail = page.locator('nav[aria-label="Primary"]');
+  const switcher = rail.getByRole("region", { name: "Workspace selector" });
+  const left = rail.getByRole("button", { name: "Scroll workspaces left" });
+  const right = rail.getByRole("button", { name: "Scroll workspaces right" });
+  const at = () => switcher.evaluate((s) => s.scrollLeft);
+  await switcher.evaluate((s) => s.scrollTo({ left: 0 }));
+  await expect(right).toBeVisible();
+  await expect(left).toHaveCount(0);
+  const max = await switcher.evaluate((s) => s.scrollWidth - s.clientWidth);
+  expect(max).toBeGreaterThan(41);
+  for (let x = 41; x <= max; x += 41) {
+    await right.click();
+    await expect.poll(at).toBe(x);
+  }
+  await expect(right).toHaveCount(0);
+  // The keyboard keeps its place when its chevron goes away at the end.
+  await switcher.evaluate((s, left) => s.scrollTo({ left }), max - 41);
+  await right.focus();
+  await page.keyboard.press("Enter");
+  await expect.poll(at).toBe(max);
+  await expect(left).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect.poll(at).toBe(max - 41);
+  if (process.env.MB1C_SHOTS)
+    await page.screenshot({ path: `${process.env.MB1C_SHOTS}/mb1c-557.png` });
+});
 
 // MOB2: on a phone the sidebar is hidden, so the bottom rail's Agents button
 // opens the same agent list as a drawer (MOB2_SHOTS=<dir> saves screenshots).

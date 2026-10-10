@@ -499,6 +499,46 @@ describe("NavRail", () => {
       });
     });
 
+    // App rebuilds the workspaces array on every render: a new array with the
+    // same workspaces must not scroll the switcher back to the active one
+    // after the user scrolled it (MB1c).
+    it("does not re-scroll for a new array of the same workspaces", () => {
+      const set = vi.fn();
+      const saved = Object.getOwnPropertyDescriptor(
+        Element.prototype,
+        "scrollLeft",
+      )!;
+      Object.defineProperty(Element.prototype, "scrollLeft", {
+        configurable: true,
+        get: () => 0,
+        set,
+      });
+      const props = {
+        activeView: "kanban" as const,
+        onChange: () => {},
+        activeWorkspaceId: "ws-7",
+      };
+      try {
+        const { rerender } = render(
+          <NavRail {...props} workspaces={manyWorkspaces} />,
+        );
+        // jsdom's zero rects read as "active is cut on the left".
+        expect(set).toHaveBeenCalled();
+        set.mockClear();
+        rerender(<NavRail {...props} workspaces={[...manyWorkspaces]} />);
+        expect(set).not.toHaveBeenCalled();
+        rerender(
+          <NavRail
+            {...props}
+            workspaces={[...manyWorkspaces, { id: "ws-8", name: "New" }]}
+          />,
+        );
+        expect(set).toHaveBeenCalled();
+      } finally {
+        Object.defineProperty(Element.prototype, "scrollLeft", saved);
+      }
+    });
+
     it("renders workspace selector with dividers and pinned add button", () => {
       render(
         <NavRail
