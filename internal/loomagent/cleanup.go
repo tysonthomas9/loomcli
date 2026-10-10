@@ -67,7 +67,10 @@ func (s *Service) expire(ctx context.Context, id string, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	if err := errors.Join(s.purge(ctx, a, owned), s.dropCheckpoints(ctx, a)); err != nil {
+	if err := s.purge(ctx, a, owned); err != nil {
+		return errors.Join(err, s.store.MarkPurgeFailed(ctx, id, now))
+	}
+	if err := s.dropCheckpoints(ctx, a); err != nil {
 		return errors.Join(err, s.store.MarkPurgeFailed(ctx, id, now))
 	}
 	if err := s.store.MarkHistoryPurged(ctx, id, now); err != nil && !errors.Is(err, loomstore.ErrNotDue) {

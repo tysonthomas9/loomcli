@@ -280,3 +280,40 @@ func TestDeletePurgesHistoryImmediately(t *testing.T) {
 		t.Fatalf("after Delete: deleted %v purged %v events %d", a.DeletedAt, a.HistoryPurgedAt, len(page.Events))
 	}
 }
+
+// TestHistoryPurgeKeepsCheckpointsUntilNativePurge: a failed native purge
+// leaves the history and its checkpoint refs; the retry drops them both.
+func TestHistoryPurgeKeepsCheckpointsUntilNativePurge(t *testing.T) {
+	ctx := context.Background()
+	h := fake.New()
+	ws := &fakeWorkspace{refs: map[string]string{checkpointRef("i1", 1): "t"}}
+	s := newService(t, ServiceConfig{Workspace: ws, Harnesses: map[string]loomharness.Harness{"fake": h}}, expiring("i1", false))
+	own(t, s, h, "i1", "/r")
+	h.FailPurge(errors.New("delete failed"))
+	s.RetentionSweep(ctx, day0.Add(30*day))
+	if _, ok := ws.checkpoint(checkpointRef("i1", 1)); !ok {
+		t.Fatal("a failed native purge dropped the checkpoint refs")
+	}
+	h.FailPurge(nil)
+	s.RetentionSweep(ctx, day0.Add(31*day))
+	if _, ok := ws.checkpoint(checkpointRef("i1", 1)); ok || s.get(t, "i1").HistoryPurgedAt == nil {
+		t.Fatal("the retry did not drop the checkpoint refs")
+	}
+}
+
+// TestDeleteDropsCheckpointsOfRemovedRepo: a repo the resolver refuses (its
+// clone removed) still gets its refs dropped at the recorded path, so Delete
+// finishes.
+func TestDeleteDropsCheckpointsOfRemovedRepo(t *testing.T) {
+	ctx := context.Background()
+	ws := &fakeWorkspace{}
+	s := newService(t, ServiceConfig{Workspace: ws, Harnesses: map[string]loomharness.Harness{"fake": fake.New()},
+		ResolveRepo: func(context.Context, Target, string) (string, error) { return "", errors.New("not a repo clone") }},
+		svcAgent("a1", "persistent", StateIdle))
+	if err := s.Delete(ctx, DeleteRequest{AgentID: "a1"}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(ws.dropped, []string{"/repo"}) {
+		t.Fatalf("dropped in %v; want /repo", ws.dropped)
+	}
+}

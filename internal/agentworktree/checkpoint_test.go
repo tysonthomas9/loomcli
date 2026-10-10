@@ -2,6 +2,7 @@ package agentworktree
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -268,7 +269,8 @@ func TestDropCheckpointsOnlyOneAgent(t *testing.T) {
 	if err := w.Checkpoint(ctx, s, turn1); err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range []string{"", "refs/", "refs/heads/", "refs/loom/checkpoints/", "refs/loom/checkpoints/agt_1"} {
+	for _, p := range []string{"", "refs/", "refs/heads/", "refs/loom/checkpoints/", "refs/loom/checkpoints/agt_1",
+		"refs/loom/checkpoints/*/", "refs/loom/checkpoints/a/b/"} {
 		if err := w.DropCheckpoints(ctx, s.Repo, p); err == nil {
 			t.Errorf("DropCheckpoints(%q) succeeded", p)
 		}
@@ -281,5 +283,8 @@ func TestDropCheckpointsOnlyOneAgent(t *testing.T) {
 	}
 	if _, err := w.CheckpointDiff(ctx, s.Repo, "refs/heads/main", turn1); err == nil {
 		t.Fatal("CheckpointDiff accepted a branch")
+	}
+	if _, err := w.CheckpointDiff(ctx, t.TempDir(), turn1, turn1); err == nil || errors.Is(err, loomagent.ErrNoCheckpoint) {
+		t.Fatalf("CheckpointDiff outside a repo = %v; want a git failure, not ErrNoCheckpoint", err)
 	}
 }

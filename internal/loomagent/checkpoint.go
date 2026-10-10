@@ -76,14 +76,15 @@ func (s *Service) TurnDiff(ctx context.Context, agentID string, n int) (Checkpoi
 }
 
 // dropCheckpoints deletes every checkpoint ref of a, for Delete and the
-// history purge.
+// history purge. A repo the resolver refuses, such as a removed clone, is
+// dropped at its recorded path, where the Workspace finds nothing to drop.
 func (s *Service) dropCheckpoints(ctx context.Context, a loomstore.Agent) error {
 	if s.workspace == nil || a.Repo == "" {
 		return nil
 	}
 	repo, err := s.repoPath(ctx, a.Repo)
 	if err != nil {
-		return err
+		repo = a.Repo
 	}
 	return s.workspace.DropCheckpoints(ctx, repo, "refs/loom/checkpoints/"+a.AgentID+"/")
 }
