@@ -175,7 +175,8 @@ tests:
           for kid in (a, b):
               n = sum(1 for e in dl if (e.get("payload") or {}).get("sender") == "agent:" + kid)
               assert n == 1, "%s's record was delivered to the lead %d times; want 1" % (kid, n)
-          reqs = [r.get("messages", []) for r in json.load(open(d + "/b1-requests.json"))["requests"]]
+          title = lambda r: any("You are a title generator" in json.dumps(m.get("content")) for m in r.get("messages", []) if m.get("role") == "system")
+          reqs = [r.get("messages", []) for r in json.load(open(d + "/b1-requests.json"))["requests"] if not title(r)]
           last = lambda m: json.dumps(m[-1].get("content")) if m and m[-1].get("role") == "user" else ""
           # No child input is sent again: each brief opened one model request.
           for brief in ("AGV1-B1-BRIEF-A", "AGV1-B1-BRIEF-B"):
@@ -340,7 +341,8 @@ tests:
           for i in $(seq 1 120); do
             curl -sf "$api/$kid" | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin)["state"] == "active" else 1)' &&
               curl -sf "$AFT_FAKE_MODEL_URL/__requests" | python3 -c 'import json,sys; d=json.load(sys.stdin)
-          n = sum(1 for r in d["requests"] if r.get("messages") and r["messages"][-1].get("role") == "user" and "AGV1-B2P-BRIEF" in json.dumps(r["messages"][-1].get("content")))
+          title = lambda r: any("You are a title generator" in json.dumps(m.get("content")) for m in r.get("messages", []) if m.get("role") == "system")
+          n = sum(1 for r in d["requests"] if not title(r) and r.get("messages") and r["messages"][-1].get("role") == "user" and "AGV1-B2P-BRIEF" in json.dumps(r["messages"][-1].get("content")))
           sys.exit(0 if n == 1 and d["queued"] == 1 else 1)' && break
             sleep 0.5
           done
@@ -388,15 +390,22 @@ tests:
             sleep 0.5
           done
           [ "$i" -lt 120 ]
-          # Settle: the request log and the child stay unchanged for 3 s, so a
-          # late record or hand-over would have shown by now.
-          prev=""
-          for i in $(seq 1 60); do
-            cur="$(curl -sf "$AFT_FAKE_MODEL_URL/__requests" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["requests"]))'):$(curl -sf "$api/$kid" | python3 -c 'import json,sys; a=json.load(sys.stdin); print(a["state"], a.get("attention_reason"), a.get("updated_at"))')"
-            [ "$cur" = "$prev" ] && break
-            prev="$cur"; sleep 3
+          # Settle on the run's own store (read only): the attempt's completion
+          # marker is processed (dropped, as its parent is deleted), and the
+          # deleted Lead holds no task_completed record. Then
+          # wait out one resync interval (5 s) so a late hand-over would show.
+          db="$AFT_LOOM_CONFIG_DIR/agents.db"
+          q() { sqlite3 -readonly "$db" "$1"; }
+          for i in $(seq 1 120); do
+            [ "$(q "SELECT count(*) FROM agent_completion_markers WHERE child_agent_id = '$kid'")" = 0 ] && break
+            sleep 0.5
           done
-          [ "$i" -lt 60 ]
+          [ "$i" -lt 120 ] || { echo "the child's completion marker was never processed"; exit 1; }
+          sleep 6
+          [ "$(q "SELECT count(*) FROM agent_completion_markers WHERE child_agent_id = '$kid' OR parent_agent_id = '$lead'")" = 0 ] ||
+            { echo "a completion marker is still owed"; exit 1; }
+          [ "$(q "SELECT count(*) FROM agent_events WHERE agent_id = '$lead' AND kind = 'task_completed'")" = 0 ] ||
+            { echo "the deleted Lead has task_completed records"; exit 1; }
           curl -sf "$api/$kid" > "$AFT_WORK_DIR/b2p-kid.json"
           curl -sf "$AFT_FAKE_MODEL_URL/__requests" > "$AFT_WORK_DIR/b2p-requests.json"
           python3 - "$kid" "$AFT_WORK_DIR" <<'PY'
@@ -414,4 +423,4 @@ tests:
               "model requests after the Lead's Delete: %r; want only the child's next attempt" % [json.dumps(r["messages"][-1])[:200] for r in new]
           assert "task_completed:" not in json.dumps(all_reqs[int(open(d + "/b2p-before").read()):]), "a completion was handed to a model after the Lead's Delete"
           PY
-        intent: "Once the Lead is idle, Delete it: it reads deleted and its child stays; the child's next attempt finishes completed with no Attention, and its completion reaches no model"
+        intent: "Once the Lead is idle, Delete it: it reads deleted and its child stays; the child's next attempt finishes completed with no Attention, no completion marker is left, the deleted Lead saves no record, and the completion reaches no model"

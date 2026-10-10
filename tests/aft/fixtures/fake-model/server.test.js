@@ -82,7 +82,7 @@ test("an error step answers 400 with an OpenAI error", async (t) => {
   assert.equal((await (await fetch(base + "/__requests")).json()).queued, 0);
 });
 
-test("a gated step waits until its gate opens; reset answers what still waits", async (t) => {
+test("a gated step waits until its gate opens; reset answers what still waits", { timeout: 10000 }, async (t) => {
   const { base, post, chat } = await start(t);
   const held = async () => (await (await fetch(base + "/__held")).json()).held;
   const until = async (n) => {
