@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,10 +24,15 @@ type openRec struct {
 	loomharness.Harness
 	specs []loomharness.OpenSpec
 	root  string
+	hang  atomic.Bool // Open takes the call and never answers, as a frozen harness does
 }
 
 func (o *openRec) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharness.NativeRef, error) {
 	o.specs = append(o.specs, spec)
+	if o.hang.Load() {
+		<-ctx.Done()
+		return loomharness.NativeRef{}, ctx.Err()
+	}
 	ref, err := o.Harness.Open(ctx, spec)
 	if o.root != "" {
 		ref.Root = o.root
