@@ -11,6 +11,10 @@ func startInOwnProcessGroup(*exec.Cmd) {}
 
 func killProcessGroup(int) error { return nil }
 
+func recordCodexAppServer(string, int) error { return nil }
+
+func forgetCodexAppServer(string) {}
+
 func cancelOnHangup(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithCancel(ctx)
 }

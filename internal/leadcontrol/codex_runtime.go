@@ -60,6 +60,7 @@ func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error 
 	}
 	defer func() { _ = logFile.Close() }()
 	defer cancelApp()
+	defer forgetCodexAppServer(runtimeHome)
 
 	runtime := persistStartingCodexRuntime(ctx, cfg, endpoint, runtimeHome, sqliteHome, appCmd.Process.Pid)
 
@@ -130,6 +131,9 @@ func startCodexAppServer(
 		cancelApp()
 		_ = logFile.Close()
 		return nil, nil, nil, nil, fmt.Errorf("start codex app-server: %w", err)
+	}
+	if err := recordCodexAppServer(runtimeHome, appCmd.Process.Pid); err != nil {
+		cfg.Logger.Warn("failed to record codex app-server for crash cleanup", "err", err)
 	}
 	appErr := make(chan error, 1)
 	go func() {
@@ -435,6 +439,9 @@ func stopCodexAppServer(cmd *exec.Cmd, appErr <-chan error, cancel context.Cance
 	cancel()
 	select {
 	case err := <-appErr:
+		// The launcher has exited; anything left in its group (a native
+		// child that outlived it) is a leftover.
+		_ = killProcessGroup(cmd.Process.Pid)
 		return err
 	case <-time.After(2 * time.Second):
 		if err := killProcessGroup(cmd.Process.Pid); err != nil {
@@ -447,36 +454,4 @@ func stopCodexAppServer(cmd *exec.Cmd, appErr <-chan error, cancel context.Cance
 			return errors.New("codex app-server did not exit after kill")
 		}
 	}
-}
-
-type codexAppServerProcess struct {
-	pid  int
-	pgid int
-}
-
-// orphanedCodexAppServers picks, from `ps -o pid=,ppid=,pgid=,command=`
-// output, the Loom lead app-servers whose parent has exited (ppid 1). Both
-// the codex npm launcher and its native child carry the same arguments, so a
-// half-killed pair is still found.
-func orphanedCodexAppServers(psOutput, leadsBaseDir string) []codexAppServerProcess {
-	marker := "sqlite_home=" + strconv.Quote(leadsBaseDir+string(filepath.Separator))
-	marker = strings.TrimSuffix(marker, `"`)
-	var found []codexAppServerProcess
-	for _, line := range strings.Split(psOutput, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 4 || fields[1] != "1" {
-			continue
-		}
-		command := strings.Join(fields[3:], " ")
-		if !strings.Contains(command, " app-server --listen ") || !strings.Contains(command, marker) {
-			continue
-		}
-		pid, errPID := strconv.Atoi(fields[0])
-		pgid, errPGID := strconv.Atoi(fields[2])
-		if errPID != nil || errPGID != nil || pid <= 1 {
-			continue
-		}
-		found = append(found, codexAppServerProcess{pid: pid, pgid: pgid})
-	}
-	return found
 }
