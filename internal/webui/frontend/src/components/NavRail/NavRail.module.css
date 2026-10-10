@@ -405,30 +405,33 @@
   }
 
   /* With room (wider than a phone's one-item slot) the chevrons are 44px
-     buttons that scroll by one item; the window gives up their width. */
-  .switcherFrame[data-chevrons="buttons"] .workspaceSwitcher {
-    width: calc(round(down, 100cqw - 85px, 41px) - 3px);
-  }
+     buttons that scroll by one item; the window gives up their width. The
+     one switch point, mirrored by CHEVRON_BUTTONS_MIN_SLOT_PX in NavRail. */
+  @container (width >= 126px) {
+    .workspaceSwitcher {
+      width: calc(round(down, 100cqw - 85px, 41px) - 3px);
+    }
 
-  .switcherFrame[data-chevrons="buttons"] .moreHint {
-    width: var(--touch-target-min);
-    height: var(--touch-target-min);
-    padding: 0;
-    border: none;
-    border-radius: 10px;
-    background: none;
-    pointer-events: auto;
-    cursor: pointer;
-  }
+    button.moreHint {
+      width: var(--touch-target-min);
+      height: var(--touch-target-min);
+      padding: 0;
+      border: none;
+      border-radius: 10px;
+      background: none;
+      pointer-events: auto;
+      cursor: pointer;
+    }
 
-  .switcherFrame[data-chevrons="buttons"] .moreHint:hover {
-    background-color: var(--color-bg-hover);
-    color: var(--color-text-primary);
-  }
+    button.moreHint:hover {
+      background-color: var(--color-bg-hover);
+      color: var(--color-text-primary);
+    }
 
-  .switcherFrame[data-chevrons="buttons"] .moreHint:focus-visible {
-    outline: 2px solid var(--color-primary);
-    outline-offset: -2px;
+    button.moreHint:focus-visible {
+      outline: 2px solid var(--color-primary);
+      outline-offset: -2px;
+    }
   }
 
   .workspaceList {

@@ -479,8 +479,11 @@ test("switcher at 557px: the chevrons scroll one item at a time", async ({
 // MB1c: one switch point, the slot fitting two 44px buttons and an item.
 // A phone (390) is below it: passive hints, swipe scrolls. The narrowest
 // desktop window (500, Chrome's minimum) is above it: buttons.
+// 485/486 put the slot at 125/126px, either side of the switch point.
 for (const { width, buttons } of [
   { width: 390, buttons: false },
+  { width: 485, buttons: false },
+  { width: 486, buttons: true },
   { width: 500, buttons: true },
 ]) {
   test(`switcher at ${width}px: chevrons are ${buttons ? "" : "not "}buttons`, async ({
@@ -491,6 +494,11 @@ for (const { width, buttons } of [
     const rail = page.locator('nav[aria-label="Primary"]');
     const hint = rail.locator("[data-more-hint]").first();
     await expect(hint).toBeVisible();
+    // The window still shows a whole item, ring room included.
+    const sw = (await rail
+      .getByRole("region", { name: "Workspace selector" })
+      .boundingBox())!;
+    expect(sw.width).toBeGreaterThanOrEqual(38);
     const chevrons = rail.getByRole("button", { name: /^Scroll workspaces / });
     if (!buttons) {
       await expect(chevrons).toHaveCount(0);
@@ -503,6 +511,47 @@ for (const { width, buttons } of [
     expect(box.height).toBeGreaterThanOrEqual(44);
   });
 }
+
+// MB1c: crossing the switch point (a window resize) keeps the user's own
+// scroll position instead of snapping back to the open workspace.
+test("switcher: resizing across the switch point keeps the scroll", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 500, height: 844 });
+  await open(page);
+  const rail = page.locator('nav[aria-label="Primary"]');
+  const switcher = rail.getByRole("region", { name: "Workspace selector" });
+  await expect(
+    rail.getByRole("button", { name: "Scroll workspaces left" }),
+  ).toBeVisible();
+  await switcher.evaluate((s) => s.scrollTo({ left: 0 }));
+  await expect.poll(() => switcher.evaluate((s) => s.scrollLeft)).toBe(0);
+  await page.setViewportSize({ width: 470, height: 844 });
+  await expect(
+    rail.getByRole("button", { name: /^Scroll workspaces / }),
+  ).toHaveCount(0);
+  await page.waitForTimeout(200);
+  expect(await switcher.evaluate((s) => s.scrollLeft)).toBe(0);
+});
+
+// MB1c: a scroll that hides the focused chevron (a trackpad, not a click)
+// hands the keyboard to the other one.
+test("switcher at 557px: scrolling away a focused chevron keeps focus", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 557, height: 844 });
+  await open(page);
+  const rail = page.locator('nav[aria-label="Primary"]');
+  const switcher = rail.getByRole("region", { name: "Workspace selector" });
+  await switcher.evaluate((s) => s.scrollTo({ left: 0 }));
+  const right = rail.getByRole("button", { name: "Scroll workspaces right" });
+  await right.focus();
+  await switcher.evaluate((s) => s.scrollTo({ left: s.scrollWidth }));
+  await expect(right).toHaveCount(0);
+  await expect(
+    rail.getByRole("button", { name: "Scroll workspaces left" }),
+  ).toBeFocused();
+});
 
 // MOB2: on a phone the sidebar is hidden, so the bottom rail's Agents button
 // opens the same agent list as a drawer (MOB2_SHOTS=<dir> saves screenshots).

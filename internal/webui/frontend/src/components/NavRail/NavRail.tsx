@@ -18,7 +18,8 @@ export const WORKSPACE_SWITCHER_LIST_MAX_HEIGHT_PX = 210;
 
 /** One avatar plus the gap after it, as laid out in NavRail.module.css. */
 const SWITCHER_ITEM_PITCH_PX = 41;
-/** The switcher slot width that fits two 44px chevron buttons and an item. */
+/** The switcher slot width that fits two 44px chevron buttons and an item.
+ *  The same number is the container query in NavRail.module.css. */
 const CHEVRON_BUTTONS_MIN_SLOT_PX = 126;
 
 export interface NavRailWorkspace {
@@ -294,11 +295,9 @@ export function NavRail({
   const workspaceListRef = useRef<HTMLDivElement>(null);
   const switcherRef = useRef<HTMLElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
-  const chevronRefs = {
-    left: useRef<HTMLButtonElement>(null),
-    right: useRef<HTMLButtonElement>(null),
-  };
-  // The chevron to focus once the one the keyboard pressed goes away.
+  const leftChevronRef = useRef<HTMLButtonElement>(null);
+  const rightChevronRef = useRef<HTMLButtonElement>(null);
+  // The chevron to focus once the focused one goes away at an end.
   const refocusChevron = useRef<"left" | "right" | null>(null);
 
   const hasAdd = Boolean(onAddWorkspace);
@@ -333,7 +332,7 @@ export function NavRail({
     if (b.left - 6 < w.left) switcher.scrollLeft -= w.left - b.left + 6;
     else if (b.right + 6 > w.right)
       switcher.scrollLeft += b.right - w.right + 6;
-  }, [activeWorkspaceId, workspaceIds, more.buttons]);
+  }, [activeWorkspaceId, workspaceIds]);
 
   const updateMore = useCallback(() => {
     const s = switcherRef.current;
@@ -341,8 +340,17 @@ export function NavRail({
     // Within the 4px padding nothing is hidden (a snap can stop there).
     const left = s.scrollLeft > 4;
     const right = s.scrollLeft + s.clientWidth < s.scrollWidth - 4;
+    // Unrounded, like the CSS container query this mirrors.
     const buttons =
-      (frameRef.current?.clientWidth ?? 0) >= CHEVRON_BUTTONS_MIN_SLOT_PX;
+      (frameRef.current?.getBoundingClientRect().width ?? 0) >=
+      CHEVRON_BUTTONS_MIN_SLOT_PX;
+    // A focused chevron that goes away (a click or a scroll reached its
+    // end) hands the keyboard to the other one.
+    const focused = document.activeElement;
+    if (focused && focused === leftChevronRef.current && !left)
+      refocusChevron.current = "right";
+    if (focused && focused === rightChevronRef.current && !right)
+      refocusChevron.current = "left";
     setMore((m) =>
       m.left === left && m.right === right && m.buttons === buttons
         ? m
@@ -361,24 +369,15 @@ export function NavRail({
   useEffect(() => {
     const side = refocusChevron.current;
     refocusChevron.current = null;
-    if (side) chevronRefs[side].current?.focus();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (side)
+      (side === "left" ? leftChevronRef : rightChevronRef).current?.focus();
   }, [more]);
 
-  const scrollByItem = (side: "left" | "right", focused: boolean) => {
-    const s = switcherRef.current;
-    if (!s) return;
-    s.scrollBy({
+  const scrollByItem = (side: "left" | "right") => {
+    switcherRef.current?.scrollBy({
       left: side === "left" ? -SWITCHER_ITEM_PITCH_PX : SWITCHER_ITEM_PITCH_PX,
     });
     updateMore();
-    // At the end this chevron goes away: keep the keyboard on the other one.
-    const end =
-      side === "left"
-        ? s.scrollLeft <= 4
-        : s.scrollLeft + s.clientWidth >= s.scrollWidth - 4;
-    if (focused && end)
-      refocusChevron.current = side === "left" ? "right" : "left";
   };
 
   const renderChevron = (side: "left" | "right") => {
@@ -396,14 +395,12 @@ export function NavRail({
       );
     return (
       <button
-        ref={chevronRefs[side]}
+        ref={side === "left" ? leftChevronRef : rightChevronRef}
         type="button"
         className={styles.moreHint}
         data-more-hint={side}
         aria-label={`Scroll workspaces ${side}`}
-        onClick={(e) =>
-          scrollByItem(side, document.activeElement === e.currentTarget)
-        }
+        onClick={() => scrollByItem(side)}
       >
         {glyph}
       </button>
@@ -493,11 +490,7 @@ export function NavRail({
       {hasWorkspaceAvatars && (
         <>
           <div className={styles.wsDivider} aria-hidden="true" />
-          <div
-            ref={frameRef}
-            className={styles.switcherFrame}
-            data-chevrons={more.buttons ? "buttons" : undefined}
-          >
+          <div ref={frameRef} className={styles.switcherFrame}>
             {renderChevron("left")}
             <section
               ref={switcherRef}
