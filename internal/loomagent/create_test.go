@@ -23,14 +23,19 @@ import (
 // root replaces the root Open returns, as a changed launch root would.
 type openRec struct {
 	loomharness.Harness
-	specs []loomharness.OpenSpec
-	root  string
-	hang  atomic.Bool // Open takes the call and never answers, as a frozen harness does
-	stuck atomic.Bool // Purge does the same
+	specs  []loomharness.OpenSpec
+	root   string
+	hang   atomic.Bool // Open takes the call and answers only once its ctx ends, as a frozen harness does
+	stuck  atomic.Bool // Purge does the same
+	fresh  atomic.Bool // a stuck Purge started with time left on its ctx
+	onOpen func()      // runs as each Open starts
 }
 
 func (o *openRec) Purge(ctx context.Context, owned []loomharness.NativeRef) error {
 	if o.stuck.Load() {
+		if ctx.Err() == nil {
+			o.fresh.Store(true)
+		}
 		<-ctx.Done()
 		return ctx.Err()
 	}
@@ -39,9 +44,15 @@ func (o *openRec) Purge(ctx context.Context, owned []loomharness.NativeRef) erro
 
 func (o *openRec) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharness.NativeRef, error) {
 	o.specs = append(o.specs, spec)
+	if o.onOpen != nil {
+		o.onOpen()
+	}
 	if o.hang.Load() {
 		<-ctx.Done()
-		return loomharness.NativeRef{}, ctx.Err()
+		if ref, err := o.Harness.Open(ctx, spec); err != nil {
+			return ref, err // a session it made and could not remove
+		}
+		return loomharness.NativeRef{}, ctx.Err() // it made the session; the answer is lost
 	}
 	ref, err := o.Harness.Open(ctx, spec)
 	if o.root != "" {
@@ -940,5 +951,41 @@ func TestOpenTimeoutNeverPermanent(t *testing.T) {
 	<-ctx.Done()
 	if err := openErr(timedOut(ctx, fmt.Errorf("opencode: %w", loomharness.ErrBadRequest))); isPermanent(err) {
 		t.Fatalf("%v is permanent; want retried", err)
+	}
+	if err := timedOut(ctx, openErr(loomharness.ErrBadRequest)); isPermanent(err) { // a late reapply
+		t.Fatalf("%v is permanent; want retried", err)
+	}
+	if err := timedOut(ctx, nil); err != nil {
+		t.Fatalf("timedOut(nil) = %v; want nil", err)
+	}
+}
+
+// HANG1: a Send that waits on the lock of a Create whose Open times out
+// opens again only after the Create showed create_retrying, so the
+// Attention is not held up behind the Send's own Open.
+func TestCreateHungOpenRetryingBeforeSend(t *testing.T) {
+	defer func(d time.Duration) { openWait = d }(openWait)
+	openWait = 200 * time.Millisecond // the Send is waiting on the lock well before it ends
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	e.h.hang.Store(true)
+	sent := make(chan error, 1)
+	e.h.onOpen = func() {
+		rows, _, _ := e.st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true})
+		if len(e.h.specs) == 1 {
+			go func() { _, err := s.Send(ctx, sendReq(rows[0].AgentID, "s1", "hi", ActorRef{})); sent <- err }()
+			return
+		}
+		if r := deref(rows[0].AttentionReason); r != AttentionCreateRetrying {
+			t.Errorf("the Send's Open ran with Attention %q; want %s raised first", r, AttentionCreateRetrying)
+		}
+	}
+	if _, err := s.Create(ctx, leadReq("r1")); err == nil {
+		t.Fatal("Create succeeded")
+	}
+	<-sent
+	if len(e.h.specs) != 2 {
+		t.Fatalf("opens = %d; want the Create's and the Send's", len(e.h.specs))
 	}
 }

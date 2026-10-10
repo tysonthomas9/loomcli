@@ -135,8 +135,7 @@ func (s *Service) reconcileAgent(ctx context.Context, agentID string) (err error
 			err = errors.Join(err, derr)
 		}
 	default:
-		_, cerr := s.finishCreate(ctx, agentID)
-		s.createFailed(ctx, agentID, cerr)
+		_, cerr := s.finishCreate(ctx, agentID) // it shows the Create's Attention
 		if !isPermanent(cerr) {
 			err = errors.Join(err, cerr)
 		}

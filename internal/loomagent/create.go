@@ -73,7 +73,6 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (AgentInfo, err
 	}
 	createCrash("inserted")
 	if a, err = s.finishCreate(ctx, id); err != nil {
-		s.createFailed(ctx, id, err)
 		if !isPermanent(err) {
 			s.retryLater(id)
 		}
@@ -98,6 +97,14 @@ func isPermanent(err error) bool {
 // create_retrying while reconcile retries it. It is saved even when the
 // request was cancelled, within a bounded time.
 func (s *Service) createFailed(ctx context.Context, agentID string, err error) {
+	if err != nil {
+		defer s.lock(agentID)()
+		s.createFailedLocked(ctx, agentID, err)
+	}
+}
+
+// createFailedLocked is createFailed under agentID's lock, which the caller holds.
+func (s *Service) createFailedLocked(ctx context.Context, agentID string, err error) {
 	if err == nil {
 		return
 	}
@@ -113,11 +120,10 @@ func (s *Service) createFailed(ctx context.Context, agentID string, err error) {
 	}
 }
 
-// createAttention shows reason on agentID under its lock, after checking
-// its Create is still below done and no Delete replaced it; it replaces the other Create reason but no
-// other Attention.
+// createAttention shows reason on agentID under its lock, which the caller
+// holds, after checking its Create is still below done and no Delete
+// replaced it; it replaces the other Create reason but no other Attention.
 func (s *Service) createAttention(ctx context.Context, agentID, reason string) error {
-	defer s.lock(agentID)()
 	a, err := s.live(ctx, agentID)
 	cur := deref(a.AttentionReason)
 	if err != nil || a.CreateStep >= stepDone || a.DeleteRequested || cur == reason || (cur != "" && !createReason(cur)) {
@@ -401,9 +407,12 @@ func (s *Service) queueFirst(ctx context.Context, a loomstore.Agent, req CreateR
 
 // finishCreate runs agentID's remaining Create steps from its create_step.
 // Every step is safe to repeat; reconcileAgent calls it for a row below done.
-func (s *Service) finishCreate(ctx context.Context, agentID string) (loomstore.Agent, error) {
+// A failure shows its Create Attention before the lock is released, so a
+// Send or retry waiting on it never holds the Attention up (HANG1).
+func (s *Service) finishCreate(ctx context.Context, agentID string) (a loomstore.Agent, err error) {
 	defer s.lock(agentID)()
-	a, err := s.agent(ctx, agentID)
+	defer func() { s.createFailedLocked(ctx, agentID, err) }()
+	a, err = s.agent(ctx, agentID)
 	if err == nil && (a.DeletedAt != nil || a.DeleteRequested) { // a Delete won: make nothing for it
 		return a, &Error{Code: CodeAgentNotFound, Message: agentID + " is being deleted"}
 	}
@@ -557,13 +566,13 @@ func (s *Service) openSession(ctx context.Context, a loomstore.Agent, cfg Config
 	ref, err := h.Open(hctx, loomharness.OpenSpec{Key: a.AgentID, Launch: launch, Preset: cfg.Open,
 		Dir: deref(a.WorktreePath), Model: cfg.Model, Rules: rules, Metadata: map[string]string{"agent_id": a.AgentID}})
 	if err != nil {
-		return loomharness.NativeRef{}, s.leftover(ctx, a.AgentID, a.Harness, ref, openErr(timedOut(hctx, err)))
+		return loomharness.NativeRef{}, s.leftover(ctx, hctx, a.AgentID, a.Harness, ref, openErr(timedOut(hctx, err)))
 	}
 	createCrash("recorded")
 	if err := s.owned(ctx, a.AgentID, a.Harness, ref); err != nil {
 		return ref, err
 	}
-	return ref, s.reapply(hctx, a.Harness, ref, cfg, true)
+	return ref, timedOut(hctx, s.reapply(hctx, a.Harness, ref, cfg, true))
 }
 
 // openWait bounds the harness calls that open a Create's session (HANG1): a
@@ -577,7 +586,7 @@ var openWait = 90 * time.Second
 // timedOut adds why ctx ended, when openWait ran out, to the harness's
 // error, keeping only its text: a timeout is always retried, never permanent.
 func timedOut(ctx context.Context, err error) error {
-	if cause := context.Cause(ctx); cause != nil && cause != ctx.Err() {
+	if cause := context.Cause(ctx); err != nil && cause != nil && cause != ctx.Err() {
 		return fmt.Errorf("%w: %v", cause, err)
 	}
 	return err
@@ -605,9 +614,10 @@ func (s *Service) owned(ctx context.Context, agentID, harness string, ref loomha
 
 // leftover handles a failed Open: a non-zero ref it returned is a session it
 // created and could not remove, so it is recorded as owned and
-// purge-pending, then purged (reconcileAgent retries it). It returns cause,
-// with any recording or purge error joined.
-func (s *Service) leftover(ctx context.Context, agentID, harness string, ref loomharness.NativeRef, cause error) error {
+// purge-pending, then purged within purge (the Open's own bound, so a
+// timed-out Open gives the purge no time of its own; reconcileAgent retries
+// it). It returns cause, with any recording or purge error joined.
+func (s *Service) leftover(ctx, purge context.Context, agentID, harness string, ref loomharness.NativeRef, cause error) error {
 	if ref == (loomharness.NativeRef{}) {
 		return cause
 	}
@@ -618,7 +628,7 @@ func (s *Service) leftover(ctx context.Context, agentID, harness string, ref loo
 		}
 		return errors.Join(cause, err)
 	}
-	if err := s.purgeLeftover(ctx, n); err != nil {
+	if err := s.purgeLeftover(purge, n); err != nil {
 		s.retryLater(agentID)
 		return errors.Join(cause, err)
 	}
