@@ -49,9 +49,9 @@ tests:
           python3 - "$AFT_WORK_DIR" <<'PY'
           import json, sys
           load = lambda n: json.load(open(f"{sys.argv[1]}/agv1-g1-{n}.json"))
-          effort = lambda a: [o["Value"] for o in json.loads(a["spec"]).get("Options") or [] if o["ID"] == "effort"]
+          effort = lambda a: [o["Value"] for o in json.loads(a["spec_json"]).get("Options") or [] if o["ID"] == "effort"]
           a, b, retry, now = load("a"), load("b"), load("retry"), load("get")
-          assert effort(a) == ["low"] and effort(b) == ["high"], (a["spec"], b["spec"])
+          assert effort(a) == ["low"] and effort(b) == ["high"], (a["spec_json"], b["spec_json"])
           assert b["spec_version"] > a["spec_version"], (a["spec_version"], b["spec_version"])
           assert retry["spec_version"] == a["spec_version"] and effort(retry) == ["low"], f"the retry of A is not A's stored result: {retry}"
           assert now["spec_version"] == b["spec_version"] and effort(now) == ["high"], f"the retry of A changed the spec: {now}"
@@ -172,6 +172,15 @@ tests:
           echo 2.0.1 > "$(dirname "$svc")/emu-version"
           kill "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$svc")"
         intent: "Make the installed OpenCode report 2.0.1 and stop its service, so Loom must check the version to reconnect"
+      - run: |
+          set -e
+          for _ in $(seq 1 60); do
+            curl -s "$AFT_BASE_URL/api/workspaces/E2E-AGV1-REQ/v1/harnesses/opencode/models" | grep -q 'harness_too_old' && exit 0
+            sleep 1
+          done
+          echo "Loom never checked the downgraded OpenCode's version" >&2
+          exit 1
+        intent: "Wait until Loom's restart backoff passes and its reconnect finds OpenCode 2.0.1 too old"
       - run: |
           set -e
           code="$(curl -s -o "$AFT_WORK_DIR/agv1-g3-create.json" -w '%{http_code}' -X POST "$AFT_BASE_URL/api/workspaces/E2E-AGV1-REQ/v1/agents" \
