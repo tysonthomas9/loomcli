@@ -139,15 +139,20 @@ func (s *Service) recoverHanded(ctx context.Context, a loomstore.Agent, sl looms
 	}
 	switch landed {
 	case loomharness.LandedFound:
-		if err := s.settleInput(ctx, a.AgentID, slots, deref(sl.NativeKey), s.store.MarkDelivered); err != nil {
-			return a, false, err
-		}
 		st, err := sess.Status(ctx)
 		if err != nil {
 			return a, false, harnessErr(err)
 		}
-		if !st.Running { // its turn ran while Loom was down: its end counts before the next hand-over
-			return a, true, s.saveTurnEnd(ctx, a.AgentID, sess, ref, deref(sl.NativeKey))
+		if !st.Running { // its turn ran while Loom was down: its end is saved while the slot still marks it handed
+			if err := s.saveTurnEnd(ctx, a.AgentID, sess, ref, deref(sl.NativeKey)); err != nil {
+				return a, false, err
+			}
+		}
+		if err := s.settleInput(ctx, a.AgentID, slots, deref(sl.NativeKey), s.store.MarkDelivered); err != nil {
+			return a, false, err
+		}
+		if !st.Running {
+			return a, true, nil
 		}
 		to := a.StateOf()
 		to.RunningTurn = sl.NativeKey // until turn.started names it

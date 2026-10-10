@@ -442,3 +442,48 @@ func TestCheckpointArchiveCancelledSavesEnd(t *testing.T) {
 		})
 	}
 }
+
+// TestCheckpointRecoveredEndSaveFails: when saving a recovered turn's end
+// fails, the handed message stays handed, so the retry saves the end and
+// captures turn/1 before the next message is handed over.
+func TestCheckpointRecoveredEndSaveFails(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	s := e.service(ServiceConfig{})
+	a, _ := newLead(t, e, s, "alpha")
+	fh.Script(a.AgentID, fake.Turn{}, fake.Turn{Steps: []fake.Step{{Ask: "t2"}}})
+	if !crashDispatchAt(t, "prompted")(func() { _, _ = s.Send(ctx, sendReq(a.AgentID, "u1", "go", user)) }) {
+		t.Fatal("did not crash")
+	}
+	s = e.service(ServiceConfig{}) // Loom restarts
+	lift := failSaving(t, e, EventTurnCompleted)
+	if _, err := s.Send(ctx, sendReq(a.AgentID, "c1", "next", child)); err == nil {
+		t.Fatal("the recovery saved the end despite the failing store")
+	}
+	lift()
+	if err := s.Dispatch(ctx, a.AgentID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := e.ws.checkpoint(checkpointRef(a.AgentID, 1)); !ok || len(handedReqs(t, s, a.AgentID, "c1")) != 1 {
+		t.Fatalf("turn/1 exists %v, c1 handed %v; want turn/1 before c1", ok, handedReqs(t, s, a.AgentID, "c1"))
+	}
+}
+
+// TestCheckpointStopUnwiredHarnessSavesEnd: Archive(cancelled) of an agent
+// whose harness is not wired still saves the stopped turn's end, under its
+// recorded session, so its ref stays owed.
+func TestCheckpointStopUnwiredHarnessSavesEnd(t *testing.T) {
+	ctx := context.Background()
+	a := svcAgent("a1", "persistent", StateActive)
+	a.WorktreePath, a.RunningTurnID = sp("/wt/a1"), sp("turn_1")
+	a.HarnessSessionRoot, a.HarnessSessionID = sp("/root/fake"), sp("ses_1")
+	s := newService(t, ServiceConfig{Workspace: &fakeWorkspace{}, Interrupt: func(context.Context, loomstore.Agent) error { return nil }}, a)
+	if err := s.Archive(ctx, ArchiveRequest{AgentID: "a1", Reason: ArchiveCancelled}); err != nil {
+		t.Fatal(err)
+	}
+	ends := kinds(rows(t, s, "a1", 0), EventTurnCompleted)
+	if len(ends) != 1 || ends[0].EventID != EventTurnCompleted+":/root/fake:ses_1:turn_1" {
+		t.Fatalf("saved ends = %+v; want turn_1's under its recorded session", ends)
+	}
+}

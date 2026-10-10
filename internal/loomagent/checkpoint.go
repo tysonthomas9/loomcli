@@ -61,18 +61,26 @@ func (s *Service) stoppedEnd(ctx context.Context, a loomstore.Agent) error {
 		return nil
 	}
 	sess, ref, err := s.current(ctx, a)
-	if err != nil || sess == nil {
+	if err != nil {
 		return err
+	}
+	if sess == nil { // an unwired harness: its recorded session
+		ref = loomharness.NativeRef{Root: deref(a.HarnessSessionRoot), NativeID: deref(a.HarnessSessionID)}
 	}
 	return s.saveTurnEnd(ctx, a.AgentID, sess, ref, *a.RunningTurnID)
 }
 
 // saveTurnEnd saves the end of running (a turn ID, or an input key until
 // turn.started names the turn), which no longer runs on sess at ref: its
-// native end if the history has one, else a cancelled end with the EventID
+// native end if the history has one (sess, nil for an unwired harness),
+// else a cancelled end with the EventID
 // the native one would have, so a late native end adds no row.
 func (s *Service) saveTurnEnd(ctx context.Context, agentID string, sess loomharness.Session, ref loomharness.NativeRef, running string) error {
-	end, err := nativeEnd(ctx, sess, running)
+	var end *loomharness.Event
+	var err error
+	if sess != nil {
+		end, err = nativeEnd(ctx, sess, running)
+	}
 	if err != nil || end == nil { // an unread history: still count the turn
 		end = &loomharness.Event{Type: loomharness.EventTurnCompleted, TurnID: running, StopReason: "cancelled"}
 	}
