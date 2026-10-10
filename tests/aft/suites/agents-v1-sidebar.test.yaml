@@ -20,42 +20,6 @@ setup: |
     printf '{"name":"e2e-agv1-%s","type":"empty","repos":["%s"]}' "$ws" "$repo" |
       curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @- >/dev/null
   done
-  # side-kid <child name> <lead follow-up text>: the lead's agent_create
-  # call, the lead's follow-up reply (its tool result), and a child turn that
-  # holds (a tool the emulator does not run waits until interrupted), so the
-  # child keeps working until it is stopped.
-  cat > "$AFT_WORK_DIR/side-kid" <<'SH'
-  #!/bin/sh
-  set -e
-  curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
-  python3 -c 'import json,sys
-  code = "return await tools.loom.agent_create(%s)" % json.dumps({"name": sys.argv[1], "brief": "do the task"})
-  print(json.dumps({"steps": [{"next": "prompt", "tool_calls": [{"name": "execute", "arguments": {"code": code}}]},
-    {"text": sys.argv[2], "next": "tool"}, {"tool_calls": [{"name": "df1_hold"}], "next": "prompt"}]}))' "$1" "$2" |
-    curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" -d @- >/dev/null
-  SH
-  chmod +x "$AFT_WORK_DIR/side-kid"
-  # side-stop <workspace> <lead id file> <child name>: interrupt the lead's
-  # working child, which ends its task.
-  cat > "$AFT_WORK_DIR/side-stop" <<'SH'
-  #!/bin/sh
-  set -e
-  api="$AFT_BASE_URL/api/workspaces/$1/v1/agents" lead="$(cat "$AFT_WORK_DIR/$2")"
-  id="$(curl -sf "$api?parent=$lead" | python3 -c 'import json,sys; print([a["agent_id"] for a in json.load(sys.stdin)["agents"] if a["name"] == sys.argv[1]][0])' "$3")"
-  curl -sf -X POST "$api/$id/messages" -H "Content-Type: application/json" \
-    -H "Idempotency-Key: side-stop-$id" -d '{"text":"","delivery":"interrupt"}' >/dev/null
-  SH
-  chmod +x "$AFT_WORK_DIR/side-stop"
-  # side-menu <agent id>: open the sidebar row's context menu, as a right
-  # click on the row does.
-  cat > "$AFT_WORK_DIR/side-menu" <<'SH'
-  #!/bin/sh
-  set -e
-  agent-browser --session "$AFT_SESSION" eval "(() => { const a = document.querySelector('nav[aria-label=Agents] [data-testid=sortable-agent-row] > a[href\$=\"/$1\"]');
-    if (!a) throw Error('sidebar row $1 missing'); const r = a.getBoundingClientRect();
-    a.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.x + 4, clientY: r.y + 4 })); return true; })()" >/dev/null
-  SH
-  chmod +x "$AFT_WORK_DIR/side-menu"
 teardown: |
   set +e
   for ws in SBE1 SBE2 SBE3; do
@@ -102,7 +66,7 @@ tests:
               return names.join('|') === ['a', 'b', 'c'].map((x) => 'agv1-sbe1-' + x + '-${RUN_ID:-local}').join('|'); })()
         budget: 60000
         intent: "Wait until the sidebar lists the three Leads in creation order"
-      - run: '"$AFT_WORK_DIR/side-menu" "$(cat "$AFT_WORK_DIR/sbe1B")"'
+      - run: '"$AFT_TESTS_DIR/scripts/agents-v1-sidebar.sh" menu "$(cat "$AFT_WORK_DIR/sbe1B")"'
         intent: "Open the second Lead's sidebar context menu"
       - click: { testid: agent-context-menu-archive }
       - wait:
@@ -178,7 +142,7 @@ tests:
         intent: "Create the second OpenCode Lead through the Agent API"
       - run: |
           set -e
-          "$AFT_WORK_DIR/side-kid" "agv1-sbe2-kid-${RUN_ID:-local}" AGV1-SBE2-STARTED
+          "$AFT_TESTS_DIR/scripts/agents-v1-sidebar.sh" kid "agv1-sbe2-kid-${RUN_ID:-local}" AGV1-SBE2-STARTED
           agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-SBE2/chat/$(cat "$AFT_WORK_DIR/sbe2B")"
         intent: "Script the second Lead's child, which keeps working, and open that Lead's chat"
       - wait:
@@ -211,10 +175,10 @@ tests:
       - run: |
           set -e
           a="$(cat "$AFT_WORK_DIR/sbe2A")" b="$(cat "$AFT_WORK_DIR/sbe2B")"
-          kid="$(curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-SBE2/v1/agents?parent=$b" | python3 -c 'import json,sys; print([a["agent_id"] for a in json.load(sys.stdin)["agents"] if a["name"] == sys.argv[1]][0])' "agv1-sbe2-kid-${RUN_ID:-local}")"
+          kid="$("$AFT_TESTS_DIR/scripts/agents-v1-sidebar.sh" child-id E2E-AGV1-SBE2 "$b" "agv1-sbe2-kid-${RUN_ID:-local}")"
+          got="$("$AFT_TESTS_DIR/scripts/agents-v1-sidebar.sh" rail-ids)"
+          [ "$got" = "$a,$b,$kid" ] || { echo "rail ids '$got', want '$a,$b,$kid'" >&2; exit 1; }
           echo "$kid" > "$AFT_WORK_DIR/sbe2Kid"
-          got="$(agent-browser --session "$AFT_SESSION" eval "Array.from(document.querySelectorAll('[data-testid=collapsed-agent-rail] [data-agent-id]')).map((x) => x.dataset.agentId).join(',')")"
-          [ "$(echo "$got" | tr -d '"')" = "$a,$b,$kid" ] || { echo "rail ids '$got', want '$a,$b,$kid'" >&2; exit 1; }
         intent: "Check that the rail's avatars are the two Leads and the child by their Agent API ids, Leads in sidebar order and the child after its Lead"
       - click: { selector: "[data-testid=collapsed-agent-rail] a[aria-label^='agv1-sbe2-a-${RUN_ID:-local} ']" }
       - wait:
@@ -248,7 +212,7 @@ tests:
       - run: |
           agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-SBE2/chat/$(cat "$AFT_WORK_DIR/sbe2A")"
         intent: "Go back to the first Lead's chat"
-      - run: '"$AFT_WORK_DIR/side-stop" E2E-AGV1-SBE2 sbe2B "agv1-sbe2-kid-${RUN_ID:-local}"'
+      - run: '"$AFT_TESTS_DIR/scripts/agents-v1-sidebar.sh" stop E2E-AGV1-SBE2 "$(cat "$AFT_WORK_DIR/sbe2B")" "agv1-sbe2-kid-${RUN_ID:-local}"'
         intent: "Stop the child, which ends its task"
       - wait:
           fn: >-
@@ -298,7 +262,7 @@ tests:
         intent: "Create the third OpenCode Lead through the Agent API"
       - run: |
           set -e
-          "$AFT_WORK_DIR/side-kid" "agv1-sbe3-kid-${RUN_ID:-local}" AGV1-SBE3-STARTED
+          "$AFT_TESTS_DIR/scripts/agents-v1-sidebar.sh" kid "agv1-sbe3-kid-${RUN_ID:-local}" AGV1-SBE3-STARTED
           agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-SBE3/chat/$(cat "$AFT_WORK_DIR/sbe3B")"
         intent: "Script the second Lead's child, which keeps working, and open that Lead's chat"
       - wait:
@@ -317,16 +281,7 @@ tests:
                 kids.length === 1 && kids[0].textContent.startsWith('agv1-sbe3-kid-${RUN_ID:-local}'); })()
         budget: 90000
         intent: "Wait until the three Leads show in creation order with the working child nested under the second"
-      - run: |
-          set -e
-          ab() { agent-browser --session "$AFT_SESSION" "$@"; }
-          name="agv1-sbe3-b-${RUN_ID:-local}"
-          ab eval "(() => { const h = document.querySelector('nav[aria-label=Agents] [aria-label=\"Drag to reorder $name\"]'); if (!h) throw Error('drag handle missing'); h.focus(); return document.activeElement === h; })()" | grep -q true
-          ab press Space
-          sleep 0.3
-          ab press ArrowUp
-          sleep 0.3
-          ab press Space
+      - run: '"$AFT_TESTS_DIR/scripts/agents-v1-sidebar.sh" drag-up "agv1-sbe3-b-${RUN_ID:-local}"'
         intent: "Keyboard-drag the second Lead above the first: focus its drag handle, lift with Space, move up, drop with Space"
       - wait:
           fn: >-
@@ -345,16 +300,9 @@ tests:
               return top.join('|') === ['b', 'a', 'c'].map((x) => 'agv1-sbe3-' + x + '-${RUN_ID:-local}').join('|') &&
                 kids.length === 1 && kids[0].textContent.startsWith('agv1-sbe3-kid-${RUN_ID:-local}'); })()
         intent: "Wait until, after a reload, the new order holds and the child is still nested under its Lead"
-      - run: |
-          set -e
-          a="$(cat "$AFT_WORK_DIR/sbe3A")"
-          agent-browser --session "$AFT_SESSION" hover "nav[aria-label=Agents] [data-testid=sortable-agent-row] > a[href\$='/$a']"
-          agent-browser --session "$AFT_SESSION" wait --fn "(() => { const a = document.querySelector('nav[aria-label=Agents] [data-testid=sortable-agent-row] > a[href\$=\"/$a\"]');
-            const b = a?.parentElement?.querySelector(':scope > [data-testid=agent-row-archive]');
-            return !!a && a.matches(':hover') && getComputedStyle(a).textDecorationLine === 'none' &&
-              !!b && b.getAttribute('aria-label') === 'Archive agv1-sbe3-a-${RUN_ID:-local}' && Number(getComputedStyle(b).opacity) > 0.9; })()"
+      - run: '"$AFT_TESTS_DIR/scripts/agents-v1-sidebar.sh" hover "$(cat "$AFT_WORK_DIR/sbe3A")" "agv1-sbe3-a-${RUN_ID:-local}"'
         intent: "Hover the first Lead's row and check it has no underline and shows its Archive action"
-      - run: '"$AFT_WORK_DIR/side-menu" "$(cat "$AFT_WORK_DIR/sbe3A")"'
+      - run: '"$AFT_TESTS_DIR/scripts/agents-v1-sidebar.sh" menu "$(cat "$AFT_WORK_DIR/sbe3A")"'
         intent: "Open the first Lead's sidebar context menu"
       - click: { testid: agent-context-menu-archive }
       - wait:
@@ -362,13 +310,7 @@ tests:
             (() => { const top = Array.from(document.querySelectorAll('nav[aria-label=Agents] [data-testid=sortable-agent-row] > a[href]')).filter((a) => !a.closest('[role=group]')).map((a) => a.querySelector('[data-testid=agent-list-name]')?.textContent.trim());
               return top.join('|') === ['b', 'c'].map((x) => 'agv1-sbe3-' + x + '-${RUN_ID:-local}').join('|'); })()
         intent: "Wait until the context-menu Archive removes the first Lead's row"
-      - run: |
-          set -e
-          c="$(cat "$AFT_WORK_DIR/sbe3C")"
-          agent-browser --session "$AFT_SESSION" hover "nav[aria-label=Agents] [data-testid=sortable-agent-row] > a[href\$='/$c']"
-          agent-browser --session "$AFT_SESSION" wait --fn "(() => { const b = document.querySelector('nav[aria-label=Agents] [data-testid=sortable-agent-row] > a[href\$=\"/$c\"]')?.parentElement?.querySelector(':scope > [data-testid=agent-row-archive]');
-            return !!b && Number(getComputedStyle(b).opacity) > 0.9; })()"
-          agent-browser --session "$AFT_SESSION" click "[aria-label='Archive agv1-sbe3-c-${RUN_ID:-local}']"
+      - run: '"$AFT_TESTS_DIR/scripts/agents-v1-sidebar.sh" hover-archive "$(cat "$AFT_WORK_DIR/sbe3C")" "agv1-sbe3-c-${RUN_ID:-local}"'
         intent: "Hover the third Lead's row and press its Archive action"
       - wait:
           fn: >-
@@ -397,5 +339,5 @@ tests:
             (() => { const top = Array.from(document.querySelectorAll('nav[aria-label=Agents] [data-testid=sortable-agent-row] > a[href]')).filter((a) => !a.closest('[role=group]')).map((a) => a.querySelector('[data-testid=agent-list-name]')?.textContent.trim());
               return top.join('|') === 'agv1-sbe3-b-${RUN_ID:-local}'; })()
         intent: "Wait until, after a reload, only the second Lead's row is left"
-      - run: '"$AFT_WORK_DIR/side-stop" E2E-AGV1-SBE3 sbe3B "agv1-sbe3-kid-${RUN_ID:-local}"'
+      - run: '"$AFT_TESTS_DIR/scripts/agents-v1-sidebar.sh" stop E2E-AGV1-SBE3 "$(cat "$AFT_WORK_DIR/sbe3B")" "agv1-sbe3-kid-${RUN_ID:-local}"'
         intent: "Stop the child, which ends its task"
