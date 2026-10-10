@@ -274,21 +274,38 @@ describe("useAgentRoster", () => {
     expect([...result.current.roster.keys()]).toEqual([]);
   });
 
-  it("drops the previous workspace's List queued before a synchronous switch", async () => {
+  // A's List lands and queues its update, the switch to B commits first,
+  // and B's List lands before React replays A's update.
+  async function switchWhileAQueued(answerB: () => Promise<Response>) {
     agents.set("a1", agent("a1"));
     const release = holdFullLists();
-    otherWs.set("wsB", async () => new Response("{}", { status: 500 }));
-    const { result, rerender } = renderHook(({ ws }) => useAgentRoster(ws), {
+    otherWs.set("wsB", answerB);
+    const hook = renderHook(({ ws }) => useAgentRoster(ws), {
       initialProps: { ws: "wsA" },
     });
     await waitFor(() => expect(lists).toHaveLength(1));
-
-    // A's List lands and queues its update; the switch to B commits first.
     await act(async () => {
       release();
       await new Promise((r) => setTimeout(r, 0));
-      flushSync(() => rerender({ ws: "wsB" }));
+      flushSync(() => hook.rerender({ ws: "wsB" }));
+      await new Promise((r) => setTimeout(r, 0));
     });
+    return hook.result;
+  }
+
+  it("shows B's List, not A's queued one, after a synchronous switch", async () => {
+    const result = await switchWhileAQueued(async () =>
+      json({ agents: [agent("b1")], next: "" }),
+    );
+    await waitFor(() =>
+      expect([...result.current.roster.keys()]).toEqual(["b1"]),
+    );
+  });
+
+  it("shows B's List error, not A's queued roster, after a synchronous switch", async () => {
+    const result = await switchWhileAQueued(
+      async () => new Response("{}", { status: 500 }),
+    );
     await waitFor(() => expect(result.current.error).not.toBeNull());
     expect([...result.current.roster.keys()]).toEqual([]);
   });

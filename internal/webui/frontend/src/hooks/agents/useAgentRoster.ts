@@ -81,12 +81,12 @@ type Owned = {
   activity: Activities;
   error: string | null;
 };
-const fresh = (ws: string): Owned => ({
-  ws,
+const NONE: Owned = {
+  ws: "",
   roster: new Map(),
   activity: new Map(),
   error: null,
-});
+};
 
 const message = (err: unknown) =>
   err instanceof Error ? err.message : String(err);
@@ -105,31 +105,30 @@ export function useAgentRoster(
   roster: Roster;
   error: string | null;
 } {
-  // A workspace switch starts fresh, and an update made for an earlier
-  // workspace changes nothing, even one queued before the switch committed
-  // (RS1).
-  const [owned, setOwned] = useState(() => fresh(workspaceId));
-  if (owned.ws !== workspaceId) setOwned(fresh(workspaceId));
-  const { roster, activity, error } = owned;
+  // A switch shows nothing of the old workspace. An update made for the
+  // committed workspace starts from empty if the state is another's; one
+  // made for any other workspace changes nothing, even one queued before
+  // the switch committed (RS1).
+  const [owned, setOwned] = useState<Owned>({ ...NONE, ws: workspaceId });
+  const { roster, activity, error } = owned.ws === workspaceId ? owned : NONE;
+  const currentWs = useRef(workspaceId);
+  useLayoutEffect(() => {
+    currentWs.current = workspaceId;
+  }, [workspaceId]);
   const [setRoster, setActivity, setError] = useMemo(() => {
     const own =
       <K extends "roster" | "activity" | "error">(k: K) =>
       (v: Owned[K] | ((old: Owned[K]) => Owned[K])) =>
         setOwned((o) => {
-          if (o.ws !== workspaceId) return o;
+          if (currentWs.current !== workspaceId) return o;
+          const base = o.ws === workspaceId ? o : { ...NONE, ws: workspaceId };
           const next =
             typeof v === "function"
-              ? (v as (old: Owned[K]) => Owned[K])(o[k])
+              ? (v as (old: Owned[K]) => Owned[K])(base[k])
               : v;
-          return next === o[k] ? o : { ...o, [k]: next };
+          return next === base[k] ? base : { ...base, [k]: next };
         });
     return [own("roster"), own("activity"), own("error")] as const;
-  }, [workspaceId]);
-  // A List's error, or a stream callback, for an earlier workspace is
-  // dropped once the switch commits.
-  const currentWs = useRef(workspaceId);
-  useLayoutEffect(() => {
-    currentWs.current = workspaceId;
   }, [workspaceId]);
 
   // Each List in flight collects the stream's events that arrive while it
