@@ -42,6 +42,19 @@ function branchSha(ref, key) {
   }
 }
 
+// Like GitHub: a PR whose head does not merge cleanly into its current base is
+// CONFLICTING / DIRTY (native stacks: GitHub will not rebuild it, the owner must).
+function conflicts(pull) {
+  const dir = remoteFor(pull.repo);
+  if (!dir || !pull.base.sha || !pull.head.sha) return false;
+  try {
+    execFileSync("git", [`--git-dir=${dir}`, "merge-tree", "--write-tree", pull.base.sha, pull.head.sha], { stdio: "ignore" });
+    return false;
+  } catch (error) {
+    return error.status === 1;
+  }
+}
+
 function currentPull(pull) {
   pull.head.sha = branchSha(pull.head.ref, pull.repo) || pull.head.sha || "";
   pull.base.sha = branchSha(pull.base.ref, pull.repo) || pull.base.sha || "";
@@ -160,7 +173,10 @@ const server = createServer(async (request, response) => {
   if (one) {
     const pull = pulls.find((item) => item.number === Number(one[3]));
     if (!pull || !inRepo(pull, one[1], one[2])) return send(response, 404, { message: "pull not found" });
-    if (request.method === "GET") return send(response, 200, currentPull(pull));
+    if (request.method === "GET") {
+      const dirty = conflicts(currentPull(pull));
+      return send(response, 200, { ...pull, mergeable: !dirty, mergeable_state: dirty ? "dirty" : "clean" });
+    }
     if (request.method === "PATCH") {
       if (body.base) pull.base.ref = body.base;
       if (body.body !== undefined) pull.body = body.body;
@@ -240,9 +256,10 @@ const server = createServer(async (request, response) => {
     return send(response, 200, { data: { repository: { pullRequests: {
       nodes: pulls.filter((pull) => pull.state === "open" && (!vars.owner || inRepo(pull, vars.owner, vars.repo))).map((pull) => {
         const fails = contentFails(pull.repo, currentPull(pull).head.sha);
-        const override = { ...(contentChecks.has(pull.repo) ? { checks: fails ? "FAILURE" : "SUCCESS", merge_state: fails ? "BLOCKED" : "CLEAN" } : {}), ...(prStatus.get(pull.number) || {}) };
+        const dirty = conflicts(pull);
+        const override = { ...(contentChecks.has(pull.repo) ? { checks: fails ? "FAILURE" : "SUCCESS", merge_state: fails ? "BLOCKED" : "CLEAN" } : {}), ...(dirty ? { merge_state: "DIRTY" } : {}), ...(prStatus.get(pull.number) || {}) };
         const node = {
-          number: pull.number, headRefName: pull.head.ref, mergeable: "MERGEABLE",
+          number: pull.number, headRefName: pull.head.ref, mergeable: dirty ? "CONFLICTING" : "MERGEABLE",
           reviewDecision: override.review || "APPROVED", mergeQueueEntry: null,
           commits: { nodes: [{ commit: { statusCheckRollup: { state: override.checks || "SUCCESS" } } }] },
         };
