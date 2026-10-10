@@ -46,6 +46,16 @@ def build(case, specs, reviewed):
         st += reviewed.get(slot, [])
     return st
 
+def reject_ui(case, slot):
+    # A code revision's Reject lives in the Revisions section and has no test id or reason box.
+    return open_changes(case, slot) + [
+        "      - wait:", "          fn: \"document.querySelector('[data-testid=revisions-section]')?.textContent.includes('Awaiting review')\"",
+        "        intent: The revision is awaiting review, so Reject is live",
+        "      - click:", "          role: button", "          name: Reject", "          exact: true",
+        f"        intent: {json.dumps('Human clicks Reject on the revision of task ' + slot)}",
+    ]
+
+
 def open_changes(case, slot):
     return run(f"open-task {case} {slot}", f"Human opens task {slot}") + [
         "      - click:", "          role: tab", "          name: Changes", "          exact: true",
@@ -247,11 +257,7 @@ def variants(real=False):
 
     c = "r1"
     st = setup(c) + settings(c, "stack", "off", "off")
-    st += task(c, "a") + run(f"open-task {c} a", "Human opens task A") + [
-        "      - click:", "          testid: panel-reject-button", "        intent: Human clicks Reject on task A",
-        "      - fill: { testid: reject-textarea, value: \"Rejected by the matrix: try again.\" }", "        intent: Human writes why",
-        "      - click:", "          testid: reject-submit", "        intent: Human sends the rejection",
-    ] + run(f"reject {c} a", "Task A is open again, with a reject verdict and no PR") + run(f"rerun {c} a", "The epic runner runs A again") + \
+    st += task(c, "a") + reject_ui(c, "a") + run(f"reject {c} a", "Task A is open again, with a reject verdict and no PR") + run(f"rerun {c} a", "The epic runner runs A again") + \
         wait_rev(c, "a") + human_create_pr(c, "a", "main") + run(f"ui {c} a open", "Task A shows its PR")
     out += case("R1 Reject, rerun, approve", "A rejected task runs again and its new revision opens the PR", st)
 
@@ -265,11 +271,7 @@ def variants(real=False):
     c = "d2"
     st = setup(c) + settings(c, "stack", "off", "off")
     st += run(f"chain {c} a b:a", "API client creates A and B (blocked by A) in one epic and starts it") + wait_rev(c, "a") + wait_rev(c, "b") + \
-        run(f"open-task {c} a", "Human opens task A") + [
-        "      - click:", "          testid: panel-reject-button", "        intent: Human clicks Reject on task A",
-        "      - fill: { testid: reject-textarea, value: \"Rejected by the matrix: B must be rebuilt.\" }", "        intent: Human writes why",
-        "      - click:", "          testid: reject-submit", "        intent: Human sends the rejection",
-    ] + run(f"reject {c} a", "A is open again with a reject verdict and no PR") + \
+        reject_ui(c, "a") + run(f"reject {c} a", "A is open again with a reject verdict and no PR") + \
         run(f"stale {c} b a", "B, built on the rejected A, is stale, has no PR and offers a rebuild")
     out += case("D2 Rejecting a blocker makes its dependent stale", "Rejecting A marks B, which ran on A's revision, stale with a rebuild offer", st, needs=True)
 

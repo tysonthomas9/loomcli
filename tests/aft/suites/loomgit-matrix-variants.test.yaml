@@ -189,15 +189,26 @@ tests:
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" wait-rev r1 a 4 4"
         intent: "Task a runs (real codex on the real tier) until it records a revision and waits in review (4/4)"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" open-task r1 a"
-        intent: "Human opens task A"
+        intent: "Human opens task a"
       - click:
-          testid: panel-reject-button
-        intent: Human clicks Reject on task A
-      - fill: { testid: reject-textarea, value: "Rejected by the matrix: try again." }
-        intent: Human writes why
+          role: tab
+          name: Changes
+          exact: true
+        intent: "Human opens the Changes tab of task a"
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The Changes panel is mounted
+      - wait:
+          text: matrix-r1-a.txt
+        intent: The task's file is in the diff
+      - wait:
+          fn: "document.querySelector('[data-testid=revisions-section]')?.textContent.includes('Awaiting review')"
+        intent: The revision is awaiting review, so Reject is live
       - click:
-          testid: reject-submit
-        intent: Human sends the rejection
+          role: button
+          name: Reject
+          exact: true
+        intent: "Human clicks Reject on the revision of task a"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" reject r1 a"
         intent: "Task A is open again, with a reject verdict and no PR"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" rerun r1 a"
@@ -337,15 +348,26 @@ tests:
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" wait-rev d2 b 4 4"
         intent: "Task b runs (real codex on the real tier) until it records a revision and waits in review (4/4)"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" open-task d2 a"
-        intent: "Human opens task A"
+        intent: "Human opens task a"
       - click:
-          testid: panel-reject-button
-        intent: Human clicks Reject on task A
-      - fill: { testid: reject-textarea, value: "Rejected by the matrix: B must be rebuilt." }
-        intent: Human writes why
+          role: tab
+          name: Changes
+          exact: true
+        intent: "Human opens the Changes tab of task a"
+      - wait:
+          fn: "!!document.querySelector('[data-testid=task-changes-tab]')"
+        intent: The Changes panel is mounted
+      - wait:
+          text: matrix-d2-a.txt
+        intent: The task's file is in the diff
+      - wait:
+          fn: "document.querySelector('[data-testid=revisions-section]')?.textContent.includes('Awaiting review')"
+        intent: The revision is awaiting review, so Reject is live
       - click:
-          testid: reject-submit
-        intent: Human sends the rejection
+          role: button
+          name: Reject
+          exact: true
+        intent: "Human clicks Reject on the revision of task a"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" reject d2 a"
         intent: "A is open again with a reject verdict and no PR"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" stale d2 b a"
