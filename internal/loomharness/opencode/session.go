@@ -29,15 +29,8 @@ func (c *Client) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharne
 	if err := c.bridge(ctx, spec.Dir, spec.Launch.Env); err != nil {
 		return loomharness.NativeRef{}, err
 	}
-	if spec.Preset.Name != "" {
-		agent := "loom-" + spec.Preset.Name
-		if err := c.hasAgent(ctx, agent, spec.Dir); err != nil {
-			return loomharness.NativeRef{}, err
-		}
-		body["agent"] = agent
-	}
-	if provider, model, ok := strings.Cut(spec.Model, "/"); ok {
-		body["model"] = map[string]string{"providerID": provider, "id": model}
+	if err := c.selectAgent(ctx, spec, body); err != nil {
+		return loomharness.NativeRef{}, err
 	}
 	rules, err := nativeRules(spec.Rules)
 	if err != nil {
@@ -78,6 +71,22 @@ func (c *Client) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharne
 		return loomharness.NativeRef{}, err // not this Open's to remove
 	}
 	return c.discard(ref, err)
+}
+
+// selectAgent adds the preset's native agent, which must exist, and the model
+// to the create body.
+func (c *Client) selectAgent(ctx context.Context, spec loomharness.OpenSpec, body map[string]any) error {
+	if spec.Preset.Name != "" {
+		agent := "loom-" + spec.Preset.Name
+		if err := c.hasAgent(ctx, agent, spec.Dir); err != nil {
+			return err
+		}
+		body["agent"] = agent
+	}
+	if provider, model, ok := strings.Cut(spec.Model, "/"); ok {
+		body["model"] = map[string]string{"providerID": provider, "id": model}
+	}
+	return nil
 }
 
 // persona installs the saved per-agent text as a durable native instruction
