@@ -3816,7 +3816,9 @@ paths:
           description: >-
             not_all_applied (the approvals are recorded, no repo is published,
             and `repo` and `message` name the repo that did not apply),
-            stale_revision, or publish_failed.
+            stale_revision, missing_repo (the request leaves out a repo of the
+            task still without a PR), no_working_area (several repos and the
+            lead has no working area; nothing is recorded), or publish_failed.
           content:
             application/json:
               schema:

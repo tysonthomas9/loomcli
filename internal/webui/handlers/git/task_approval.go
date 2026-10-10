@@ -31,6 +31,16 @@ type taskApprovalRevision struct {
 	HeadSHA  string `json:"head_sha"`
 }
 
+// approvalRefusal refuses a whole task approval before any verdict is
+// recorded, naming the repo.
+type approvalRefusal struct {
+	Code    string
+	Repo    string
+	Message string
+}
+
+func (r *approvalRefusal) Error() string { return r.Message }
+
 // approvalFailure names a repo whose approval did not apply.
 type approvalFailure struct {
 	Repo   string   `json:"repo"`
@@ -61,18 +71,16 @@ func handleTaskApprovalWithPublisher(w http.ResponseWriter, req *http.Request, p
 	}
 	defer func() { _ = store.Close() }()
 	ctx, workspace := req.Context(), req.PathValue("ws")
-	repos, err := taskApprovalRepos(ctx, store, workspace, req.PathValue("id"), body)
-	if err != nil {
-		handler.WriteJSON(w, http.StatusConflict, map[string]any{"success": false, "error": "stale_revision", "message": err.Error()})
+	repos, available, err := checkTaskApproval(ctx, store, workspace, req.PathValue("id"), body)
+	var refused *approvalRefusal
+	if errors.As(err, &refused) {
+		writeApprovalRefusal(w, refused)
 		return
 	}
-	available, err := hasWorkingArea(ctx, store, workspace, body.Lead)
 	if err != nil {
 		writeReviewError(w, err)
 		return
 	}
-	// No working area: nothing can apply now, so record the PR intent and
-	// let each repo publish as it applies, as a one-repo approval does.
 	verdicts, err := recordTaskApproval(ctx, store, workspace, body, !available)
 	if err != nil {
 		writeReviewError(w, err)
@@ -131,8 +139,37 @@ func recordTaskApproval(ctx context.Context, store *review.Local, workspace stri
 	return verdicts, nil
 }
 
-// taskApprovalRepos checks each revision is its repo's newest for the task
-// and returns the repo of each change.
+// checkTaskApproval refuses the whole approval before anything is recorded
+// when a revision is stale, a repo is left out, or several repos have no
+// working area to apply to: nothing could check them together, so none is
+// approved. One repo keeps its PR intent and publishes when it applies.
+func checkTaskApproval(ctx context.Context, store *review.Local, workspace, task string,
+	body taskApprovalRequest) (map[string]string, bool, error) {
+	repos, err := taskApprovalRepos(ctx, store, workspace, task, body)
+	if err != nil {
+		return nil, false, err
+	}
+	available, err := hasWorkingArea(ctx, store, workspace, body.Lead)
+	if err != nil {
+		return nil, false, err
+	}
+	if !available && len(body.Revisions) > 1 {
+		first := repos[body.Revisions[0].ChangeID]
+		return nil, false, &approvalRefusal{Code: "no_working_area", Repo: first,
+			Message: first + ": " + body.Lead + " has no working area to apply to yet. No repo is approved; " +
+				"approve again once it has one."}
+	}
+	return repos, available, nil
+}
+
+func writeApprovalRefusal(w http.ResponseWriter, r *approvalRefusal) {
+	handler.WriteJSON(w, http.StatusConflict, map[string]any{"success": false, "error": r.Code, "repo": r.Repo, "message": r.Message})
+}
+
+// taskApprovalRepos checks each revision is its repo's newest for the task,
+// and that the request covers every repo of the task still without a PR (a
+// rejected or no-change revision needs no approval). It returns the repo of
+// each change.
 func taskApprovalRepos(ctx context.Context, store *review.Local, workspace, task string, body taskApprovalRequest) (map[string]string, error) {
 	revisions, err := store.TaskRevisionsForLead(ctx, workspace, task, body.Lead)
 	if err != nil {
@@ -144,9 +181,17 @@ func taskApprovalRepos(ctx context.Context, store *review.Local, workspace, task
 			return r.ChangeID == want.ChangeID && r.Number == want.Number && r.HeadSHA == want.HeadSHA && !r.Superseded
 		})
 		if i < 0 {
-			return nil, errors.New("revision " + want.ChangeID + " is not this task's newest; reload and review again")
+			return nil, &approvalRefusal{Code: "stale_revision", Repo: want.ChangeID,
+				Message: "revision " + want.ChangeID + " is not this task's newest; reload and review again"}
 		}
 		repos[want.ChangeID] = revisions[i].Repo
+	}
+	for _, r := range revisions {
+		if _, asked := repos[r.ChangeID]; asked || r.Superseded || r.NoChanges || r.PRNumber != 0 || r.Verdict == "reject" {
+			continue
+		}
+		return nil, &approvalRefusal{Code: "missing_repo", Repo: r.Repo,
+			Message: r.Repo + ": not in this approval. Approve every repo of the task together; reload and review again."}
 	}
 	return repos, nil
 }

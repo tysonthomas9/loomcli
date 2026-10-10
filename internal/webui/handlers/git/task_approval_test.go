@@ -154,3 +154,59 @@ func TestTaskApprovalRefusesAStaleRevision(t *testing.T) {
 		t.Fatalf("stale head = %d %s", recorder.Code, recorder.Body.String())
 	}
 }
+
+// TestTaskApprovalRefusesBeforeRecording pins the two whole-task refusals:
+// a request that leaves out a repo still without a PR, and several repos
+// while the lead has no working area. Neither records a verdict or a PR
+// intent, and both name the repo.
+func TestTaskApprovalRefusesBeforeRecording(t *testing.T) {
+	revisions := freezeTwoRepoTask(t)
+	alpha, beta := revisions[0], revisions[1]
+	previousArea := hasWorkingArea
+	t.Cleanup(func() { hasWorkingArea = previousArea })
+	available := true
+	hasWorkingArea = func(context.Context, *review.Local, string, string) (bool, error) { return available, nil }
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/revisions", handleTaskRevisions)
+	mux.HandleFunc("POST /api/workspaces/{ws}/issues/{id}/approval", func(w http.ResponseWriter, r *http.Request) {
+		handleTaskApprovalWithPublisher(w, r, func(context.Context, string, string) error {
+			t.Fatal("a refused approval published")
+			return nil
+		})
+	})
+	approve := func(revs ...loomgit.Revision) (int, map[string]any) {
+		items := []map[string]any{}
+		for _, r := range revs {
+			items = append(items, map[string]any{"change_id": r.Change, "number": r.Number, "head_sha": r.HeadSHA})
+		}
+		data, _ := json.Marshal(map[string]any{"verdict": "approve", "actor": map[string]string{"kind": "human", "id": "user"}, "revisions": items})
+		recorder := httptest.NewRecorder()
+		mux.ServeHTTP(recorder, httptest.NewRequest("POST", "/api/workspaces/W/issues/T/approval", bytes.NewReader(data)))
+		var decoded map[string]any
+		_ = json.Unmarshal(recorder.Body.Bytes(), &decoded)
+		return recorder.Code, decoded
+	}
+	nothingRecorded := func() {
+		t.Helper()
+		get := httptest.NewRecorder()
+		mux.ServeHTTP(get, httptest.NewRequest("GET", "/api/workspaces/W/issues/T/revisions", nil))
+		if body := get.Body.String(); strings.Contains(body, `"verdict"`) || strings.Contains(body, `"publish_status"`) {
+			t.Fatalf("a refused approval recorded something: %s", body)
+		}
+	}
+
+	if code, response := approve(alpha); code != http.StatusConflict || response["error"] != "missing_repo" || response["repo"] != "beta" {
+		t.Fatalf("approving alpha alone = %d %v", code, response)
+	}
+	nothingRecorded()
+
+	available = false
+	code, response := approve(alpha, beta)
+	if code != http.StatusConflict || response["error"] != "no_working_area" || response["repo"] != "alpha" {
+		t.Fatalf("no working area = %d %v", code, response)
+	}
+	if message, _ := response["message"].(string); !strings.Contains(message, "No repo is approved") {
+		t.Fatalf("message = %q", message)
+	}
+	nothingRecorded()
+}

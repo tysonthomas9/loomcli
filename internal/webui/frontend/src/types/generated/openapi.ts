@@ -8320,7 +8320,7 @@ export interface operations {
           "application/json": Record<string, never>;
         };
       };
-      /** @description not_all_applied (the approvals are recorded, no repo is published, and `repo` and `message` name the repo that did not apply), stale_revision, or publish_failed. */
+      /** @description not_all_applied (the approvals are recorded, no repo is published, and `repo` and `message` name the repo that did not apply), stale_revision, missing_repo (the request leaves out a repo of the task still without a PR), no_working_area (several repos and the lead has no working area; nothing is recorded), or publish_failed. */
       409: {
         headers: {
           [name: string]: unknown;
