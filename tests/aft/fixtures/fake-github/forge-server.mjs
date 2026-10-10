@@ -17,6 +17,17 @@ let remotes = {};
 const prStatus = new Map();
 const statuses = [];
 
+
+// Like GitHub: when a PR merges, open PRs based on its head branch are
+// retargeted to the merged PR's base (native stacks rely on this after the
+// bottom PR lands, including merges made outside Loom).
+function retargetDependents(merged) {
+  for (const pull of pulls) {
+    if (pull.state === "open" && pull.repo === merged.repo && pull.base.ref === merged.head.ref) {
+      pull.base.ref = merged.base.ref;
+    }
+  }
+}
 function remoteFor(key) {
   return (key && remotes[key]) || remote;
 }
@@ -120,6 +131,7 @@ const server = createServer(async (request, response) => {
     pull.state = "closed";
     pull.merged_at = new Date().toISOString();
     pull.merge_commit_sha = body.sha;
+    retargetDependents(pull);
     return send(response, 200, pull);
   }
 
@@ -214,6 +226,7 @@ const server = createServer(async (request, response) => {
         pull.state = "closed";
         pull.merged_at = new Date().toISOString();
         pull.merge_commit_sha = currentPull(pull).head.sha;
+        retargetDependents(pull);
       }
       const successor = stack && pulls.find((item) => item.number === stack.numbers[numbers.length]);
       if (successor) successor.base.ref = "main";
