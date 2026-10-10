@@ -10,7 +10,7 @@
 #
 # `run` takes the first free slot (or waits for slot N with --slot) and runs the
 # command with these exported (slot N, base B = LOOM_SLOT_PORT_BASE + N*100):
-#   LOOM_SLOT=N  LOOM_SLOT_DIR=<state>/slot-N  TMPDIR/GOTMPDIR=<slot dir>/tmp
+#   LOOM_SLOT=N  LOOM_SLOT_DIR=<state>/slot-N  TMPDIR=<slot dir>/tmp
 #   LOCAL_MODE_COMPOSE_PROJECT=loomcli-slot-N  (make derives image tags from it)
 #   LOCAL_MODE_FLEETDB_PORT=B+80  LOCAL_MODE_API_PORT=B+82  LOCAL_MODE_UI_PORT=B+83
 #   LOCAL_MODE_API_URL=http://127.0.0.1:B+82
@@ -50,11 +50,12 @@ check_slot() {
 slot_env() {
 	local n="$1" base=$((PORT_BASE + $1 * 100)) dir="$STATE_DIR/slot-$1"
 	local fdb="${FLEET_DB_REPO:-$AFT_INPUTS/fleet-db}"
+	# No GOTMPDIR: go test puts t.TempDir() under it, bypassing the TMPDIR that
+	# tests such as internal/loomharness/claude set for their own isolation.
 	cat <<EOF
 export LOOM_SLOT=$n
 export LOOM_SLOT_DIR='$dir'
 export TMPDIR='$dir/tmp'
-export GOTMPDIR='$dir/tmp'
 export LOCAL_MODE_COMPOSE_PROJECT=loomcli-slot-$n
 export LOCAL_MODE_FLEETDB_PORT=$((base + 80))
 export LOCAL_MODE_API_PORT=$((base + 82))

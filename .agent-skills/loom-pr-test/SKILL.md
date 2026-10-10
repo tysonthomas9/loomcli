@@ -141,6 +141,8 @@ Slot N uses ports `B+80/82/83` (FleetDB/API/UI) and `B+90/91` (AFT `E2E_PORT`/`E
 
 Run the whole up/verify/down sequence inside one `run` so the slot is held while the stack exists, and always tear down inside it. The lock is released when the command exits, including on INT/TERM (the command is stopped first), and a lock whose owner died is reclaimed. Compose selection is unchanged: Podman when installed, otherwise `docker compose`; set `LOCAL_MODE_COMPOSE` to force one.
 
+On Linux, a gate run with a throwaway `HOME` (see AGENTS.md) has no git identity and cannot guess one, so tests that commit fail; pass one as CI does, e.g. `GIT_AUTHOR_NAME="Loom Gate" GIT_AUTHOR_EMAIL=gate@loomcli.test GIT_COMMITTER_NAME="Loom Gate" GIT_COMMITTER_EMAIL=gate@loomcli.test`.
+
 ## Compose Overrides
 
 Use `LOCAL_MODE_COMPOSE` to force the compose runner when auto-detection picks the wrong one. Use `LOCAL_MODE_COMPOSE_FILES` for real compatibility overrides, not for fabricated state.
