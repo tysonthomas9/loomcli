@@ -264,7 +264,13 @@ lead_refused() { # the real lead ran the command and Loom's refusal is in its tr
   cp "$work/lead-terminal.txt" "$work/lead-refusal-$(date +%s).txt"
 }
 
-verdict_by_lead() { revisions "$1"; json "$work/rev-$1.json" 'assert v.get("verdict")=="policy", v'; }
+# rev_numbered <slot> <number>: that revision's row into $work/rev-<slot>-<number>.json.
+# A carried (derived) rebuild can sit on top of the revision a verdict was for.
+rev_numbered() {
+  revisions "$1"
+  json "$work/revisions-$1.json" 'r=[i for i in v["data"] if str(i["number"])==sys.argv[2]]; print(json.dumps(r[0] if r else {}))' "$2" > "$work/rev-$1-$2.json"
+}
+verdict_by_lead() { rev_numbered "$1" "$2"; json "$work/rev-$1-$2.json" 'assert v.get("verdict")=="policy", v'; }
 
 # --- phases --------------------------------------------------------------------
 
@@ -616,12 +622,12 @@ lead-do)
       if [[ "$forge" == fake ]]; then
         [[ "$code" == 200 ]] || { [[ "$code" == 409 ]] && grep -q publish_failed "$work/lead-$action.out"; } || fail "lead approval: HTTP $code"
       fi
-      wait_until $((60 * scale)) "a policy verdict by the lead on $slot" verdict_by_lead "$slot" ;;
+      wait_until $((60 * scale)) "a policy verdict by the lead on $slot revision $number" verdict_by_lead "$slot" "$number" ;;
     approve:refused | cli-approve:refused)
       [[ "$forge" == fake && "$action" == approve ]] && { [[ "$code" == 409 ]] && grep -q review_required "$work/lead-$action.out" || fail "lead approval with Lead may approve off: HTTP $code"; }
       for _ in $(seq 1 $((15 * scale))); do
-        revisions "$slot"
-        json "$work/rev-$slot.json" 'assert not v.get("verdict"), "the lead got a verdict recorded: %r" % v' || fail "$action by the lead was not refused: $(cat "$work/rev-$slot.json")"
+        rev_numbered "$slot" "$number"
+        json "$work/rev-$slot-$number.json" 'assert v and not v.get("verdict"), "the lead got a verdict recorded: %r" % v' || fail "$action by the lead was not refused: $(cat "$work/rev-$slot-$number.json")"
         sleep 2
       done
       curl -fsS "$api/issues/$(task_id "$slot")" > "$work/issue-$slot.json"
