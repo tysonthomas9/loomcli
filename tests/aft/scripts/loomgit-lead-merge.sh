@@ -68,7 +68,7 @@ if [[ "$phase" == teardown ]]; then
 fi
 
 # make_tasks <stack|none> <repo:file>... creates one real task per argument and
-# runs them through the epic runner until each has a reviewable revision.
+# starts them through the epic runner; approve_and_apply waits for each revision.
 make_tasks() {
   local stack="$1"
   shift
@@ -109,23 +109,29 @@ make_tasks() {
   fi
   curl -fsS -X POST "$api/workflows/epic-runner" -H 'Content-Type: application/json' \
     -d "{\"epicId\":\"$epic\",\"runner\":\"local-task-runner\"}" > "$case_dir/workflow.json"
-  for layer in $(seq 1 "$(cat "$case_dir/layers")"); do
-    task="$(cat "$case_dir/task-$layer.id")"
-    for _ in $(seq 1 90); do
-      curl -fsS "$api/issues/$task/revisions" > "$case_dir/revisions-$layer.json"
-      if grep -q '"head_sha"' "$case_dir/revisions-$layer.json"; then break; fi
-      sleep 2
-    done
-    grep -q '"head_sha"' "$case_dir/revisions-$layer.json"
-  done
 }
 
-# approve_and_apply approves each revision as a human, applies it into the lead
+# wait_revision <layer>: the layer's task records a reviewable revision. A
+# stacked task runs only once the task below it is approved (P1.26).
+wait_revision() {
+  local task
+  task="$(cat "$case_dir/task-$1.id")"
+  for _ in $(seq 1 90); do
+    curl -fsS "$api/issues/$task/revisions" > "$case_dir/revisions-$1.json"
+    if grep -q '"head_sha"' "$case_dir/revisions-$1.json"; then return 0; fi
+    sleep 2
+  done
+  echo "task $task (layer $1) recorded no revision" >&2
+  return 1
+}
+
+# approve_and_apply waits for each layer's revision, approves it as a human, applies it into the lead
 # area and approves the Apply-derived head, as a stack merge requires.
 approve_and_apply() {
   local layer task change revision sha
   for layer in $(seq 1 "$(cat "$case_dir/layers")"); do
     task="$(cat "$case_dir/task-$layer.id")"
+    wait_revision "$layer"
     read -r change revision sha < <(json "$case_dir/revisions-$layer.json" 'i=v["data"][0]; print(i["change_id"],i["number"],i["head_sha"])')
     printf '%s\n' "$change" > "$case_dir/change-$layer.id"
     curl -sS --fail-with-body -X POST "$api/changes/$change/revisions/$revision/verdict" -H 'Content-Type: application/json' \
