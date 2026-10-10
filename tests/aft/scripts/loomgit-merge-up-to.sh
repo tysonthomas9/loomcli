@@ -61,6 +61,8 @@ done
 curl -fsS -X POST "$api/workflows/epic-runner" -H 'Content-Type: application/json' \
   -d "{\"epicId\":\"$epic\",\"runner\":\"local-task-runner\"}" > "$case_dir/workflow.json"
 
+# A stacked task runs only once the task below it is approved (P1.26), so
+# approve and apply each layer as its revision appears.
 for layer in 1 2 3 4; do
   task="$(cat "$case_dir/task-$layer.id")"
   for attempt in $(seq 1 90); do
@@ -69,10 +71,6 @@ for layer in 1 2 3 4; do
     sleep 2
   done
   grep -q '"head_sha"' "$case_dir/revisions-$layer.json"
-done
-
-for layer in 1 2 3 4; do
-  task="$(cat "$case_dir/task-$layer.id")"
   read -r change revision sha < <(python3 -c 'import json,sys; item=json.load(open(sys.argv[1]))["data"][0]; print(item["change_id"],item["number"],item["head_sha"])' "$case_dir/revisions-$layer.json")
   printf '%s\n' "$change" > "$case_dir/change-$layer.id"
   curl -sS --fail-with-body -X POST "$api/changes/$change/revisions/$revision/verdict" -H 'Content-Type: application/json' \
