@@ -58,7 +58,7 @@ func TestFourLayerMergeEntryUsesRecordedBackend(t *testing.T) {
 			oldProvider := localPublishProvider
 			localPublishProvider = func() (Forge, string, string) { return mergeForge, "fixture-token", "owner/repo" }
 			t.Cleanup(func() { localPublishProvider = oldProvider })
-			view, err := MergeStackPreviewLocal(ctx, "W", "L", "feature", "C")
+			view, err := MergeUpToViewLocal(ctx, "W", "C")
 			if err != nil || len(view.Layers) != 4 || view.Backend != backend {
 				t.Fatalf("preview=%+v err=%v", view, err)
 			}
@@ -91,7 +91,7 @@ func assertBlockedMergeEntry(t *testing.T, item fixture, backend string) {
 			t.Fatal(err)
 		}
 	}
-	view, err := MergeStackPreviewLocal(ctx, "W", "L", "feature", "C")
+	view, err := MergeUpToViewLocal(ctx, "W", "C")
 	if err != nil || view.Phase != "blocked" || view.Reason == "" {
 		t.Fatalf("blocked view=%+v err=%v", view, err)
 	}
@@ -104,7 +104,7 @@ func assertBlockedMergeEntry(t *testing.T, item fixture, backend string) {
 	if err := os.Rename(item.repo, item.repo+"-away"); err != nil {
 		t.Fatal(err)
 	}
-	view, err = MergeStackPreviewLocal(ctx, "W", "L", "feature", "C")
+	view, err = MergeUpToViewLocal(ctx, "W", "C")
 	if err != nil || view.Phase != "blocked" || len(view.Layers) != 4 {
 		t.Fatalf("durable view=%+v err=%v", view, err)
 	}

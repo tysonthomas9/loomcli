@@ -70,7 +70,7 @@ func TestLoomMergeUpToHigherLayerAfterEarlierMergeLanded(t *testing.T) {
 	if err != nil || current.Head == heads[2] {
 		t.Fatalf("C was not restacked: %+v, %v", current, err)
 	}
-	view, err := MergeStackPreviewLocal(ctx, "W", "L", "feature", "C")
+	view, err := MergeUpToViewLocal(ctx, "W", "C")
 	if err != nil || view.Phase != "" || len(view.Layers) != 2 || view.Layers[0].Change != "C" ||
 		view.Layers[0].Head != current.Head || view.Layers[0].State != "pending" {
 		t.Fatalf("view after B landed = %+v, %v", view, err)

@@ -32,15 +32,6 @@ type MergeStackView struct {
 	Layers  []MergeLayerView `json:"layers"`
 }
 
-func MergeStackPreviewLocal(ctx context.Context, workspace, lead, stackID, target string) (MergeStackView, error) {
-	store, err := openLocalStore()
-	if err != nil {
-		return MergeStackView{}, err
-	}
-	defer func() { _ = store.Close() }()
-	return mergeStackView(ctx, store, workspace, lead, stackID, target)
-}
-
 func mergeStackView(ctx context.Context, store *journal.SQLite, workspace, lead, stackID, target string) (MergeStackView, error) {
 	if workspace == "" || lead == "" || stackID == "" || target == "" {
 		return MergeStackView{}, errors.New("workspace, lead, stack and target are required")
