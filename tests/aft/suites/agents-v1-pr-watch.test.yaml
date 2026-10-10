@@ -4,7 +4,8 @@
 # and the host GitHub connector reads fixtures/fake-github through
 # LOOM_CONNECTOR_GITHUB_BASE_URL, which run-aft.sh sets for this tier, with a
 # fixture token this suite puts in the host settings and clears afterwards.
-# OR8 (PR-watch wakes) is not built yet; its cases extend this suite later.
+# W1-W4 cover OR8's wakes: each waits for the dispatcher's real two-minute
+# PR-watch sweep, which it sees in fake-github's request log.
 suite: agents-v1-pr-watch
 classification: { area: agents, feature: agent-api-pr-watch, surface: api, purpose: journey }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
@@ -137,6 +138,166 @@ tests:
           assert r[4]["body"] == {"number": 7, "removed": True}, r[4]
           PY
         intent: "Watch, unwatch twice, watch again and unwatch as the GitHub Lead, and check each answer"
+
+  - name: W1 a sweep with no news wakes no one (OR8)
+    intent: After the Lead watches PR 7, the next PR-watch sweep reads the PR, finds nothing new since the watch, and hands the Lead nothing
+    steps:
+      - run: |
+          set -e
+          curl -sf -X POST "$AFT_FAKE_GH_BASE/__reset" >/dev/null
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          python3 -c 'import json; print(json.dumps({"steps": [{"text": "AGV1-PRW-WOKE"}] * 4}))' |
+            curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" -d @- >/dev/null
+          "$AFT_TESTS_DIR/scripts/agent-bridge-call.py" E2E-AGV1-PRWATCH "$(cat "$AFT_WORK_DIR/agv1PrWatch-gh-Id")" github/watch '{"number":7}' |
+            python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["status"] == 200 and r["body"].get("created") is True, r'
+          "$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" begin-sweep "$AFT_WORK_DIR/agv1-prwatch-w1"
+        intent: "Script the Lead's replies, watch PR 7, and start waiting for the next sweep"
+      - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w1"'
+        intent: "Wait for a whole sweep after the watch (poll 1 of 4)"
+      - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w1"'
+        intent: "Wait for a whole sweep after the watch (poll 2 of 4)"
+      - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w1"'
+        intent: "Wait for a whole sweep after the watch (poll 3 of 4)"
+      - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w1"'
+        intent: "Wait for a whole sweep after the watch (poll 4 of 4)"
+      - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" end "$AFT_WORK_DIR/agv1-prwatch-w1"'
+        intent: "Check the wait for wait for a whole sweep after the watch is over"
+      - run: |
+          set -e
+          got="$("$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" wakes E2E-AGV1-PRWATCH "$(cat "$AFT_WORK_DIR/agv1PrWatch-gh-Id")")"
+          [ "$got" = "[]" ] || { echo "a sweep with no news woke the Lead: $got" >&2; exit 1; }
+        intent: "Check the sweep handed the Lead no wake"
+
+  - name: W2 news wakes the Lead once, without the host's own comment (OR8)
+    intent: A failed check, a new conflict and a comment by someone else wake the Lead with one message telling all three, the host viewer's own comment is left out, and the next sweep tells nothing again
+    steps:
+      - run: |
+          set -e
+          # Patched right after W1's sweep ended, so the next sweep sees all of it at once.
+          curl -sf -X POST "$AFT_FAKE_GH_BASE/__fixture" -H "Content-Type: application/json" -d '{
+            "pr": {"mergeable_state": "dirty"},
+            "checkRuns": [{"id": 101, "name": "ci", "status": "completed", "conclusion": "failure"}],
+            "issueComments": [{"id": 501, "user": {"login": "octocat"}, "body": "please fix"},
+                              {"id": 502, "user": {"login": "aft-viewer"}, "body": "the host itself"}]}' >/dev/null
+          "$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" begin-wakes "$AFT_WORK_DIR/agv1-prwatch-w2" E2E-AGV1-PRWATCH "$(cat "$AFT_WORK_DIR/agv1PrWatch-gh-Id")" 1
+        intent: "Add a failed check, a conflict, a comment by octocat and one by the host viewer, and start waiting for a wake"
+      - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w2"'
+        intent: "Wait for the Lead's wake (poll 1 of 4)"
+      - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w2"'
+        intent: "Wait for the Lead's wake (poll 2 of 4)"
+      - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w2"'
+        intent: "Wait for the Lead's wake (poll 3 of 4)"
+      - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w2"'
+        intent: "Wait for the Lead's wake (poll 4 of 4)"
+      - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" end "$AFT_WORK_DIR/agv1-prwatch-w2"'
+        intent: "Check the wait for wait for the lead's wake is over"
+      - run: |
+          set -e
+          "$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" wakes E2E-AGV1-PRWATCH "$(cat "$AFT_WORK_DIR/agv1PrWatch-gh-Id")" > "$AFT_WORK_DIR/agv1-prwatch-w2-wakes.json"
+          python3 - "$AFT_WORK_DIR/agv1-prwatch-w2-wakes.json" <<'PY'
+          import json, sys
+          got = json.load(open(sys.argv[1]))
+          assert len(got) == 1, "want one wake, got %r" % got
+          t = got[0]
+          assert t.startswith("Update on pull request loom-e2e/agv1-prwatch#7, which Loom is watching for you:"), t
+          for want in ("- Checks finished on 0000000; 1 of 1 failed: ci.",
+                       "- The branch now conflicts with its base.",
+                       "- 1 new comment: octocat (issue 501)."):
+              assert want in t, "missing %r in %r" % (want, t)
+          assert "aft-viewer" not in t, "the host viewer's own comment was told: %r" % t
+          PY
+          "$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" begin-sweep "$AFT_WORK_DIR/agv1-prwatch-w2b"
+        intent: "Check the one wake tells the failed check, the conflict and octocat's comment but not the host's, and start waiting for the next sweep"
+      - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w2b"'
+        intent: "Wait for the sweep after the wake (poll 1 of 4)"
+      - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w2b"'
+        intent: "Wait for the sweep after the wake (poll 2 of 4)"
+      - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w2b"'
+        intent: "Wait for the sweep after the wake (poll 3 of 4)"
+      - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w2b"'
+        intent: "Wait for the sweep after the wake (poll 4 of 4)"
+      - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" end "$AFT_WORK_DIR/agv1-prwatch-w2b"'
+        intent: "Check the wait for wait for the sweep after the wake is over"
+      - run: |
+          set -e
+          n="$("$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" wakes E2E-AGV1-PRWATCH "$(cat "$AFT_WORK_DIR/agv1PrWatch-gh-Id")" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')"
+          [ "$n" = 1 ] || { echo "the next sweep told the news again ($n wakes)" >&2; exit 1; }
+        intent: "Check the next sweep told nothing again"
+
+  - name: W3 a closed PR wakes the Lead once and ends the watch (OR8)
+    intent: When the watched PR closes, the Lead is told it was closed and that Loom stopped watching, and the watch is gone
+    steps:
+      - run: |
+          set -e
+          curl -sf -X POST "$AFT_FAKE_GH_BASE/__fixture" -H "Content-Type: application/json" -d '{"pr": {"state": "closed"}}' >/dev/null
+          "$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" begin-wakes "$AFT_WORK_DIR/agv1-prwatch-w3" E2E-AGV1-PRWATCH "$(cat "$AFT_WORK_DIR/agv1PrWatch-gh-Id")" 2
+        intent: "Close PR 7 and start waiting for a second wake"
+      - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w3"'
+        intent: "Wait for the close wake (poll 1 of 4)"
+      - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w3"'
+        intent: "Wait for the close wake (poll 2 of 4)"
+      - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w3"'
+        intent: "Wait for the close wake (poll 3 of 4)"
+      - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w3"'
+        intent: "Wait for the close wake (poll 4 of 4)"
+      - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" end "$AFT_WORK_DIR/agv1-prwatch-w3"'
+        intent: "Check the wait for wait for the close wake is over"
+      - run: |
+          set -e
+          "$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" wakes E2E-AGV1-PRWATCH "$(cat "$AFT_WORK_DIR/agv1PrWatch-gh-Id")" > "$AFT_WORK_DIR/agv1-prwatch-w3-wakes.json"
+          "$AFT_TESTS_DIR/scripts/agent-bridge-call.py" E2E-AGV1-PRWATCH "$(cat "$AFT_WORK_DIR/agv1PrWatch-gh-Id")" github/unwatch '{"number":7}' \
+            > "$AFT_WORK_DIR/agv1-prwatch-w3-unwatch.json"
+          python3 - "$AFT_WORK_DIR" <<'PY'
+          import json, sys
+          d = sys.argv[1]
+          got = json.load(open(d + "/agv1-prwatch-w3-wakes.json"))
+          assert len(got) == 2, "want the W2 wake and one close wake, got %r" % got
+          assert "- It was closed, so Loom stopped watching it. Watch it again if it reopens." in got[1], got[1]
+          un = json.load(open(d + "/agv1-prwatch-w3-unwatch.json"))
+          assert un == {"status": 200, "body": {"number": 7}}, "the closed PR's watch was not ended: %r" % un
+          PY
+        intent: "Check the close wake's text and that the watch is gone"
+
+  - name: W4 a merged PR ends the watch quietly (OR8)
+    intent: When a watched PR is merged, the next sweep ends the watch without waking the Lead
+    steps:
+      - run: |
+          set -e
+          call="$AFT_TESTS_DIR/scripts/agent-bridge-call.py"
+          "$call" E2E-AGV1-PRWATCH "$(cat "$AFT_WORK_DIR/agv1PrWatch-gh-Id")" github/unwatch '{"number":7}' >/dev/null  # in case W3 left one
+          curl -sf -X POST "$AFT_FAKE_GH_BASE/__reset" >/dev/null
+          "$call" E2E-AGV1-PRWATCH "$(cat "$AFT_WORK_DIR/agv1PrWatch-gh-Id")" github/watch '{"number":7}' |
+            python3 -c 'import json,sys; r=json.load(sys.stdin); assert r["status"] == 200 and r["body"].get("created") is True, r'
+          "$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" wakes E2E-AGV1-PRWATCH "$(cat "$AFT_WORK_DIR/agv1PrWatch-gh-Id")" > "$AFT_WORK_DIR/agv1-prwatch-w4-before.json"
+          curl -sf -X POST "$AFT_FAKE_GH_BASE/__fixture" -H "Content-Type: application/json" \
+            -d '{"pr": {"state": "closed", "merged": true, "merged_at": "2026-01-02T00:00:00Z"}}' >/dev/null
+          "$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" begin-sweep "$AFT_WORK_DIR/agv1-prwatch-w4"
+        intent: "Watch the reopened PR 7 again, merge it, and start waiting for the next sweep"
+      - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w4"'
+        intent: "Wait for a whole sweep after the merge (poll 1 of 4)"
+      - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w4"'
+        intent: "Wait for a whole sweep after the merge (poll 2 of 4)"
+      - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w4"'
+        intent: "Wait for a whole sweep after the merge (poll 3 of 4)"
+      - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" poll "$AFT_WORK_DIR/agv1-prwatch-w4"'
+        intent: "Wait for a whole sweep after the merge (poll 4 of 4)"
+      - run: '"$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" end "$AFT_WORK_DIR/agv1-prwatch-w4"'
+        intent: "Check the wait for wait for a whole sweep after the merge is over"
+      - run: |
+          set -e
+          "$AFT_TESTS_DIR/scripts/agv1-prwatch-wait.py" wakes E2E-AGV1-PRWATCH "$(cat "$AFT_WORK_DIR/agv1PrWatch-gh-Id")" > "$AFT_WORK_DIR/agv1-prwatch-w4-after.json"
+          "$AFT_TESTS_DIR/scripts/agent-bridge-call.py" E2E-AGV1-PRWATCH "$(cat "$AFT_WORK_DIR/agv1PrWatch-gh-Id")" github/unwatch '{"number":7}' \
+            > "$AFT_WORK_DIR/agv1-prwatch-w4-unwatch.json"
+          python3 - "$AFT_WORK_DIR" <<'PY'
+          import json, sys
+          d = sys.argv[1]
+          before = json.load(open(d + "/agv1-prwatch-w4-before.json"))
+          after = json.load(open(d + "/agv1-prwatch-w4-after.json"))
+          assert after == before, "a merged PR woke the Lead: %r" % after[len(before):]
+          un = json.load(open(d + "/agv1-prwatch-w4-unwatch.json"))
+          assert un == {"status": 200, "body": {"number": 7}}, "the merged PR's watch was not ended: %r" % un
+          PY
+        intent: "Check no wake came and the watch is gone"
 
   - name: H1z the host GitHub fixture token is cleared
     intent: Host settings are global, so the suite removes its fixture GitHub token and later suites see GitHub unconfigured again

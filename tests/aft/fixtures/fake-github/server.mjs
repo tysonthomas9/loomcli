@@ -16,8 +16,9 @@
 //   GET  /__requests  every request, INCLUDING the query string (a reviewer test
 //                     asserts state/per_page/page were sent), with auth redacted
 //   POST /__reset     clear the log and restore fixture defaults
-//   POST /__fixture   patch the PR fixture, or force {status, headers, body} on the
-//                     next matching response
+//   POST /__fixture   patch the PR fixture ({pr, files, issueComments, reviews,
+//                     reviewComments, checkRuns, statuses}), or force
+//                     {status, headers, body} on the next matching response
 //
 // Read-only proof depends on /__requests: LP-1 asserts NO mutating call was made.
 // That is only meaningful because writes are recorded here even though they succeed.
@@ -39,6 +40,10 @@ const DEFAULTS = () => ({
 
 let pr = DEFAULTS();
 let files = [];
+// The PR's lists a PR-watch sweep reads (OR8): GitHub-shaped items a test
+// patches through /__fixture under the same keys.
+const NO_LISTS = () => ({ issueComments: [], reviews: [], reviewComments: [], checkRuns: [], statuses: [] });
+let lists = NO_LISTS();
 let forced = null; // {status, headers, body}
 const requests = [];
 
@@ -75,6 +80,7 @@ const server = createServer(async (req, res) => {
     requests.length = 0;
     pr = DEFAULTS();
     files = [];
+    lists = NO_LISTS();
     forced = null;
     return send(res, 200, { ok: true });
   }
@@ -82,6 +88,7 @@ const server = createServer(async (req, res) => {
     const patch = bodyText ? JSON.parse(bodyText) : {};
     if (patch.pr) pr = { ...pr, ...patch.pr };
     if (patch.files) files = patch.files;
+    for (const k of Object.keys(lists)) if (patch[k]) lists[k] = patch[k];
     forced = patch.force || null;
     return send(res, 200, { ok: true, pr, files: files.length });
   }
@@ -121,16 +128,24 @@ const server = createServer(async (req, res) => {
 
   // The reads a PR-watch registration makes (internal/prwatch Observe): the
   // host viewer, the head's check runs and commit status, and the PR's
-  // comments, reviews and review comments, all empty, on one page.
+  // comments, reviews and review comments, on one page: empty until a test
+  // patches them through /__fixture.
   if (path === "/user" && req.method === "GET") return send(res, 200, { login: "aft-viewer", id: 1, type: "User" });
   const checkRuns = path.match(/^\/repos\/([^/]+)\/([^/]+)\/commits\/([^/]+)\/check-runs$/);
-  if (checkRuns && req.method === "GET") return send(res, 200, { total_count: 0, check_runs: [] });
+  if (checkRuns && req.method === "GET") {
+    return send(res, 200, { total_count: lists.checkRuns.length, check_runs: lists.checkRuns });
+  }
   const status = path.match(/^\/repos\/([^/]+)\/([^/]+)\/commits\/([^/]+)\/status$/);
   if (status && req.method === "GET") {
-    return send(res, 200, { state: "success", sha: status[3], total_count: 0, statuses: [] });
+    const failed = lists.statuses.some((st) => st.state === "failure" || st.state === "error");
+    const state = failed ? "failure" : lists.statuses.some((st) => st.state === "pending") ? "pending" : "success";
+    return send(res, 200, { state, sha: status[3], total_count: lists.statuses.length, statuses: lists.statuses });
   }
-  const prLists = path.match(/^\/repos\/([^/]+)\/([^/]+)\/(?:issues\/\d+\/comments|pulls\/\d+\/(?:reviews|comments))$/);
-  if (prLists && req.method === "GET") return send(res, 200, []);
+  const prLists = path.match(/^\/repos\/([^/]+)\/([^/]+)\/(issues\/\d+\/comments|pulls\/\d+\/reviews|pulls\/\d+\/comments)$/);
+  if (prLists && req.method === "GET") {
+    const key = prLists[3].startsWith("issues") ? "issueComments" : prLists[3].endsWith("reviews") ? "reviews" : "reviewComments";
+    return send(res, 200, lists[key]);
+  }
 
   const comments = path.match(/^\/repos\/([^/]+)\/([^/]+)\/issues\/(\d+)\/comments$/);
   if (comments && req.method === "POST") return send(res, 201, { id: 2 });
