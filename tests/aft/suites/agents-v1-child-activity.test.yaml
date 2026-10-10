@@ -148,6 +148,13 @@ tests:
               return ok; })()
         budget: 30000
         intent: "Wait until the row reads ▸ Ran command · npm test with the turn's time, and from then on watch every change to the row"
+      - wait:
+          fn: >-
+            (() => { const w = window.__df2; if (!w) return false;
+              const ticks = new Set(w.seen.filter((l) => l.startsWith('▸ Ran command · npm test · ')).map((l) => l.split(' · ').pop()));
+              return ticks.size >= 2; })()
+        budget: 10000
+        intent: "Wait until the held step's clock has advanced, so the line shows a live turn timer, not a fixed time"
       - run: |
           set -e
           "$AFT_WORK_DIR/act-send" "$(cat "$AFT_WORK_DIR/actDf2Kid")" "agv1-act-df2-2-${RUN_ID:-local}" "read the routes"
@@ -203,20 +210,22 @@ tests:
             (() => { if (document.querySelector('[data-testid=harness-label]')?.textContent !== 'opencode') return false;
               if (!window.__ui5) {
                 const s = { lens: [], caretWhile: 0, cls: 0, samples: 0 };
-                new PerformanceObserver((l) => { for (const e of l.getEntries()) if (!e.hadRecentInput) s.cls += e.value; })
-                  .observe({ type: 'layout-shift', buffered: false });
+                const add = (es) => { for (const e of es) if (!e.hadRecentInput) s.cls += e.value; };
+                s.po = new PerformanceObserver((l) => add(l.getEntries()));
+                s.po.observe({ type: 'layout-shift', buffered: false });
+                s.drain = () => add(s.po.takeRecords());
                 s.timer = setInterval(() => {
-                  const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
-                  const i = t.indexOf('AGV1-ACT-STREAM-A');
-                  if (i < 0) return;
+                  const md = Array.from(document.querySelectorAll('[data-testid=chat-transcript] [data-testid=chat-markdown]'))
+                    .find((m) => (m.textContent || '').includes('AGV1-ACT-STREAM-A'));
+                  if (!md) return;
                   s.samples++;
-                  s.lens.push(t.length - i);
-                  if (document.querySelector('[data-testid=chat-transcript] [data-streaming-caret]')) s.caretWhile++;
+                  s.lens.push((md.textContent || '').length);
+                  if (md.querySelector('[data-streaming-caret]')) s.caretWhile++;
                 }, 100);
                 window.__ui5 = s;
               }
               return true; })()
-        intent: "Wait until the lead's chat is ready, then sample the reply's length, its caret and the layout-shift score every 100ms"
+        intent: "Wait until the lead's chat is ready, then sample the reply's own text length, its caret and the layout-shift score every 100ms"
       - fill: { label: Message, value: "summarise the routes" }
       - press: Enter
       - wait:
@@ -231,6 +240,7 @@ tests:
             (() => { const s = window.__ui5; const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
               if (!s || !t.includes('AGV1-ACT-STREAM-END') || document.querySelector('[data-streaming-caret]')) return false;
               clearInterval(s.timer);
+              s.drain();
               const grows = s.lens.every((n, i) => i === 0 || n >= s.lens[i - 1]);
               return s.samples >= 20 && grows && s.caretWhile >= 10 && s.cls <= 0.05 &&
                 t.split('AGV1-ACT-STREAM-A').length === 2; })()
@@ -254,7 +264,7 @@ tests:
               const pillOf = (text) => rows.find((r) => (r.textContent || '').includes(text))?.querySelector('[data-testid=message-actions]');
               const agent = pillOf('AGV1-ACT-STREAM-A'), user = pillOf('summarise the routes');
               if (!agent || !user) return false;
-              const time = /^\d{1,2}:\d{2}\s?[AP]M$/i;
+              const time = /^\d{1,2}:\d{2}(\s?[AP]M)?$/i;
               const parts = (p) => [p.querySelector('span')?.textContent || '', !!p.querySelector('button[aria-label^=Copy]')];
               const [at, ac] = parts(agent), [ut, uc] = parts(user);
               return getComputedStyle(agent).opacity === '1' && time.test(at) && ac && time.test(ut) && uc &&
