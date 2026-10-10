@@ -103,6 +103,10 @@ func publishStack(ctx context.Context, store Store, request StackRequest) ([]loo
 	if err != nil {
 		return nil, err
 	}
+	applied, request.BaseSHA, err = dropLandedBottom(ctx, store, request.Workspace, applied, request.BaseSHA)
+	if err != nil {
+		return nil, err
+	}
 	if err := validateStackLayers(ctx, store, request, applied); err != nil {
 		return nil, err
 	}
@@ -345,4 +349,36 @@ func mergeParentNames(ctx context.Context, runner *gitexec.Runner, merge string,
 		names = append(names, name)
 	}
 	return strings.Join(names, " and ")
+}
+
+type landingReader interface {
+	LandingStatus(context.Context, string, string) (journal.LandingStatus, error)
+}
+
+// stackLayerGone reports whether a change already landed or merged, so it is
+// no longer a layer of the lead's stack and must not be published again.
+func stackLayerGone(ctx context.Context, store any, workspace, change string) (bool, error) {
+	reader, ok := store.(landingReader)
+	if !ok {
+		return false, nil
+	}
+	status, err := reader.LandingStatus(ctx, workspace, change)
+	if err != nil {
+		return false, err
+	}
+	return status.State == "landed" || status.State == "merged", nil
+}
+
+// dropLandedBottom removes the landed or merged layers at the bottom of the
+// working-area log, which a later layer may still sit on when no landing
+// restack ran, and returns the remaining layers and the tip they start from.
+func dropLandedBottom(ctx context.Context, store any, workspace string, applied []loomgit.AppliedLayer, base string) ([]loomgit.AppliedLayer, string, error) {
+	for len(applied) > 0 {
+		gone, err := stackLayerGone(ctx, store, workspace, applied[0].Change)
+		if err != nil || !gone {
+			return applied, base, err
+		}
+		base, applied = applied[0].NewTip, applied[1:]
+	}
+	return applied, base, nil
 }

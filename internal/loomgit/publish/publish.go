@@ -293,6 +293,11 @@ func finishPublication(ctx context.Context, store Store, runner *gitexec.Runner,
 		body += "Ships behind feature flag: " + publication.FeatureFlag + "\n"
 	}
 	for _, pr := range prs {
+		if pr.Head == publication.Branch && pr.Merged && pr.HeadSHA == publication.Head {
+			// This head already merged; a new PR would duplicate it. Landing
+			// reconcile records the merge, and the retry then drops the layer.
+			return loomgit.NewError(loomgit.Stale, fmt.Sprintf("change %s already merged in PR #%d; waiting for Loom to record the landing", publication.Change, pr.Number), nil)
+		}
 		if pr.Head != publication.Branch || pr.State != "open" {
 			continue
 		}

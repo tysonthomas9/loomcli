@@ -184,6 +184,13 @@ func taskStackChanges(ctx context.Context, store *journal.SQLite, workspace, lea
 		if (err == nil && repo != repoName) || slices.Contains(requested, change) {
 			continue
 		}
+		gone, err := stackLayerGone(ctx, store, workspace, change)
+		if err != nil {
+			return nil, err
+		}
+		if gone {
+			continue
+		}
 		requested = append(requested, change)
 	}
 	return requested, nil
@@ -360,6 +367,9 @@ func orderedStackChanges(ctx context.Context, store *journal.SQLite, areaPath, w
 	}
 	applied, err := apply.New(store, nil, areaRunner).AppliedLog(ctx, workspace, lead)
 	if err != nil {
+		return nil, err
+	}
+	if applied, _, err = dropLandedBottom(ctx, store, workspace, applied, ""); err != nil {
 		return nil, err
 	}
 	ordered := make([]string, 0, len(applied))
