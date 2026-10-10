@@ -242,15 +242,17 @@ blocker_ready() { # blocker_ready <slot>: may a task blocked by <slot> start now
 
 lead_say() { # lead_say <instruction>: type one line into the running lead's terminal
   browser open "$AFT_BASE_URL/ws/$workspace/agents/lead" > /dev/null
-  browser wait '[data-testid="terminal-wrapper"] .wterm' > /dev/null
+  wait_until 20 "lead terminal mounted" lead_terminal_mounted
   browser click '[data-testid="terminal-wrapper"]' > /dev/null
   browser keyboard inserttext "$1" > /dev/null
   browser press Enter > /dev/null
   printf '%s %s\n' "$(date -u +%FT%TZ)" "$1" >> "$work/lead-instructions.log"
 }
 
+# The terminal is xterm.js with its DOM renderer: one div per row under .xterm-rows.
+lead_terminal_mounted() { browser eval "!!document.querySelector('[data-testid=terminal-wrapper] .xterm-rows')" 2> /dev/null | grep -q true; }
 lead_terminal_text() {
-  browser eval "Array.from(document.querySelectorAll('[data-testid=terminal-wrapper] .term-row')).map(e => e.textContent).join('\\n')" > "$work/lead-terminal.txt" 2> /dev/null || true
+  browser eval "Array.from(document.querySelectorAll('[data-testid=terminal-wrapper] .xterm-rows > div')).map(e => e.textContent).join('\\n')" > "$work/lead-terminal.txt" 2> /dev/null || true
 }
 
 lead_mark() { lead_terminal_text; grep -cE "$1" "$work/lead-terminal.txt" > "$work/lead-mark.count" || true; }
@@ -518,9 +520,8 @@ lead-start)
   browser open "$AFT_BASE_URL/ws/$workspace/agents/lead" > /dev/null
   # Bounded polls (agent-browser's own wait has no timeout) that keep a screenshot
   # and the terminal text when the lead does not come up.
-  mounted() { browser eval "!!document.querySelector('[data-testid=terminal-wrapper] .wterm')" 2> /dev/null | grep -q true; }
   started() { lead_terminal_text; grep -qE 'Launching controlled .*lead session' "$work/lead-terminal.txt"; }
-  if ! (wait_until 20 "lead terminal mounted" mounted && wait_until 85 "real lead runtime started" started); then
+  if ! (wait_until 20 "lead terminal mounted" lead_terminal_mounted && wait_until 85 "real lead runtime started" started); then
     browser screenshot "$work/lead-start-failed.png" > /dev/null 2>&1 || true
     lead_terminal_text
     fail "real lead did not start (screenshot $work/lead-start-failed.png); terminal: $(tail -c 600 "$work/lead-terminal.txt" 2> /dev/null)"
