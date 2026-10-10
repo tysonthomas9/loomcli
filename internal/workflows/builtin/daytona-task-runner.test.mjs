@@ -276,6 +276,9 @@ describe("remote sandbox capture", () => {
     fs.writeFileSync(path.join(task, "readme"), "edited\n");
     fs.writeFileSync(path.join(task, ".env"), "SECRET=fixture\n");
     fs.writeFileSync(path.join(task, "scratch.log"), "ignored\n");
+    fs.mkdirSync(path.join(task, "cache.log", "nested"), { recursive: true });
+    fs.writeFileSync(path.join(task, "cache.log", "a"), "12345");
+    fs.writeFileSync(path.join(task, "cache.log", "nested", "b"), "123");
     const tokenPath = path.join(root, "scoped-token");
     fs.writeFileSync(tokenPath, "fixture-scoped-token");
     const ref = "refs/loom/ws/W/attempt/run-a1/capture";
@@ -285,7 +288,10 @@ describe("remote sandbox capture", () => {
     assert.equal(capture.complete, false);
     assert.equal(capture.retained, true);
     assert.ok(capture.entries.some((entry) => entry.path === ".env" && entry.class === "secret_suspect"));
-    assert.ok(capture.entries.some((entry) => entry.path === "scratch.log" && entry.class === "listed"));
+    assert.ok(capture.entries.some((entry) => entry.path === "scratch.log" && entry.class === "listed" && entry.size === 8));
+    // D18 lists an ignored directory with the total size of its files.
+    assert.ok(capture.entries.some((entry) => entry.path === "cache.log/" && entry.class === "listed" && entry.size === 8));
+    assert.ok(!git(task, "ls-tree", "-r", "--name-only", capture.captureSha).includes("scratch.log"));
     assert.equal(git(provider, "rev-parse", ref), capture.captureSha);
     assert.equal(git(task, "rev-list", "--count", `${base}..${capture.captureSha}`), "3");
     assert.equal(git(task, "show", `${capture.captureSha}:readme`), "edited");
