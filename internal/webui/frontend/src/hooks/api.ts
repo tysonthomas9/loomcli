@@ -25,6 +25,7 @@ export {
   getTaskDiff,
   getTaskRevisions,
   rebuildTask,
+  getTaskStartedFrom,
   submitRevisionVerdict,
   approveTask,
 } from "@/api/git/revisions";

@@ -1625,6 +1625,7 @@ function App() {
             agentTasks={agentTasks}
             onClose={handleAgentPanelClose}
             onTaskClick={handleAgentTaskClick}
+            issues={issues}
           />
           <CreateIssueModal
             isOpen={showCreateIssue}

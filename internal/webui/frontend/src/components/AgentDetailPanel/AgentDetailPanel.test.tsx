@@ -51,17 +51,10 @@ vi.mock("../OpenInEditor", () => ({
   ),
 }));
 
-// Mock GitTab to avoid its hook dependencies (useGitStatus, fetchDiffCommits)
-vi.mock("./GitTab", () => ({
-  GitTab: ({ agent }: { agent: { name: string } }) => (
-    <div data-testid="git-tab-mock" data-agent={agent.name} />
-  ),
-}));
-
-// Mock DiffTab to avoid its hook dependencies (useDiff)
-vi.mock("./DiffTab", () => ({
-  DiffTab: ({ agent }: { agent: { name: string } }) => (
-    <div data-testid="diff-tab-mock" data-agent={agent.name} />
+// Mock ChangesTab to avoid its hook dependencies (useDiff, started-from)
+vi.mock("./ChangesTab", () => ({
+  ChangesTab: ({ agent }: { agent: { name: string } }) => (
+    <div data-testid="changes-tab-mock" data-agent={agent.name} />
   ),
 }));
 
@@ -181,151 +174,33 @@ describe("AgentDetailPanel", () => {
     });
   });
 
-  describe("Git tab in tab bar", () => {
-    it("renders Git tab button in the tab bar", () => {
+  describe("Changes tab in tab bar (D43)", () => {
+    it("renders Info, Changes and Files, with no Git or Diff tab", () => {
       renderPanel();
 
-      const gitTab = screen.getByRole("tab", { name: "Git" });
-      expect(gitTab).toBeInTheDocument();
-    });
-
-    it("renders all four tabs: Info, Git, Diff, Files", () => {
-      renderPanel();
-
-      expect(screen.getByRole("tab", { name: "Info" })).toBeInTheDocument();
-      expect(screen.getByRole("tab", { name: "Git" })).toBeInTheDocument();
-      expect(
-        screen.queryByRole("tab", { name: "Logs" }),
-      ).not.toBeInTheDocument();
-      expect(screen.getByRole("tab", { name: "Diff" })).toBeInTheDocument();
-      expect(screen.getByRole("tab", { name: "Files" })).toBeInTheDocument();
-    });
-
-    it("Info tab is selected by default", () => {
-      renderPanel();
-
-      const infoTab = screen.getByRole("tab", { name: "Info" });
-      expect(infoTab).toHaveAttribute("aria-selected", "true");
-
-      const gitTab = screen.getByRole("tab", { name: "Git" });
-      expect(gitTab).toHaveAttribute("aria-selected", "false");
-    });
-
-    it("switches to Git tab content when Git tab is clicked", () => {
-      renderPanel();
-
-      // Git tab content should not be visible initially
-      expect(screen.queryByTestId("git-tab-mock")).not.toBeInTheDocument();
-
-      // Click Git tab
-      fireEvent.click(screen.getByRole("tab", { name: "Git" }));
-
-      // Git tab content should now be visible
-      expect(screen.getByTestId("git-tab-mock")).toBeInTheDocument();
-
-      // Git tab should be selected
-      expect(screen.getByRole("tab", { name: "Git" })).toHaveAttribute(
-        "aria-selected",
-        "true",
-      );
-
-      // Info tab should no longer be selected
+      const names = screen.getAllByRole("tab").map((t) => t.textContent);
+      expect(names).toEqual(["Info", "Changes", "Files"]);
       expect(screen.getByRole("tab", { name: "Info" })).toHaveAttribute(
         "aria-selected",
-        "false",
+        "true",
       );
     });
 
-    it("passes the correct agent to GitTab component", () => {
+    it("shows the agent's Changes when the tab is clicked", async () => {
       renderPanel({ name: "nova" });
 
-      // Click Git tab to render GitTab
-      fireEvent.click(screen.getByRole("tab", { name: "Git" }));
+      fireEvent.click(screen.getByRole("tab", { name: "Changes" }));
 
-      const gitTabMock = screen.getByTestId("git-tab-mock");
-      expect(gitTabMock).toHaveAttribute("data-agent", "nova");
-    });
-
-    it("Git tab panel has correct ARIA attributes", () => {
-      renderPanel();
-
-      // Click Git tab
-      fireEvent.click(screen.getByRole("tab", { name: "Git" }));
-
-      const tabPanel = document.getElementById("agent-panel-tabpanel-git");
-      expect(tabPanel).toBeInTheDocument();
-      expect(tabPanel).toHaveAttribute("role", "tabpanel");
-      expect(tabPanel).toHaveAttribute(
-        "aria-labelledby",
-        "agent-panel-tab-git",
-      );
-    });
-
-    it("Git tab button has correct ARIA attributes", () => {
-      renderPanel();
-
-      const gitTab = screen.getByRole("tab", { name: "Git" });
-      expect(gitTab).toHaveAttribute("id", "agent-panel-tab-git");
-      expect(gitTab).toHaveAttribute(
-        "aria-controls",
-        "agent-panel-tabpanel-git",
-      );
-    });
-  });
-
-  describe("Diff tab in tab bar", () => {
-    it("renders Diff tab button in the tab bar", () => {
-      renderPanel();
-      const diffTab = screen.getByRole("tab", { name: "Diff" });
-      expect(diffTab).toBeInTheDocument();
-    });
-
-    it("Diff tab activates on click and shows DiffTab component", async () => {
-      renderPanel({ name: "nova" });
-
-      // Diff tab should not be selected initially
-      expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute(
-        "aria-selected",
-        "false",
-      );
-
-      // Click Diff tab
-      fireEvent.click(screen.getByRole("tab", { name: "Diff" }));
-
-      // Diff tab should be selected
-      expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute(
+      expect(screen.getByRole("tab", { name: "Changes" })).toHaveAttribute(
         "aria-selected",
         "true",
       );
-
-      // DiffTab mock should render (lazy-loaded via Suspense)
-      const diffTabMock = await screen.findByTestId("diff-tab-mock");
-      expect(diffTabMock).toHaveAttribute("data-agent", "nova");
-    });
-
-    it("Diff tab panel has correct ARIA attributes", async () => {
-      renderPanel();
-      fireEvent.click(screen.getByRole("tab", { name: "Diff" }));
-
-      // Wait for lazy load
-      await screen.findByTestId("diff-tab-mock");
-
-      const tabPanel = document.getElementById("agent-panel-tabpanel-diff");
-      expect(tabPanel).toBeInTheDocument();
-      expect(tabPanel).toHaveAttribute("role", "tabpanel");
+      const mock = await screen.findByTestId("changes-tab-mock");
+      expect(mock).toHaveAttribute("data-agent", "nova");
+      const tabPanel = document.getElementById("agent-panel-tabpanel-changes");
       expect(tabPanel).toHaveAttribute(
         "aria-labelledby",
-        "agent-panel-tab-diff",
-      );
-    });
-
-    it("Diff tab button has correct ARIA attributes", () => {
-      renderPanel();
-      const diffTab = screen.getByRole("tab", { name: "Diff" });
-      expect(diffTab).toHaveAttribute("id", "agent-panel-tab-diff");
-      expect(diffTab).toHaveAttribute(
-        "aria-controls",
-        "agent-panel-tabpanel-diff",
+        "agent-panel-tab-changes",
       );
     });
   });
@@ -336,15 +211,6 @@ describe("AgentDetailPanel", () => {
 
       const filesTab = screen.getByRole("tab", { name: "Files" });
       expect(filesTab).toBeInTheDocument();
-    });
-
-    it("renders all four tabs: Info, Git, Diff, Files", () => {
-      renderPanel();
-
-      expect(screen.getByRole("tab", { name: "Info" })).toBeInTheDocument();
-      expect(screen.getByRole("tab", { name: "Git" })).toBeInTheDocument();
-      expect(screen.getByRole("tab", { name: "Diff" })).toBeInTheDocument();
-      expect(screen.getByRole("tab", { name: "Files" })).toBeInTheDocument();
     });
 
     it("Files tab activates on click", () => {

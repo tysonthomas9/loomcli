@@ -105,7 +105,9 @@ const mockLoomTasks = {
     { id: "loom-104", title: "Add rate limiter", priority: 2 },
   ],
   needs_review: [],
-  in_progress: [{ id: "loom-103", title: "Fix authentication bug", priority: 1 }],
+  in_progress: [
+    { id: "loom-103", title: "Fix authentication bug", priority: 1 },
+  ],
   backlog: [],
   closed: [],
   timestamp: "2026-01-15T10:00:00Z",
@@ -621,7 +623,9 @@ test.describe("E2E Journey: Review agent code changes", () => {
 
     // Verify agent metadata in the Info tab
     await expect(panel.getByText("/tmp/worktrees/ember")).toBeVisible();
-    await expect(panel.getByLabel("Info").getByText("fix-auth-bug")).toBeVisible();
+    await expect(
+      panel.getByLabel("Info").getByText("fix-auth-bug"),
+    ).toBeVisible();
   });
 
   test("Step 4-5: Panel mutual exclusivity (agent → issue → agent)", async () => {
@@ -658,54 +662,25 @@ test.describe("E2E Journey: Review agent code changes", () => {
     await expect(panel.locator("h2")).toContainText("ember");
   });
 
-  test("Step 6: Git tab renders commits and status", async () => {
+  test("Step 6-8: Changes tab shows the task, its files and inline diffs", async () => {
     const panel = page.getByTestId("agent-detail-panel");
     await expect(panel).toHaveAttribute("data-state", "open");
 
-    // Click Git tab
-    await page.getByRole("tab", { name: "Git" }).click();
-
-    // Verify Git tab is selected
-    await expect(page.locator("#agent-panel-tab-git")).toHaveAttribute(
+    // D43: one Changes tab replaces Git and Diff.
+    await expect(page.getByRole("tab", { name: "Git" })).toHaveCount(0);
+    await expect(page.getByRole("tab", { name: "Diff" })).toHaveCount(0);
+    await page.getByRole("tab", { name: "Changes" }).click();
+    await expect(page.locator("#agent-panel-tab-changes")).toHaveAttribute(
       "aria-selected",
       "true",
     );
 
-    // Wait for git tab panel to be visible
-    const gitPanel = page.locator("#agent-panel-tabpanel-git");
-    await expect(gitPanel).toBeVisible();
-
-    // Verify branch header shows "fix-auth-bug"
-    await expect(gitPanel.getByText("fix-auth-bug")).toBeVisible();
-
-    // Verify commit badges
-    await expect(gitPanel.getByText("+3 ahead")).toBeVisible();
-    await expect(gitPanel.getByText("-1 behind")).toBeVisible();
-
-    // Verify commit list renders commits (from diff commits or agent commits)
-    // The GitTab tries to fetch rich diff commits, falling back to agent commits
-    await expect(gitPanel.getByText("Add auth middleware")).toBeVisible({
-      timeout: 5000,
-    });
-    await expect(gitPanel.getByText("Fix token validation")).toBeVisible();
-    await expect(gitPanel.getByText("Add auth tests")).toBeVisible();
-
-    // Working tree file details are covered by the Diff tab.
-  });
-
-  test("Step 7-8: Diff tab renders files, expand shows diff viewer", async () => {
-    // Click Diff tab (lazy-loaded)
-    await page.getByRole("tab", { name: "Diff" }).click();
-
-    // Verify Diff tab is selected
-    await expect(page.locator("#agent-panel-tab-diff")).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-
-    // Wait for lazy-loaded DiffTab to render (through Suspense)
-    const diffPanel = page.locator("#agent-panel-tabpanel-diff");
+    const diffPanel = page.locator("#agent-panel-tabpanel-changes");
     await expect(diffPanel).toBeVisible();
+    await expect(diffPanel.getByTestId("changes-task-header")).toContainText(
+      "loom-103",
+    );
+    await expect(diffPanel.getByText("fix-auth-bug")).toHaveCount(0);
 
     // Wait for diff files to load — summary bar should appear
     await expect(diffPanel.getByText("3 files changed")).toBeVisible({

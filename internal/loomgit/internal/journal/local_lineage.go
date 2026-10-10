@@ -238,6 +238,18 @@ func (s *SQLite) ClearLocalLineage(ctx context.Context, workspace, task, repo st
 	return err
 }
 
+// TaskPredecessor is the change a dependent task's copy was pinned to start
+// from, or "" when the task has no local lineage.
+func (s *SQLite) TaskPredecessor(ctx context.Context, workspace, task string) (string, error) {
+	var predecessor string
+	err := s.db.QueryRowContext(ctx, `SELECT predecessor_change FROM local_lineage
+		WHERE workspace = ? AND task_id = ? ORDER BY repo LIMIT 1`, workspace, task).Scan(&predecessor)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return predecessor, err
+}
+
 func (s *SQLite) DependencyForChange(ctx context.Context, workspace, change string) (string, error) {
 	var predecessor string
 	err := s.db.QueryRowContext(ctx, `SELECT l.predecessor_change FROM driver_changes d

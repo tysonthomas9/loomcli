@@ -3,20 +3,20 @@
  */
 
 /**
- * Unit tests for DiffTab component.
- * Covers summary bar, file list, expand/collapse, viewed toggle,
- * loading/error/empty states, and hook invocation.
+ * Unit tests for the agent's Changes tab (P2.24, D43): the task or lead
+ * header, then the changed files with their diffs inline.
  */
 
 import { render, screen, fireEvent, act } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 
 import type { DiffFile, DiffFilePatch } from "@/api/issues";
-import type { LoomAgentStatus } from "@/types";
+import type { Issue, LoomAgentStatus } from "@/types";
 import type { UseDiffReturn } from "@/hooks/terminal";
 
-import { DiffTab } from "./DiffTab";
+import { ChangesTab } from "./ChangesTab";
 
 // ============= Mocks =============
 
@@ -24,6 +24,7 @@ let lastUseDiffOptions: {
   agentName: string | null;
   enabled: boolean;
   commitSignal?: number;
+  refreshMs?: number;
 };
 let mockUseDiffReturn: UseDiffReturn;
 
@@ -37,18 +38,23 @@ vi.mock("@/hooks/terminal", async () => {
     );
   return {
     ...actual,
-    useDiff: (opts: {
-      agentName: string | null;
-      enabled: boolean;
-      commitSignal?: number;
-    }) => {
+    useDiff: (opts: typeof lastUseDiffOptions) => {
       lastUseDiffOptions = opts;
       return mockUseDiffReturn;
     },
   };
 });
 
-// Mock sub-components to isolate DiffTab orchestration
+const mockStartedFrom = vi.fn();
+vi.mock("@/hooks/api", () => ({
+  getTaskStartedFrom: (...args: unknown[]) => mockStartedFrom(...args),
+}));
+
+vi.mock("@/hooks/workspace", () => ({
+  useWorkspaceContext: () => ({ workspaceId: "ws-1" }),
+}));
+
+// Mock sub-components to isolate ChangesTab orchestration
 vi.mock("./DiffFileRow", () => ({
   DiffFileRow: (props: {
     file: DiffFile;
@@ -101,6 +107,7 @@ function makeAgent(overrides: Partial<LoomAgentStatus> = {}): LoomAgentStatus {
     name: "ember",
     branch: "feature-x",
     status: "ready",
+    task_id: "T-1",
     ahead: 0,
     behind: 0,
     ...overrides,
@@ -117,7 +124,22 @@ function makeFile(overrides: Partial<DiffFile> = {}): DiffFile {
   };
 }
 
+function makeIssue(overrides: Partial<Issue> = {}): Issue {
+  return {
+    id: "T-1",
+    title: "Add the login form",
+    status: "in_progress",
+    priority: 2,
+    issue_type: "task",
+    created_at: "2026-10-10T00:00:00Z",
+    updated_at: "2026-10-10T00:00:00Z",
+    ...overrides,
+  } as Issue;
+}
+
 function resetMocks() {
+  mockStartedFrom.mockReset();
+  mockStartedFrom.mockResolvedValue({ kind: "trunk" });
   mockFetchPatch.mockReset();
   mockMarkViewed.mockReset();
   mockUseDiffReturn = {
@@ -133,17 +155,41 @@ function resetMocks() {
   };
 }
 
-async function renderDiffTab(agent: LoomAgentStatus, isActive?: boolean) {
+function tab(
+  agent: LoomAgentStatus,
+  isActive?: boolean,
+  issues: Issue[] = [makeIssue()],
+  onOpenTaskChanges?: (task: Issue) => void,
+) {
+  return (
+    <MemoryRouter>
+      <ChangesTab
+        agent={agent}
+        isActive={isActive}
+        issues={issues}
+        lead="lead-1"
+        {...(onOpenTaskChanges ? { onOpenTaskChanges } : {})}
+      />
+    </MemoryRouter>
+  );
+}
+
+async function renderDiffTab(
+  agent: LoomAgentStatus,
+  isActive?: boolean,
+  issues?: Issue[],
+  onOpenTaskChanges?: (task: Issue) => void,
+) {
   let result: ReturnType<typeof render>;
   await act(async () => {
-    result = render(<DiffTab agent={agent} isActive={isActive} />);
+    result = render(tab(agent, isActive, issues, onOpenTaskChanges));
   });
   return result!;
 }
 
 // ============= Tests =============
 
-describe("DiffTab", () => {
+describe("ChangesTab", () => {
   beforeEach(() => {
     resetMocks();
   });
@@ -238,7 +284,7 @@ describe("DiffTab", () => {
 
       await renderDiffTab(makeAgent());
 
-      expect(screen.getByText("No changes")).toBeInTheDocument();
+      expect(screen.getByText("No changes yet")).toBeInTheDocument();
       expect(screen.queryByTestId("file-row")).not.toBeInTheDocument();
     });
   });
@@ -356,7 +402,7 @@ describe("DiffTab", () => {
 
       await renderDiffTab(makeAgent());
 
-      expect(screen.getByText(/Loading diff/)).toBeInTheDocument();
+      expect(screen.getByText(/Loading changes/)).toBeInTheDocument();
     });
 
     it("hides file list during loading", async () => {
@@ -398,7 +444,7 @@ describe("DiffTab", () => {
       const agent = makeAgent({ name: "nova", ahead: 1 });
       let result: ReturnType<typeof render>;
       await act(async () => {
-        result = render(<DiffTab agent={agent} isActive={true} />);
+        result = render(tab(agent, true));
       });
 
       // Expand a file
@@ -408,7 +454,7 @@ describe("DiffTab", () => {
       // Re-render with new ahead count (simulating a new commit)
       const updatedAgent = makeAgent({ name: "nova", ahead: 2 });
       await act(async () => {
-        result!.rerender(<DiffTab agent={updatedAgent} isActive={true} />);
+        result!.rerender(tab(updatedAgent, true));
       });
 
       // Expanded files should be reset — viewer should be gone
@@ -512,6 +558,125 @@ describe("DiffTab", () => {
       await renderDiffTab(makeAgent({ name: "nova", ahead: 0 }), true);
 
       expect(lastUseDiffOptions.commitSignal).toBe(0);
+    });
+  });
+
+  describe("task header (P2.24)", () => {
+    it("shows the task key, title, status and where it started", async () => {
+      mockStartedFrom.mockResolvedValue({ kind: "lead" });
+
+      await renderDiffTab(makeAgent({ status: "working:T-1" }));
+
+      const header = screen.getByTestId("changes-task-header");
+      expect(header).toHaveTextContent("T-1");
+      expect(header).toHaveTextContent("Add the login form");
+      expect(screen.getByTestId("changes-task-status")).toHaveTextContent(
+        "Working",
+      );
+      expect(
+        await screen.findByTestId("changes-started-from"),
+      ).toHaveTextContent("Started from: the lead's latest work");
+      expect(mockStartedFrom).toHaveBeenCalledWith("ws-1", "T-1", "lead-1");
+      // No branch names, SHAs, PR or merge buttons.
+      expect(header).not.toHaveTextContent("feature-x");
+      expect(screen.queryByRole("button", { name: /merge|PR/i })).toBeNull();
+      expect(screen.queryByTestId("changes-open-task")).toBeNull();
+    });
+
+    it.each([
+      [{ kind: "trunk" }, "Started from: trunk"],
+      [{ kind: "blocker", task: "T-0" }, "Started from: T-0 Build the API"],
+    ])("names the start point %j", async (from, text) => {
+      mockStartedFrom.mockResolvedValue(from);
+
+      await renderDiffTab(makeAgent(), true, [
+        makeIssue(),
+        makeIssue({ id: "T-0", title: "Build the API", status: "closed" }),
+      ]);
+
+      expect(
+        await screen.findByTestId("changes-started-from"),
+      ).toHaveTextContent(text);
+    });
+
+    it.each([
+      ["review", undefined, "Waiting for review"],
+      ["closed", "Approved: code applied", "Approved"],
+    ])(
+      "links a %s task to its Changes when done",
+      async (status, reason, pill) => {
+        const onOpen = vi.fn();
+        const task = makeIssue({
+          status: status as Issue["status"],
+          ...(reason ? { close_reason: reason } : {}),
+        });
+
+        await renderDiffTab(makeAgent(), true, [task], onOpen);
+
+        expect(screen.getByTestId("changes-task-status")).toHaveTextContent(
+          pill,
+        );
+        fireEvent.click(screen.getByTestId("changes-open-task"));
+        expect(onOpen).toHaveBeenCalledWith(task);
+      },
+    );
+
+    it("keeps the file list live only while the agent works", async () => {
+      await renderDiffTab(makeAgent({ status: "working:T-1" }), true);
+      expect(lastUseDiffOptions.refreshMs).toBe(5000);
+
+      await renderDiffTab(makeAgent({ status: "ready" }), true);
+      expect(lastUseDiffOptions.refreshMs).toBeUndefined();
+    });
+
+    it("says No task assigned when the agent has no task", async () => {
+      await renderDiffTab(makeAgent({ task_id: undefined }), true, []);
+
+      expect(screen.getByTestId("changes-no-task")).toHaveTextContent(
+        "No task assigned",
+      );
+      expect(lastUseDiffOptions.enabled).toBe(false);
+      expect(mockStartedFrom).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("lead (S16)", () => {
+    it("counts the epic's approved tasks and links to the PRs", async () => {
+      const approved = (id: string, parent: string) =>
+        makeIssue({
+          id,
+          parent,
+          status: "closed",
+          close_reason: "Approved: code applied",
+        });
+
+      await renderDiffTab(
+        makeAgent({ name: "lead-1", role: "lead", parent: "EPIC-1" }),
+        true,
+        [
+          approved("T-1", "EPIC-1"),
+          approved("T-2", "EPIC-1"),
+          approved("T-9", "EPIC-2"),
+          makeIssue({
+            id: "T-3",
+            parent: "EPIC-1",
+            status: "closed",
+            close_reason: "No changes",
+          }),
+        ],
+      );
+
+      expect(screen.getByTestId("changes-lead-summary")).toHaveTextContent(
+        "2 tasks approved · open PRs →",
+      );
+      expect(screen.getByTestId("changes-open-prs")).toHaveAttribute(
+        "href",
+        "/ws/ws-1/prs",
+      );
+      expect(screen.queryByTestId("changes-task-header")).toBeNull();
+      expect(screen.queryByText("No changes yet")).toBeNull();
+      expect(lastUseDiffOptions.enabled).toBe(true);
+      expect(mockStartedFrom).not.toHaveBeenCalled();
     });
   });
 });

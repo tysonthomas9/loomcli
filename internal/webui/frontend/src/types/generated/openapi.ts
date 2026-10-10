@@ -1800,6 +1800,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/issues/{id}/started-from": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Where a task's attempt starts
+     * @description blocker: from its blocker task's revision (task names it); lead: from the lead's working area; trunk: the lead has no working area yet.
+     */
+    get: operations["getTaskStartedFrom"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/changes/{change}/revisions/{r}/diff": {
     parameters: {
       query?: never;
@@ -8070,6 +8090,41 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+    };
+  };
+  getTaskStartedFrom: {
+    parameters: {
+      query?: {
+        /** @description Lead whose working area the task starts from. Defaults to "lead". */
+        lead?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Start point */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            success: boolean;
+            data: {
+              /** @enum {string} */
+              kind: "blocker" | "lead" | "trunk";
+              /** @description The blocker task, when kind is blocker. */
+              task?: string;
+            };
+          };
         };
       };
     };

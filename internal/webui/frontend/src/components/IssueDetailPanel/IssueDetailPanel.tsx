@@ -170,6 +170,8 @@ export interface IssueDetailPanelProps {
    * other surface keeps the slide-out behavior.
    */
   inline?: boolean;
+  /** Tab to show when the task opens, e.g. "changes" from an agent's Changes tab. */
+  initialTab?: "changes";
 }
 
 /**
@@ -253,6 +255,7 @@ interface DefaultContentProps {
   isMaximized?: boolean;
   /** Toggle full-page maximize */
   onToggleMaximize?: () => void;
+  initialTab?: "changes";
 }
 
 /**
@@ -461,6 +464,7 @@ function DefaultContent({
   onNavigateToIssue,
   isMaximized: isPanelMaximized,
   onToggleMaximize,
+  initialTab,
 }: DefaultContentProps): JSX.Element {
   const {
     workspaceId,
@@ -648,8 +652,8 @@ function DefaultContent({
     tabsRef.current = [DETAILS_TAB, SESSIONS_TAB];
     restoredIssueIdRef.current = null;
     setTabs([DETAILS_TAB, SESSIONS_TAB]);
-    setActiveTabId("details");
-  }, [issue?.id, cleanupTerminalTabs]);
+    setActiveTabId(initialTab ?? "details");
+  }, [issue?.id, cleanupTerminalTabs, initialTab]);
 
   // Restore tabs from persisted state once loaded
   useEffect(() => {
@@ -703,11 +707,15 @@ function DefaultContent({
         persistedTabState.active_tab_id === "diff"
           ? "details"
           : persistedTabState.active_tab_id;
-      if (activeId && restoredTabs.some((t) => t.id === activeId)) {
+      if (
+        !initialTab &&
+        activeId &&
+        restoredTabs.some((t) => t.id === activeId)
+      ) {
         setActiveTabId(activeId);
       }
     }
-  }, [persistedTabState, isLoadingPersistedTabs, issue?.id]);
+  }, [persistedTabState, isLoadingPersistedTabs, issue?.id, initialTab]);
 
   // Persist tab state on changes (debounced via hook)
   useEffect(() => {
@@ -1806,6 +1814,7 @@ export function IssueDetailPanel({
   onCopyLink,
   onNavigateToIssue,
   inline = false,
+  initialTab,
 }: IssueDetailPanelProps): JSX.Element {
   const panelRef = useRef<HTMLElement>(null);
 
@@ -1853,6 +1862,7 @@ export function IssueDetailPanel({
       {...(onIssueUpdate !== undefined && { onIssueUpdate })}
       {...(onCopyLink !== undefined && { onCopyLink })}
       {...(onNavigateToIssue !== undefined && { onNavigateToIssue })}
+      {...(initialTab !== undefined && { initialTab })}
       {...(!inline && {
         isMaximized,
         onToggleMaximize: toggleMaximize,

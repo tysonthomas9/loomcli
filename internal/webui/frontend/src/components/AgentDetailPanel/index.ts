@@ -4,9 +4,6 @@
 
 export { AgentDetailPanel } from "./AgentDetailPanel";
 export type { AgentDetailPanelProps } from "./AgentDetailPanel";
-export { GitTab } from "./GitTab";
-export { DiffTab } from "./DiffTab";
+export { ChangesTab } from "./ChangesTab";
 export { DiffFileRow } from "./DiffFileRow";
 export { DiffFileViewer } from "./DiffFileViewer";
-export { GitActionBar } from "./GitActionBar";
-export { TargetBranchSelector } from "./TargetBranchSelector";

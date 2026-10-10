@@ -4,7 +4,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import "@testing-library/jest-dom";
 
-import { AgentEditorGroups } from "../AgentEditorGroups";
+import { AgentEditorGroups, agentTabFromParam } from "../AgentEditorGroups";
 
 describe("AgentEditorGroups", () => {
   it("renders the supported agent tabs without Logs", () => {
@@ -23,11 +23,12 @@ describe("AgentEditorGroups", () => {
       screen.getByRole("button", { name: "Terminal" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Info" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Git" })).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Logs" }),
-    ).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Diff" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Changes" })).toBeInTheDocument();
+    for (const gone of ["Logs", "Git", "Diff"]) {
+      expect(
+        screen.queryByRole("button", { name: gone }),
+      ).not.toBeInTheDocument();
+    }
     expect(screen.getByRole("button", { name: "Files" })).toBeInTheDocument();
   });
 
@@ -59,7 +60,7 @@ describe("AgentEditorGroups", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Git" }));
+    fireEvent.click(screen.getByRole("button", { name: "Changes" }));
     fireEvent.click(screen.getByTestId("agent-editor-split"));
     expect(screen.getByTestId("agent-editor-groups")).toHaveAttribute(
       "data-split",
@@ -77,5 +78,15 @@ describe("AgentEditorGroups", () => {
       "data-split",
       "true",
     );
+  });
+
+  // D43: old links to the Git or Diff tab land on Changes.
+  it("maps ?tab=git and ?tab=diff deep links to Changes", () => {
+    expect(agentTabFromParam("git")).toBe("changes");
+    expect(agentTabFromParam("diff")).toBe("changes");
+    expect(agentTabFromParam("changes")).toBe("changes");
+    expect(agentTabFromParam("files")).toBe("files");
+    expect(agentTabFromParam("bogus")).toBeUndefined();
+    expect(agentTabFromParam(null)).toBeUndefined();
   });
 });

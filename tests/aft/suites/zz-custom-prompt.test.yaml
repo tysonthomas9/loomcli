@@ -992,7 +992,7 @@ tests:
               const group = document.querySelector("[data-testid=agent-editor-groups]");
               if (!group) return false;
               const labels = Array.from(group.querySelectorAll('button[draggable="true"]')).map((b) => b.textContent.trim()).filter(Boolean);
-              return JSON.stringify(labels) === JSON.stringify(["Terminal", "Info", "Git", "Diff", "Files"]);
+              return JSON.stringify(labels) === JSON.stringify(["Terminal", "Info", "Changes", "Files"]);
             })()
         intent: "Wait until the agent editor tab labels exactly match the promptless tab set"
       - expect: { notText: "AFT-PROMPT-MARKER" }

@@ -4302,6 +4302,12 @@ type ListTaskRevisionsParams struct {
 	Lead *string `form:"lead,omitempty" json:"lead,omitempty"`
 }
 
+// GetTaskStartedFromParams defines parameters for GetTaskStartedFrom.
+type GetTaskStartedFromParams struct {
+	// Lead Lead whose working area the task starts from. Defaults to "lead".
+	Lead *string `form:"lead,omitempty" json:"lead,omitempty"`
+}
+
 // SaveIssueTabsJSONBody defines parameters for SaveIssueTabs.
 type SaveIssueTabsJSONBody struct {
 	ActiveTabId string     `json:"active_tab_id"`
