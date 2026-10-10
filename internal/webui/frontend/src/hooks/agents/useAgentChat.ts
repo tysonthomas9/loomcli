@@ -97,6 +97,8 @@ export interface UseAgentChatReturn {
   synced: boolean;
   /** Get said agent_not_found: the agent is gone (deleted, or a reset). */
   notFound: boolean;
+  /** The agent was deleted: Get says state=deleted, or agent.deleted arrived. */
+  deleted: boolean;
 }
 
 /** REST Send's JSON request body limit (the server's 1 MiB guard). */
@@ -139,6 +141,7 @@ export function useAgentChat(
   const [expiredErr, setExpiredErr] = useState(false);
   const [synced, setSynced] = useState(false);
   const [notFound, setNotFound] = useState(false);
+  const [deletedLive, setDeletedLive] = useState(false);
 
   const refresh = useCallback(() => {
     getAgent(workspaceId, agentId)
@@ -167,6 +170,9 @@ export function useAgentChat(
       },
       onNotice: (n) => {
         if (n.kind === "feed.gap") setSynced(false);
+        // A delete purges the history first, so agent.deleted is live only.
+        if (n.kind === "agent.deleted" && n.agent_id === agentId)
+          setDeletedLive(true);
         // Capture each native notice before React can combine state updates.
         const observedAt = performance.now();
         setStreaming((s) => addDelta(s, n, observedAt));
@@ -283,6 +289,7 @@ export function useAgentChat(
     expired: expiredErr || !!agent?.history_purged_at,
     synced,
     notFound,
+    deleted: deletedLive || agent?.state === "deleted",
   };
 }
 

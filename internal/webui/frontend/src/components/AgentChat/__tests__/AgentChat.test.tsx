@@ -1069,6 +1069,32 @@ describe("AgentChat lifecycle (1.8b)", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("shows This agent was deleted, with no composer, when Get says state=deleted", async () => {
+    api.getAgent.mockResolvedValue(agent({ state: "deleted" }));
+    render(
+      <MemoryRouter>
+        <AgentChat workspaceId="w1" agentId="a1" />
+      </MemoryRouter>,
+    );
+    const state = await screen.findByTestId("agent-not-found");
+    expect(state).toHaveTextContent("This agent was deleted");
+    expect(
+      within(state).getByRole("link", { name: "Go home" }),
+    ).toHaveAttribute("href", "/ws/w1/home");
+    expect(screen.queryByLabelText("Message")).toBeNull();
+  });
+
+  it("shows This agent was deleted when its live agent.deleted arrives while open", async () => {
+    await mount(agent());
+    expect(screen.getByLabelText("Message")).toBeInTheDocument();
+    const s = api.streams[api.streams.length - 1];
+    act(() => s.opts.onNotice?.({ ...ev("agent.deleted"), seq: 0 }));
+    expect(screen.getByTestId("agent-not-found")).toHaveTextContent(
+      "This agent was deleted",
+    );
+    expect(screen.queryByLabelText("Message")).toBeNull();
+  });
+
   it("keeps the chat and its error for a Get failure other than agent_not_found", async () => {
     api.getAgent.mockRejectedValue(
       new ApiError(404, "Not Found", { error: "boom", code: "not_found" }),
