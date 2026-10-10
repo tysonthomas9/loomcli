@@ -242,13 +242,16 @@ blocker_ready() { # blocker_ready <slot>: may a task blocked by <slot> start now
 
 # Codex shows "esc to interrupt" while a turn runs and "Worked for …" when it ends.
 lead_busy() { lead_terminal_text; grep -q 'esc to interrupt' "$work/lead-terminal.txt"; }
-lead_idle() { ! lead_busy; }
+# Idle = its opening turn (or the last instruction) has finished: "Worked for" is
+# on screen and no turn is running. Right after start the lead looks idle before
+# its opening turn begins, and a line typed then stays unsent in the composer.
+lead_idle() { ! lead_busy && grep -q 'Worked for' "$work/lead-terminal.txt"; }
 lead_turns() { lead_terminal_text; grep -cE 'esc to interrupt|Worked for' "$work/lead-terminal.txt" || true; }
 lead_say() { # lead_say <instruction>: type one line into the running lead's terminal
   browser open "$AFT_BASE_URL/ws/$workspace/agents/lead" > /dev/null
   wait_until 20 "lead terminal mounted" lead_terminal_mounted
   # Text typed while the lead's own first turn runs stays unsent in its composer.
-  wait_until 45 "lead idle before an instruction" lead_idle
+  wait_until 60 "lead idle before an instruction" lead_idle
   local before tries
   before="$(lead_turns)"
   browser click '[data-testid="terminal-wrapper"]' > /dev/null
