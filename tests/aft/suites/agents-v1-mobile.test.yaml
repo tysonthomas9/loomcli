@@ -1,0 +1,195 @@
+# The app on a phone and a narrow tablet, on Agent API leads (MB1, MB1b and
+# MOB2's agents drawer), and the user-message hover pill in a narrow chat
+# column (UI7, UI7b). OpenCode runs for real or as its emulator
+# (LOOM_HARNESS_EMU=1); only the model is scripted, through 2.0d's fake model.
+# Viewports are set per case with agent-browser and put back at the end of it.
+suite: agents-v1-mobile
+classification: { area: agents, feature: agent-api-mobile, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: |
+  set -e
+  curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+  for ws in E2E-AGV1-MOB E2E-AGV1-MOB-B E2E-AGV1-MOB-C E2E-AGV1-MOB-D; do
+    curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/$ws" >/dev/null || true
+  done
+  repo="$AFT_WORK_DIR/agv1-mob-repo"
+  mkdir -p "$repo"
+  git -C "$repo" init -q -b main
+  echo "agents-v1 mobile ${RUN_ID:-local}" > "$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" -c user.email=e2e@x -c user.name=e2e commit -q -m init
+  printf '{"name":"e2e-agv1-mob","type":"empty","repos":["%s"]}' "$repo" |
+    curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @- >/dev/null
+  # Three more workspaces, so a phone's switcher has more than fits.
+  for n in b c d; do
+    printf '{"name":"e2e-agv1-mob-%s","type":"empty"}' "$n" |
+      curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @- >/dev/null
+  done
+  # mob-lead <name> <saved var>: an OpenCode lead made through the Agent API;
+  # its agent id goes to $AFT_WORK_DIR/<saved var>.
+  cat > "$AFT_WORK_DIR/mob-lead" <<'SH'
+  #!/bin/sh
+  set -e
+  printf '{"preset":"lead","name":"%s","repo":"%s","base_ref":"main","overrides":{"harness":"opencode"}}' \
+    "$1" "$AFT_WORK_DIR/agv1-mob-repo" |
+    curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-AGV1-MOB/v1/agents" \
+      -H "Content-Type: application/json" -H "Idempotency-Key: $1" -d @- |
+    python3 -c 'import json,sys; print(json.load(sys.stdin)["agent_id"])' > "$AFT_WORK_DIR/$2"
+  SH
+  chmod +x "$AFT_WORK_DIR/mob-lead"
+teardown: |
+  set +e
+  agent-browser --session "$AFT_SESSION" set viewport 1920 1080 >/dev/null
+  for ws in E2E-AGV1-MOB E2E-AGV1-MOB-B E2E-AGV1-MOB-C E2E-AGV1-MOB-D; do
+    curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/$ws" >/dev/null
+  done
+
+tests:
+  # covers: MB1 phone/tablet chat layout; MB1b switcher whole items and more hint
+  - name: MB1 a lead's chat fits a phone and a narrow tablet
+    intent: At 360, 390 and 557 px wide nothing on a lead's chat lays out past the right edge, the rail is one bottom row, the workspace switcher settles on whole items with a hint where more is off-screen, the agent's name is readable and the composer is uncovered
+    steps:
+      - run: |
+          set -e
+          "$AFT_WORK_DIR/mob-lead" "agv1-mob-layout-${RUN_ID:-local}" mobLayoutId
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-MOB/chat/$(cat "$AFT_WORK_DIR/mobLayoutId")"
+        intent: "Create an OpenCode lead and open its chat"
+      - wait:
+          fn: >-
+            document.querySelector('section[aria-label="Agent chat"] header h2')?.textContent === 'agv1-mob-layout-${RUN_ID:-local}' &&
+            !!document.querySelector('textarea[aria-label=Message]') &&
+            document.querySelectorAll('nav[aria-label="Primary"] [aria-label="Workspace selector"] button[aria-label^="Switch to "]').length >= 4
+        intent: "Wait until the chat shows the lead's name, the composer and all four workspaces"
+      - run: |
+          set -e
+          for size in "360 800" "390 844" "557 844"; do
+            python3 "$AFT_TESTS_DIR/scripts/agents-v1-mobile.py" layout $size
+          done
+          agent-browser --session "$AFT_SESSION" set viewport 1920 1080 >/dev/null
+        intent: "At each width, check overflow, the one-row rail, the switcher's whole items and hints, the name and the composer"
+
+  # covers: MOB2 phone Agents button and drawer: open, tap a lead, Escape, backdrop, desktop has no button
+  - name: MOB2 the phone's Agents button opens a drawer that leads to a lead's chat
+    intent: On a phone the bottom rail's Agents button opens the agent list as a drawer between the header and the rail, tapping a lead opens its chat and closes the drawer, and Escape or a tap on the backdrop closes it; on the desktop there is no Agents button and the sidebar lists the leads
+    steps:
+      - run: |
+          set -e
+          "$AFT_WORK_DIR/mob-lead" "agv1-mob-alpha-${RUN_ID:-local}" mobAlphaId
+          "$AFT_WORK_DIR/mob-lead" "agv1-mob-beta-${RUN_ID:-local}" mobBetaId
+          agent-browser --session "$AFT_SESSION" set viewport 390 844 >/dev/null
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-MOB/chat/$(cat "$AFT_WORK_DIR/mobAlphaId")"
+        intent: "Create two OpenCode leads and open the first one's chat on a 390 px phone"
+      - wait:
+          fn: >-
+            (() => { const b = document.querySelector('nav[aria-label="Primary"] button[aria-label="Agents"]');
+              const row = Array.from(document.querySelectorAll('a[href*="/chat/agt_"]')).find((a) => (a.textContent || '').includes('agv1-mob-beta-${RUN_ID:-local}'));
+              return document.querySelector('section[aria-label="Agent chat"] header h2')?.textContent === 'agv1-mob-alpha-${RUN_ID:-local}' &&
+                !!b && b.getBoundingClientRect().width > 0 && b.getAttribute('aria-expanded') === 'false' &&
+                (!row || row.getBoundingClientRect().width === 0); })()
+        intent: "Wait until the rail shows a closed Agents button and the agent list is hidden"
+      - click: { selector: "nav[aria-label='Primary'] button[aria-label='Agents']" }
+        intent: "Tap Agents"
+      - wait:
+          fn: &mobDrawerOpen >-
+            (() => { const b = document.querySelector('nav[aria-label="Primary"] button[aria-label="Agents"]');
+              const d = document.querySelector('aside#agents-drawer[aria-label="Agents"]');
+              const row = d && Array.from(d.querySelectorAll('a[href*="/chat/agt_"]')).find((a) => (a.textContent || '').includes('agv1-mob-beta-${RUN_ID:-local}'));
+              const cur = d && Array.from(d.querySelectorAll('a[href*="/chat/agt_"]')).find((a) => (a.textContent || '').includes('agv1-mob-alpha-${RUN_ID:-local}'));
+              if (!d || !row || !cur || b?.getAttribute('aria-expanded') !== 'true') return false;
+              const r = d.getBoundingClientRect(), rail = document.querySelector('nav[aria-label="Primary"]').getBoundingClientRect();
+              const rr = row.getBoundingClientRect(), top = document.elementFromPoint(rr.left + rr.width / 2, rr.top + rr.height / 2);
+              return r.left >= 0 && r.right <= innerWidth && r.top > 0 && r.bottom <= rail.top + 0.5 &&
+                cur.getAttribute('aria-current') === 'page' && !!top && row.contains(top); })()
+        intent: "Wait until the drawer lists both leads between the header and the rail, the open one marked current, with the other row tappable"
+      - run: |
+          set -e
+          ab() { agent-browser --session "$AFT_SESSION" "$@"; }
+          over="$(ab eval "(() => { const out = []; for (const el of document.body.querySelectorAll('*')) { const r = el.getBoundingClientRect();
+            if (r.width && r.height && getComputedStyle(el).visibility !== 'hidden' && r.right > innerWidth + 0.5) {
+              let clipped = false; for (let p = el.parentElement; p; p = p.parentElement) { const s = getComputedStyle(p).overflowX;
+                if (s !== 'visible' && p.getBoundingClientRect().right < innerWidth - 0.5) { clipped = true; break; } }
+              if (!clipped) out.push(el.tagName + '.' + el.className); } } return out.join(','); })()")"
+          [ "$over" = '""' ] || { echo "past the right edge with the drawer open: $over"; exit 1; }
+          ab click "#agents-drawer a[href\$='/chat/$(cat "$AFT_WORK_DIR/mobBetaId")']"
+        intent: "Nothing lays out past the right edge with the drawer open; tap the second lead"
+      - wait:
+          fn: >-
+            (() => { const b = document.querySelector('nav[aria-label="Primary"] button[aria-label="Agents"]');
+              return location.pathname.startsWith('/ws/E2E-AGV1-MOB/chat/agt_') &&
+                document.querySelector('section[aria-label="Agent chat"] header h2')?.textContent === 'agv1-mob-beta-${RUN_ID:-local}' &&
+                !document.querySelector('aside#agents-drawer[data-open]') && b?.getAttribute('aria-expanded') === 'false'; })()
+        intent: "Wait until the second lead's chat is open and the drawer has closed"
+      - click: { selector: "nav[aria-label='Primary'] button[aria-label='Agents']" }
+        intent: "Open the drawer again"
+      - wait:
+          fn: >-
+            (() => { const d = document.querySelector('aside#agents-drawer[data-open]'); return !!d && !!Array.from(d.querySelectorAll('a[href*="/chat/agt_"]')).find((a) => (a.textContent || '').includes('agv1-mob-alpha-${RUN_ID:-local}')); })()
+        intent: "Wait until the drawer is open"
+      - press: Escape
+      - wait:
+          fn: >-
+            !document.querySelector('aside#agents-drawer[data-open]') &&
+            document.activeElement === document.querySelector('nav[aria-label="Primary"] button[aria-label="Agents"]')
+        intent: "Wait until Escape closes the drawer and focus is back on Agents"
+      - click: { selector: "nav[aria-label='Primary'] button[aria-label='Agents']" }
+        intent: "Open the drawer once more"
+      - wait:
+          fn: >-
+            (() => { const d = document.querySelector('aside#agents-drawer[data-open]'); return !!d && !!Array.from(d.querySelectorAll('a[href*="/chat/agt_"]')).find((a) => (a.textContent || '').includes('agv1-mob-alpha-${RUN_ID:-local}')); })()
+        intent: "Wait until the drawer is open"
+      - run: |
+          set -e
+          ab() { agent-browser --session "$AFT_SESSION" "$@"; }
+          ab mouse move 385 422 >/dev/null
+          ab mouse down >/dev/null
+          ab mouse up >/dev/null
+        intent: "Tap the backdrop to the right of the drawer"
+      - wait:
+          fn: >-
+            !document.querySelector('aside#agents-drawer[data-open]') &&
+            document.querySelector('section[aria-label="Agent chat"] header h2')?.textContent === 'agv1-mob-beta-${RUN_ID:-local}' &&
+            document.querySelector('nav[aria-label="Primary"] button[aria-label="Agents"]')?.getAttribute('aria-expanded') === 'false'
+        intent: "Wait until the backdrop tap closes the drawer and the chat stays put"
+      - run: 'agent-browser --session "$AFT_SESSION" set viewport 1920 1080 >/dev/null'
+        intent: "Back to the desktop width"
+      - wait:
+          fn: >-
+            (() => { const b = document.querySelector('nav[aria-label="Primary"] button[aria-label="Agents"]');
+              const row = Array.from(document.querySelectorAll('a[href*="/chat/agt_"]')).find((a) => (a.textContent || '').includes('agv1-mob-alpha-${RUN_ID:-local}'));
+              return (!b || b.getBoundingClientRect().width === 0) && !!row && row.getBoundingClientRect().width > 0; })()
+        intent: "Wait until the desktop shows no Agents button and the sidebar lists the leads"
+
+  # covers: UI7 user pill beside the bubble; UI7b narrow chat columns keep the copy button whole
+  - name: UI7 the user-message pill stays beside the bubble in a narrow chat column
+    intent: For a short and a long user message, hovering shows the time and copy pill beside the bubble, never on it, inside its row and with the copy button whole, at chat columns of 130, 105 and 80 px
+    steps:
+      - run: |
+          set -e
+          "$AFT_WORK_DIR/mob-lead" "agv1-mob-pill-${RUN_ID:-local}" mobPillId
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" \
+            -d '{"steps":[{"text":"AGV1-MOB-PILL-ONE"}]}' >/dev/null
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-MOB/chat/$(cat "$AFT_WORK_DIR/mobPillId")"
+        intent: "Create an OpenCode lead, script its first reply and open its chat"
+      - fill: { label: Message, value: "ok" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-MOB-PILL-ONE') &&
+            (document.querySelector('section[aria-label="Agent chat"] header')?.textContent || '').includes('idle')
+        budget: 90000
+        intent: "Wait until the short message's reply arrives and the lead is idle"
+      - run: |
+          set -e
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" \
+            -d '{"steps":[{"text":"AGV1-MOB-PILL-TWO"}]}' >/dev/null
+        intent: "Script the second reply"
+      - fill: { label: Message, value: "A longer message that wraps over several lines in a narrow chat column, so the pill sits beside a tall bubble rather than a one-line one." }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-MOB-PILL-TWO') &&
+            (document.querySelector('section[aria-label="Agent chat"] header')?.textContent || '').includes('idle')
+        budget: 60000
+        intent: "Wait until the long message's reply arrives and the lead is idle"
+      - run: 'python3 "$AFT_TESTS_DIR/scripts/agents-v1-mobile.py" pill'
+        intent: "Hover each user message at chat columns of 130, 105 and 80 px and check the pill against its bubble and row"
