@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -94,8 +95,9 @@ export function useAgentRoster(
   const [activity, setActivity] = useState<Activities>(new Map());
   const [error, setError] = useState<string | null>(null);
 
-  // A workspace switch clears the roster, and a List for an earlier
-  // workspace never lands on the new one (RS1).
+  // A workspace switch clears the roster, and a List or stream callback for
+  // an earlier workspace never lands on the new one once it is committed
+  // (RS1).
   const [shownWs, setShownWs] = useState(workspaceId);
   if (shownWs !== workspaceId) {
     setShownWs(workspaceId);
@@ -104,7 +106,9 @@ export function useAgentRoster(
     setError(null);
   }
   const currentWs = useRef(workspaceId);
-  currentWs.current = workspaceId;
+  useLayoutEffect(() => {
+    currentWs.current = workspaceId;
+  }, [workspaceId]);
 
   // Each List in flight collects the stream's events that arrive while it
   // runs, and its result is the List with those events applied on top: a
@@ -164,8 +168,9 @@ export function useAgentRoster(
   }, [relist, openId]);
 
   // The roster as of the last render, for the stream's starting cursors.
+  // Shared before paint, so a switch never paints the old one.
   const latest = useRef(roster);
-  useEffect(() => {
+  useLayoutEffect(() => {
     latest.current = roster;
     shared = roster;
     sharedActivity = activity;
@@ -190,6 +195,7 @@ export function useAgentRoster(
 
   useEffect(() => {
     if (!ids) return;
+    const stale = () => currentWs.current !== workspaceId;
     const stream = new AgentEventStream(workspaceId, {
       agents: ids.split(","),
       types: ROSTER_KINDS,
@@ -202,6 +208,7 @@ export function useAgentRoster(
       ),
       expired: purged ? purged.split(",") : [],
       onEvents: (added) => {
+        if (stale()) return;
         inflight.current.forEach((seen) => seen.push(...added));
         setRoster((r) => applyEvents(r, added));
         setActivity((m) => applyActivity(m, added));
@@ -209,11 +216,12 @@ export function useAgentRoster(
           list({ parent }, upsert).catch((err) => setError(message(err)));
       },
       onNotice: (n) => {
-        if (n.kind === "tool.started")
+        if (n.kind === "tool.started" && !stale())
           setActivity((m) => applyActivity(m, [n]));
       },
       // Steps missed while away are not caught up: "Working…" until the next.
       onResync: () => {
+        if (stale()) return;
         setActivity(new Map());
         relist();
       },
