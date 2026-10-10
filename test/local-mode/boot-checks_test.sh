@@ -227,7 +227,7 @@ printf '%s\n' "$out" > "$T/k2a-up.log"
 check "K2 truncated host WAL: make local-mode-agents-up fails" '[ "$rc" != 0 ]'
 check "K2 truncated host WAL: clear refusal naming the damaged WAL" \
   'printf "%s" "$out" | grep -q "opencode.db-wal is unreadable or damaged (bad WAL header); repair the host database with OpenCode first; not starting the REAL stack"'
-check "K2 truncated host WAL: no container was created" '[ -z "$(owned)" ]'
+check "K2 truncated host WAL: no container was created" 'c="$(owned)" && [ -z "$c" ]'
 check "K2 truncated host WAL: no private copy left" '[ ! -e "$state_dir/$project" ]'
 check "K2 truncated host WAL: host folder bytes and mtimes unchanged" '[ "$(listing "$host")" = "$before" ]'
 
@@ -255,16 +255,22 @@ now() { if [ -n "${EPOCHREALTIME:-}" ]; then printf '%s\n' "$EPOCHREALTIME"; els
       ts="${raw%% *}" line="${raw#* }"
       printf '%s\n' "$line" >> "$boot"
       if [ "$line" = "[local-mode] ready" ]; then
-        t_models="$(now)"
-        code="$(curl -sS -o "$T/k1-models.json" -w '%{http_code}' --max-time 1 "$prefix/harnesses/opencode/models" 2>"$T/k1-models.err" || true)"
+        # Each request's send time is bounded from above by curl's own timers:
+        # it went out at (exit time - time_total + time_pretransfer), and the
+        # host clock is read only after curl exits, so the bound is never early.
+        mw="$(curl -sS -o "$T/k1-models.json" -w '%{http_code} %{time_pretransfer} %{time_total}' --max-time 1 \
+          "$prefix/harnesses/opencode/models" 2>"$T/k1-models.err" || true)"; m_end="$(now)"
         body="$(jq -nc --arg m "$model" '{preset:"lead",name:"s15-wu1-first",repo:"source-repo",base_ref:"main",overrides:{harness:"opencode",model:$m}}')"
-        t_post="$(now)"
-        ccode="$(curl -sS -o "$T/k1-create.json" -w '%{http_code}' --max-time 60 -X POST \
-          -H 'Content-Type: application/json' -H "Idempotency-Key: s15-wu1-$$" -d "$body" "$prefix/agents" 2>"$T/k1-create.err" || true)"
+        pw="$(curl -sS -o "$T/k1-create.json" -w '%{http_code} %{time_pretransfer} %{time_total}' --max-time 60 -X POST \
+          -H 'Content-Type: application/json' -H "Idempotency-Key: s15-wu1-$$" -d "$body" "$prefix/agents" 2>"$T/k1-create.err" || true)"; p_end="$(now)"
         h0="$(now)"; vm="$(podman exec "$ctr" date +%s.%N 2>/dev/null)"; h1="$(now)"
-        python3 - "$ts" "$t_models" "$t_post" "$h0" "$vm" "$h1" "$code" "$ccode" > "$T/k1-timing" <<'PY2'
+        python3 - "$ts" "$mw" "$m_end" "$pw" "$p_end" "$h0" "$vm" "$h1" > "$T/k1-timing" <<'PY2'
 import datetime, json, re, sys
-ts, t_models, t_post, h0, vm, h1, code, ccode = sys.argv[1:]
+ts, mw, m_end, pw, p_end, h0, vm, h1 = sys.argv[1:]
+code, m_pre, m_tot = (mw.split() + ["", "nan", "nan"])[:3]
+ccode, p_pre, p_tot = (pw.split() + ["", "nan", "nan"])[:3]
+t_models = float(m_end) - float(m_tot) + float(m_pre)
+t_post = float(p_end) - float(p_tot) + float(p_pre)
 # Python 3.9 fromisoformat: at most 6 fraction digits and no trailing Z.
 t = re.sub(r"Z$", "+00:00", ts)
 m = re.match(r"(.*\.\d{1,6})\d*(.*)$", t)
@@ -273,8 +279,8 @@ emit_vm = datetime.datetime.fromisoformat(m.group(1) + m.group(2) if m else t).t
 # with offset in [h0 - vm, h1 - vm]. Taking the smallest offset gives the
 # LARGEST possible delay after emission: an upper bound, never an understatement.
 off_lo = float(h0) - float(vm)
-print(json.dumps({"ready_ts": ts, "models_after_max_s": float(t_models) - (emit_vm + off_lo),
-                  "post_after_max_s": float(t_post) - (emit_vm + off_lo),
+print(json.dumps({"ready_ts": ts, "models_after_max_s": t_models - (emit_vm + off_lo),
+                  "post_after_max_s": t_post - (emit_vm + off_lo),
                   "clock_offset_range_s": [off_lo, float(h1) - float(vm)],
                   "models_http": code, "create_http": ccode}))
 PY2
@@ -322,7 +328,7 @@ tget() { jq -r ".$1 // empty" "$T/k1-timing" 2>/dev/null; }
 # the timestamps are wrong, so it never passes.
 under1() { python3 -c 'import sys; d = float(sys.argv[1]); sys.exit(0 if 0 <= d < 1 else 1)' "$1" 2>/dev/null; }
 mcode="$(tget models_http)" ccode="$(tget create_http)"
-check "K1 the catalog request starts within 1 s of the ready line's emission" 'under1 "$(tget models_after_max_s)"'
+check "K1 the catalog request is sent within 1 s of the ready line's emission" 'under1 "$(tget models_after_max_s)"'
 check "K1 at ready, the catalog answers within 1 s and lists $model" \
   '[ "$mcode" = 200 ] && jq -e --arg m "$model" "any(.providers[].models[]; .id == \$m)" "$T/k1-models.json" >/dev/null 2>&1'
 check "K1 the first Create is sent within 1 s of the ready line's emission" 'under1 "$(tget post_after_max_s)"'
