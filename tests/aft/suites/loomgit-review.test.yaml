@@ -17,7 +17,7 @@ teardown: >-
 
 tests:
   - name: operator approves a real task revision from the task detail panel
-    intent: An agent edits a task repo through a TaskRun, then an operator approves the recorded head SHA in the Revisions section
+    intent: An agent edits a task repo through a TaskRun, then an operator approves the recorded head SHA in the review bar on Changes
     steps:
       - api:
           method: "POST"
@@ -79,3 +79,55 @@ tests:
             - path: "data.0.verdict"
               equals: "approve"
         intent: "An operator confirms that the UI action persisted approval for the recorded revision"
+
+  # AFT-RB1 (P2.23): the header names what is approved. A task in review with
+  # no PR is a plan review; one whose external ref is a PR is a code review.
+  - name: the header says Approve plan for a plan and Approve code for a PR
+    intent: A human reviewing a task sees Approve plan while it has no PR, and Approve code once its PR is linked
+    steps:
+      - api:
+          method: "POST"
+          path: "/api/workspaces/E2E-WS-REVIEW/issues"
+          body:
+            title: "plan review $RUN_ID"
+            issue_type: "task"
+            priority: 2
+          save:
+            - from: "data.id"
+              as: "planTaskId"
+        intent: "An orchestration client creates the task to review"
+      - api:
+          method: "PATCH"
+          path: "/api/workspaces/E2E-WS-REVIEW/issues/${var:planTaskId}"
+          body:
+            status: "review"
+          assert:
+            - path: "data.status"
+              equals: "review"
+        intent: "The planner hands the task's plan to review"
+      - open: /ws/E2E-WS-REVIEW/kanban
+        intent: "Load the workspace before following the task deep link"
+      - wait:
+          fn: "!!document.querySelector('[data-testid=board-toolbar]')"
+        intent: "Wait until the workspace board has finished mounting"
+      - run: >-
+          agent-browser --session "$AFT_SESSION" open
+          "$AFT_BASE_URL/ws/E2E-WS-REVIEW/issues/$(cat "$AFT_WORK_DIR/planTaskId")"
+        intent: "The human opens the task in plan review"
+      - wait:
+          fn: "document.querySelector('[data-testid=panel-approve-button]')?.textContent.trim() === '✓ Approve plan'"
+        intent: "RB1-plan: the header button says Approve plan"
+      - api:
+          method: "PATCH"
+          path: "/api/workspaces/E2E-WS-REVIEW/issues/${var:planTaskId}"
+          body:
+            external_ref: "https://github.com/owner/repo/pull/7"
+          assert:
+            - path: "data.external_ref"
+              equals: "https://github.com/owner/repo/pull/7"
+        intent: "The task's PR is linked, so the review is now of code"
+      - reload: true
+        intent: "The human reloads the task"
+      - wait:
+          fn: "document.querySelector('[data-testid=panel-approve-button]')?.textContent.trim() === '✓ Approve code'"
+        intent: "RB1-code: the header button says Approve code, not Approve plan"

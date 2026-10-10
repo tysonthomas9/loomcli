@@ -139,7 +139,7 @@ export function getReviewType(issue: ReviewCheckable): ReviewType | null {
   const isBlockedWithNotes = issue.status === "blocked" && !!issue.notes;
   const hasExternalPR = isPRUrl(issue.external_ref);
 
-  // Code awaiting review in Loom: the Revisions panel owns its verdict, so
+  // Code awaiting review in Loom: the review bar on Changes owns its verdict, so
   // the header offers no plan or PR review actions.
   if (isAwaitingCodeReview(issue)) {
     return null;
