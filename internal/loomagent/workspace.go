@@ -22,6 +22,10 @@ type Workspace interface {
 	// Remove deletes the working copy for s and keeps its branch. It refuses
 	// uncommitted work unless s.Confirm equals the current Status fingerprint.
 	Remove(ctx context.Context, s WorkspaceSpec) error
+	// Checkpoint saves the working copy for s, tracked and untracked files,
+	// as the commit at ref, unless ref exists already. The branch, index and
+	// log are left as they are.
+	Checkpoint(ctx context.Context, s WorkspaceSpec, ref string) error
 	// Publish pushes the agent's branch and opens or updates its one PR.
 	Publish(ctx context.Context, req PublishRequest) (PublishResult, error)
 }

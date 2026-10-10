@@ -544,7 +544,8 @@ vi.mock("@/hooks/ui/usePanelManager", () => ({
   usePanelManager: mockUsePanelManager,
 }));
 
-vi.mock("@/hooks/ui/useKeyboardShortcuts", () => ({
+vi.mock("@/hooks/ui/useKeyboardShortcuts", async () => ({
+  EscapeRegistryContext: (await import("react")).createContext(null),
   KeyboardShortcutProvider: ({ children }: { children: React.ReactNode }) =>
     children,
   useKeyboardShortcuts: vi.fn(() => ({
@@ -913,6 +914,11 @@ function mockHelloWorldWorkspaceContext({
     isMultiRepo: false,
   } as ReturnType<typeof useWorkspaceContext>);
 }
+
+// The sidebar's Agent API roster owner needs a real router and the Agent API.
+vi.mock("@/components/WorkspaceTree/AgentRosterOwner", () => ({
+  AgentRosterOwner: ({ children }: { children: React.ReactNode }) => children,
+}));
 
 // AgentSection's module import triggers a vitest-4 mock-allocation blowup on
 // import; stub it to a lightweight shim that still renders the store-provided

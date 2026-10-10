@@ -275,8 +275,9 @@ func parseCompletionKey(key string) (Completion, bool) {
 }
 
 // created are the events Create's last step saves: agent.created, a's
-// model.unverified if any, and child.created on a's parent.
-func created(a loomstore.Agent) ([]loomstore.Event, error) {
+// model.unverified if any, and child.created on a's parent, naming call,
+// the parent's tool call that created a, when known.
+func created(a loomstore.Agent, call string) ([]loomstore.Event, error) {
 	e, err := eventRow(a.AgentID, KindAgentCreated, KindAgentCreated,
 		map[string]any{"name": a.Name, "preset": a.Preset, "harness": a.Harness})
 	if err != nil {
@@ -291,8 +292,11 @@ func created(a loomstore.Agent) ([]loomstore.Event, error) {
 	if a.ParentAgentID == nil {
 		return out, nil
 	}
-	e, err = eventRow(*a.ParentAgentID, KindChildCreated, KindChildCreated+":"+a.AgentID,
-		map[string]any{"child": a.AgentID, "name": a.Name, "preset": a.Preset})
+	p := map[string]any{"child": a.AgentID, "name": a.Name, "preset": a.Preset}
+	if call != "" {
+		p["call"] = call
+	}
+	e, err = eventRow(*a.ParentAgentID, KindChildCreated, KindChildCreated+":"+a.AgentID, p)
 	return append(out, e), err
 }
 

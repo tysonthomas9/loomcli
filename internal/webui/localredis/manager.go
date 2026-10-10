@@ -116,6 +116,10 @@ type Manager struct {
 	started   bool
 	mu        sync.Mutex
 	closeOnce sync.Once
+	// dumpSem serializes whole sweeps so a manual Dump and the periodic one
+	// cannot interleave file writes or land an older sweep last. A channel,
+	// not a mutex, so a waiter can give up when its context ends.
+	dumpSem chan struct{}
 
 	// lastDumpHash is the SHA-256 of the most recently written snapshot
 	// payload. Subsequent Dump calls compare against this to skip
@@ -165,6 +169,7 @@ func NewManager(snapshotPath string, fleetKeys bool, logger *slog.Logger, opts .
 		baseCancel:    baseCancel,
 		stopCh:        make(chan struct{}),
 		stoppedCh:     make(chan struct{}),
+		dumpSem:       make(chan struct{}, 1),
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -250,6 +255,18 @@ func (m *Manager) Dump() error {
 	return m.dump(ctx)
 }
 
+// DumpContext is Dump that also stops when ctx ends, so a caller's request
+// deadline bounds the sweep.
+func (m *Manager) DumpContext(ctx context.Context) error {
+	if m.snapshotPath == "" {
+		return nil
+	}
+	dctx, cancel := context.WithTimeout(m.baseCtx, m.sweepCap)
+	defer cancel()
+	defer context.AfterFunc(ctx, cancel)()
+	return m.dump(dctx)
+}
+
 // dump runs one sweep+write attempt and records its outcome in the
 // package metrics. Single instrumentation point: every failure mode
 // (partial-read abort, scan failure, marshal, file I/O) increments the
@@ -258,6 +275,16 @@ func (m *Manager) Dump() error {
 // because a verified-unchanged keyspace is just as durable as a
 // rewritten one.
 func (m *Manager) dump(ctx context.Context) error {
+	select {
+	case m.dumpSem <- struct{}{}:
+	default: // held by another sweep: wait, but not past ctx
+		select {
+		case m.dumpSem <- struct{}{}:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	defer func() { <-m.dumpSem }()
 	if err := m.dumpOnce(ctx); err != nil {
 		snapshotFailuresTotal.Inc()
 		return err

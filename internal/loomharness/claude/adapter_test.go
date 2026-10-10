@@ -7,6 +7,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -916,6 +917,74 @@ func TestClaudeFailedResultCarriesError(t *testing.T) {
 		}
 		if done.StopReason != want[0] || done.Error != want[1] {
 			t.Errorf("%s -> %q %q; want %q %q", raw, done.StopReason, done.Error, want[0], want[1])
+		}
+	}
+}
+
+// TestClaudeFailureClass (OR9): a failed turn carries its failure class, as
+// T3 Code's ClaudeAdapterV2 classifies it (providerFailureFromResult): a
+// blocking_limit, a 429 or a root assistant frame's rate_limit error is a
+// usage limit; a 401 or authentication_failed is auth; a 529 is a retryable
+// provider error. A success result with is_error (how the CLI reports an
+// API error) fails the turn with its result text. The auth frames are T3
+// Code's claude_result_is_error fixture. No result carries a reset time.
+func TestClaudeFailureClass(t *testing.T) {
+	limit := &loomharness.Failure{Class: loomharness.FailureUsageLimit, Retryable: true}
+	for _, c := range []struct {
+		name   string
+		frames []string
+		stop   string
+		err    string
+		want   *loomharness.Failure
+	}{
+		{"429", []string{`{"type":"result","subtype":"success","is_error":true,"api_error_status":429,"result":"API Error: 429 rate limited"}`},
+			"failed", "API Error: 429 rate limited", limit},
+		{"blocking_limit", []string{`{"type":"result","subtype":"error_during_execution","terminal_reason":"blocking_limit","errors":["usage limit"]}`},
+			"failed", "usage limit", limit},
+		{"assistant rate_limit", []string{
+			`{"type":"assistant","parent_tool_use_id":null,"error":"rate_limit","message":{"id":"m1","content":[{"type":"text","text":"You've hit your limit"}]}}`,
+			`{"type":"result","subtype":"success","is_error":true,"result":"You've hit your limit"}`},
+			"failed", "You've hit your limit", limit},
+		{"subagent rate_limit", []string{
+			`{"type":"assistant","parent_tool_use_id":"tu_1","error":"rate_limit","message":{"id":"m1","content":[{"type":"text","text":"x"}]}}`,
+			`{"type":"result","subtype":"error_during_execution","errors":["boom"]}`},
+			"failed", "boom", &loomharness.Failure{Class: loomharness.FailureProvider}},
+		{"auth", []string{
+			`{"type":"assistant","message":{"id":"7f28a402-6d4c-491e-abbb-2b3c231a06f0","model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"Failed to authenticate. API Error: 401 Invalid authentication credentials"}]},"parent_tool_use_id":null,"session_id":"aa401aa4-e597-4e40-8e40-1e401e401e40","error":"authentication_failed"}`,
+			`{"type":"result","subtype":"success","is_error":true,"api_error_status":401,"result":"Failed to authenticate. API Error: 401 Invalid authentication credentials","stop_reason":"stop_sequence","session_id":"aa401aa4-e597-4e40-8e40-1e401e401e40","total_cost_usd":0,"terminal_reason":"completed"}`},
+			"failed", "Failed to authenticate. API Error: 401 Invalid authentication credentials", &loomharness.Failure{Class: loomharness.FailureAuth}},
+		{"529", []string{`{"type":"result","subtype":"success","is_error":true,"api_error_status":529,"result":"Overloaded"}`},
+			"failed", "Overloaded", &loomharness.Failure{Class: loomharness.FailureProvider, Retryable: true}},
+		{"max turns", []string{`{"type":"result","subtype":"error_max_turns"}`},
+			"failed", "error_max_turns", &loomharness.Failure{Class: loomharness.FailureProvider}},
+		{"success", []string{`{"type":"result","subtype":"success","is_error":false,"result":"done"}`}, "completed", "", nil},
+	} {
+		m := newMapper(loomharness.NativeRef{NativeID: "s"})
+		var done loomharness.Event
+		for _, raw := range c.frames {
+			for _, e := range m.frame([]byte(raw)) {
+				if e.Type == loomharness.EventTurnCompleted {
+					done = e
+				}
+			}
+		}
+		if done.StopReason != c.stop || done.Error != c.err || !reflect.DeepEqual(done.Failure, c.want) {
+			t.Errorf("%s: %q %q %+v; want %q %q %+v", c.name, done.StopReason, done.Error, done.Failure, c.stop, c.err, c.want)
+		}
+	}
+	// A cancelled turn's error result stays cancelled, with no failure, and
+	// a rate_limit frame does not outlive its turn.
+	m := newMapper(loomharness.NativeRef{NativeID: "s"})
+	m.frame([]byte(`{"type":"assistant","parent_tool_use_id":null,"error":"rate_limit","message":{"id":"m1","content":[]}}`))
+	m.cancelled = true
+	for _, e := range m.frame([]byte(`{"type":"result","subtype":"success","is_error":true,"result":"x"}`)) {
+		if e.Type == loomharness.EventTurnCompleted && (e.StopReason != "cancelled" || e.Failure != nil) {
+			t.Errorf("cancelled: %+v", e)
+		}
+	}
+	for _, e := range m.frame([]byte(`{"type":"result","subtype":"error_during_execution","errors":["boom"]}`)) {
+		if e.Type == loomharness.EventTurnCompleted && !reflect.DeepEqual(e.Failure, &loomharness.Failure{Class: loomharness.FailureProvider}) {
+			t.Errorf("next turn: %+v", e.Failure)
 		}
 	}
 }

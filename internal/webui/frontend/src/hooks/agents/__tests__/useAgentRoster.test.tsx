@@ -7,6 +7,7 @@
 // the browser opens the stream (RR1).
 
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { flushSync } from "react-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Agent, AgentEvent } from "@/api/agentsv1";
@@ -96,6 +97,37 @@ function commit(id: string, kind: string, payload: object = {}) {
     if (es.registered && !es.closed && es.wants(e)) act(() => es.deliver(e));
 }
 
+// Deletes an agent as the server does: its history is purged first, so its
+// agent.deleted is live only (seq 0) and goes to every open subscriber that
+// follows it, whatever its kinds (DEL2).
+function tombstone(id: string) {
+  agents.delete(id);
+  log.delete(id);
+  const e: AgentEvent = {
+    agent_id: id,
+    seq: 0,
+    event_id: `${id}:deleted:agent.deleted`,
+    kind: "agent.deleted",
+    turn_id: "",
+    payload: {},
+    created_at: "",
+  };
+  for (const es of FakeEventSource.all)
+    if (es.registered && !es.closed && es.agents.includes(id))
+      act(() => es.deliver(e));
+}
+
+// A live-only feed.gap notice: the roster re-lists everything.
+const feedGap: AgentEvent = {
+  agent_id: "",
+  seq: 0,
+  event_id: "",
+  kind: "feed.gap",
+  turn_id: "",
+  payload: {},
+  created_at: "",
+};
+
 const json = (body: unknown) =>
   new Response(JSON.stringify(body), {
     status: 200,
@@ -114,8 +146,14 @@ function holdFullLists(): () => void {
   };
 }
 
+// A workspace's own List answer, in place of the shared agents (RS1).
+const otherWs = new Map<string, () => Promise<Response>>();
+
 async function fakeFetch(input: string) {
   const url = new URL(input, "http://localhost");
+  const ws = url.pathname.split("/")[3];
+  if (url.pathname.endsWith("/v1/agents") && otherWs.has(ws))
+    return otherWs.get(ws)!();
   if (url.pathname.endsWith("/events/token")) return json({ token: "tok" });
   if (url.pathname.endsWith("/v1/agents")) {
     lists.push(url);
@@ -140,6 +178,7 @@ beforeEach(() => {
   log.clear();
   lists = [];
   holdFull = null;
+  otherWs.clear();
   FakeEventSource.all = [];
   vi.stubGlobal("fetch", vi.fn(fakeFetch));
   vi.stubGlobal("EventSource", FakeEventSource);
@@ -230,5 +269,115 @@ describe("useAgentRoster", () => {
     renderHook(() => useAgentRoster("ws1"));
     await waitFor(() => expect(openStream()?.agents).toEqual(["lead"]));
     expect(openStream()!.url.searchParams.get("after")).toBe("lead:5");
+  });
+
+  it("ignores a List for the previous workspace that lands after a switch", async () => {
+    agents.set("a1", agent("a1"));
+    const release = holdFullLists();
+    let answerB = (_: Response) => {};
+    otherWs.set("wsB", () => new Promise((r) => (answerB = r)));
+    const { result, rerender } = renderHook(({ ws }) => useAgentRoster(ws), {
+      initialProps: { ws: "wsA" },
+    });
+    await waitFor(() => expect(lists).toHaveLength(1));
+
+    rerender({ ws: "wsB" });
+    await act(async () => release());
+    expect([...result.current.roster.keys()]).toEqual([]);
+
+    await act(async () => answerB(json({ agents: [agent("b1")], next: "" })));
+    expect([...result.current.roster.keys()]).toEqual(["b1"]);
+  });
+
+  it("never shows the previous workspace's agents when the new List fails", async () => {
+    agents.set("a1", agent("a1"));
+    otherWs.set("wsB", async () => new Response("{}", { status: 500 }));
+    const { result, rerender } = renderHook(({ ws }) => useAgentRoster(ws), {
+      initialProps: { ws: "wsA" },
+    });
+    await waitFor(() =>
+      expect([...result.current.roster.keys()]).toEqual(["a1"]),
+    );
+
+    rerender({ ws: "wsB" });
+    expect([...result.current.roster.keys()]).toEqual([]);
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+    expect([...result.current.roster.keys()]).toEqual([]);
+  });
+
+  // A's List lands and queues its update, the switch to B commits first,
+  // and B's List lands before React replays A's update.
+  async function switchWhileAQueued(answerB: () => Promise<Response>) {
+    agents.set("a1", agent("a1"));
+    const release = holdFullLists();
+    otherWs.set("wsB", answerB);
+    const hook = renderHook(({ ws }) => useAgentRoster(ws), {
+      initialProps: { ws: "wsA" },
+    });
+    await waitFor(() => expect(lists).toHaveLength(1));
+    await act(async () => {
+      release();
+      await new Promise((r) => setTimeout(r, 0));
+      flushSync(() => hook.rerender({ ws: "wsB" }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    return hook.result;
+  }
+
+  it("shows B's List, not A's queued one, after a synchronous switch", async () => {
+    const result = await switchWhileAQueued(async () =>
+      json({ agents: [agent("b1")], next: "" }),
+    );
+    await waitFor(() =>
+      expect([...result.current.roster.keys()]).toEqual(["b1"]),
+    );
+  });
+
+  it("shows B's List error, not A's queued roster, after a synchronous switch", async () => {
+    const result = await switchWhileAQueued(
+      async () => new Response("{}", { status: 500 }),
+    );
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+    expect([...result.current.roster.keys()]).toEqual([]);
+  });
+
+  it("drops a Lead deleted elsewhere as soon as its live-only agent.deleted arrives", async () => {
+    agents.set("lead", agent("lead", { preset: "lead" }));
+    agents.set("kid", agent("kid", { parent_agent_id: "lead" }));
+    commit("lead", "agent.state_changed", { from: "creating", to: "idle" });
+    commit("kid", "agent.state_changed", { from: "creating", to: "finished" });
+    const { result } = renderHook(() => useAgentRoster("ws1"));
+    await waitFor(() => expect(openStream()?.agents).toEqual(["kid", "lead"]));
+    act(() => openStream()!.register());
+    await waitFor(() => expect(result.current.roster.has("lead")).toBe(true));
+
+    tombstone("lead");
+    await waitFor(() =>
+      expect([...result.current.roster.keys()]).toEqual(["kid"]),
+    );
+  });
+
+  it("does not let a List read before the delete bring the Lead back", async () => {
+    agents.set("lead", agent("lead", { preset: "lead" }));
+    agents.set("other", agent("other", { preset: "lead" }));
+    commit("lead", "agent.state_changed", { from: "creating", to: "idle" });
+    const { result } = renderHook(() => useAgentRoster("ws1"));
+    await waitFor(() =>
+      expect(openStream()?.agents).toEqual(["lead", "other"]),
+    );
+    const stream = openStream()!;
+    act(() => stream.register());
+    await waitFor(() => expect(result.current.roster.size).toBe(2));
+
+    // A full List reads the lead, then the delete lands before it answers.
+    const release = holdFullLists();
+    const before = lists.length;
+    act(() => stream.deliver({ ...feedGap }));
+    await waitFor(() => expect(lists.length).toBeGreaterThan(before));
+    tombstone("lead");
+    await act(async () => release());
+    await waitFor(() =>
+      expect([...result.current.roster.keys()]).toEqual(["other"]),
+    );
   });
 });

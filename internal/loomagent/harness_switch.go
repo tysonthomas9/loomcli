@@ -124,7 +124,7 @@ func (s *Service) switchFailed(ctx context.Context, a loomstore.Agent, req Updat
 func (s *Service) switchTarget(ctx context.Context, a loomstore.Agent, req UpdateRequest) (loomharness.Harness, Config, string, error) {
 	var cfg Config
 	if req.Expect == nil || req.Expect.SpecVersion == nil {
-		return nil, cfg, "", &Error{Code: CodeSpecVersionMismatch, Message: "a harness switch needs Expect.SpecVersion"}
+		return nil, cfg, "", invalid("a harness switch needs expect.spec_version")
 	}
 	h, ok := s.harnesses[req.Harness]
 	if !ok {

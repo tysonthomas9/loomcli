@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -73,6 +74,20 @@ export const useRoster = (): Roster =>
 export const useRosterActivity = (): Activities =>
   useSyncExternalStore(subscribe, () => sharedActivity);
 
+// The roster, its activity and its error belong to one workspace.
+type Owned = {
+  ws: string;
+  roster: Roster;
+  activity: Activities;
+  error: string | null;
+};
+const NONE: Owned = {
+  ws: "",
+  roster: new Map(),
+  activity: new Map(),
+  error: null,
+};
+
 const message = (err: unknown) =>
   err instanceof Error ? err.message : String(err);
 
@@ -90,9 +105,31 @@ export function useAgentRoster(
   roster: Roster;
   error: string | null;
 } {
-  const [roster, setRoster] = useState<Roster>(new Map());
-  const [activity, setActivity] = useState<Activities>(new Map());
-  const [error, setError] = useState<string | null>(null);
+  // A switch shows nothing of the old workspace. An update made for the
+  // committed workspace starts from empty if the state is another's; one
+  // made for any other workspace changes nothing, even one queued before
+  // the switch committed (RS1).
+  const [owned, setOwned] = useState<Owned>({ ...NONE, ws: workspaceId });
+  const { roster, activity, error } = owned.ws === workspaceId ? owned : NONE;
+  const currentWs = useRef(workspaceId);
+  useLayoutEffect(() => {
+    currentWs.current = workspaceId;
+  }, [workspaceId]);
+  const [setRoster, setActivity, setError] = useMemo(() => {
+    const own =
+      <K extends "roster" | "activity" | "error">(k: K) =>
+      (v: Owned[K] | ((old: Owned[K]) => Owned[K])) =>
+        setOwned((o) => {
+          if (currentWs.current !== workspaceId) return o;
+          const base = o.ws === workspaceId ? o : { ...NONE, ws: workspaceId };
+          const next =
+            typeof v === "function"
+              ? (v as (old: Owned[K]) => Owned[K])(base[k])
+              : v;
+          return next === base[k] ? base : { ...base, [k]: next };
+        });
+    return [own("roster"), own("activity"), own("error")] as const;
+  }, [workspaceId]);
 
   // Each List in flight collects the stream's events that arrive while it
   // runs, and its result is the List with those events applied on top: a
@@ -106,16 +143,21 @@ export function useAgentRoster(
     ) => {
       const seen: AgentEvent[] = [];
       inflight.current.add(seen);
+      const stale = () => currentWs.current !== workspaceId;
       return listAll(workspaceId, q, open)
-        .then((agents) =>
-          setRoster((r) => {
-            const next = merge(r, agents);
-            return next ? applyEvents(next, seen) : r;
-          }),
+        .then(
+          (agents) =>
+            setRoster((r) => {
+              const next = merge(r, agents);
+              return next ? applyEvents(next, seen) : r;
+            }),
+          (err) => {
+            if (!stale()) throw err;
+          },
         )
         .finally(() => inflight.current.delete(seen));
     },
-    [workspaceId],
+    [workspaceId, setRoster],
   );
 
   // A full List replaces the roster, unless a later one already did.
@@ -138,7 +180,7 @@ export function useAgentRoster(
         () => n === sent.current && setError(null),
         (err) => n === sent.current && setError(message(err)),
       );
-  }, [list]);
+  }, [list, setError]);
 
   useEffect(() => {
     open.current = openId;
@@ -146,8 +188,9 @@ export function useAgentRoster(
   }, [relist, openId]);
 
   // The roster as of the last render, for the stream's starting cursors.
+  // Shared before paint, so a switch never paints the old one.
   const latest = useRef(roster);
-  useEffect(() => {
+  useLayoutEffect(() => {
     latest.current = roster;
     shared = roster;
     sharedActivity = activity;
@@ -172,6 +215,7 @@ export function useAgentRoster(
 
   useEffect(() => {
     if (!ids) return;
+    const stale = () => currentWs.current !== workspaceId;
     const stream = new AgentEventStream(workspaceId, {
       agents: ids.split(","),
       types: ROSTER_KINDS,
@@ -184,6 +228,7 @@ export function useAgentRoster(
       ),
       expired: purged ? purged.split(",") : [],
       onEvents: (added) => {
+        if (stale()) return;
         inflight.current.forEach((seen) => seen.push(...added));
         setRoster((r) => applyEvents(r, added));
         setActivity((m) => applyActivity(m, added));
@@ -191,11 +236,19 @@ export function useAgentRoster(
           list({ parent }, upsert).catch((err) => setError(message(err)));
       },
       onNotice: (n) => {
+        if (stale()) return;
         if (n.kind === "tool.started")
           setActivity((m) => applyActivity(m, [n]));
+        // A delete purges the history first, so its agent.deleted is live
+        // only (seq 0); a List in flight must not bring the row back (DEL2).
+        if (n.kind === "agent.deleted") {
+          inflight.current.forEach((seen) => seen.push(n));
+          setRoster((r) => applyEvents(r, [n]));
+        }
       },
       // Steps missed while away are not caught up: "Working…" until the next.
       onResync: () => {
+        if (stale()) return;
         setActivity(new Map());
         relist();
       },
@@ -203,7 +256,16 @@ export function useAgentRoster(
     history.current = { ws: workspaceId, h: stream.history };
     void stream.connect();
     return () => stream.close();
-  }, [workspaceId, ids, purged, relist, list]);
+  }, [
+    workspaceId,
+    ids,
+    purged,
+    relist,
+    list,
+    setRoster,
+    setActivity,
+    setError,
+  ]);
 
   return { roster, error };
 }

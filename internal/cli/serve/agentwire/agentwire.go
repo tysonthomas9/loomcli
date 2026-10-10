@@ -24,6 +24,7 @@ import (
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 	"github.com/tysonthomas9/loomcli/internal/loomharness/opencode"
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
+	"github.com/tysonthomas9/loomcli/internal/prwatch"
 	"github.com/tysonthomas9/loomcli/internal/skillmat"
 	"github.com/tysonthomas9/loomcli/internal/store"
 	"github.com/tysonthomas9/loomcli/internal/webui/handlers/agentsv1"
@@ -45,6 +46,9 @@ type Config struct {
 	// GitHubRead is serve's host GitHub connector for the agents' github_read
 	// tool; nil leaves github_read unoffered.
 	GitHubRead agentsv1.GitHubReader
+	// PRWatchHost is serve's host GitHub connector for the agents' PR
+	// watches (OR10); nil leaves github/watch unavailable.
+	PRWatchHost prwatch.Host
 }
 
 // API is a running Agent API: one service per workspace on a shared
@@ -108,12 +112,13 @@ func Start(ctx context.Context, cfg Config) (*API, error) {
 		c := serviceConfig(st, ws, wt, cfg.Skills,
 			map[string]loomharness.Harness{"opencode": lazyFeed{Harness: oc, start: feed}})
 		c.RecoverFirst = true              // writes wait for the dispatcher's start-up Reconcile
+		c.PRWatchHost = cfg.PRWatchHost    // OR8: the dispatcher sweeps the agents' PR watches
 		c.CatalogWarmUp = 45 * time.Second // MC1: OpenCode lists only some models ~20s after boot
 		c.Bridge, c.Launch, c.Retire = bridge(a.APIBase, cfg.GitHubRead != nil), launch(a.APIBase, ws, tokens, cfg.GitHubRead != nil), retire(oc)
 		svc = loomagent.New(c)
 		return svc, feed
 	}
-	a.handler = agentsv1.New(a.service, nil).WithTokens(tokens).WithGitHub(cfg.GitHubRead)
+	a.handler = agentsv1.New(a.service, nil).WithTokens(tokens).WithGitHub(cfg.GitHubRead).WithPRWatch(prWatcher(st, cfg.PRWatchHost))
 	a.run(a.runIdle)
 	known, _, err := st.ListAgents(ctx, loomstore.AgentFilter{IncludeArchived: true, IncludeDeleted: true})
 	if err != nil {
@@ -128,6 +133,14 @@ func Start(ctx context.Context, cfg Config) (*API, error) {
 	}
 	a.run(a.runRetention)
 	return a, nil
+}
+
+// prWatcher is the agents' PR watches on st through host; nil without host.
+func prWatcher(st *loomstore.Store, host prwatch.Host) agentsv1.PRWatcher {
+	if host == nil {
+		return nil
+	}
+	return prwatch.Service{Store: st, Host: host}
 }
 
 // newOpenCode returns the OpenCode adapter with Loom's presets and the

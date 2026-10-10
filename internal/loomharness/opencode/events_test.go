@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -494,5 +495,74 @@ func TestEventsTurnAfterADeclineIsItsOwn(t *testing.T) {
 	}
 	if strings.Join(hist, "\n") != strings.Join(wantHist, "\n") {
 		t.Fatalf("history turns:\n%s\nwant:\n%s", strings.Join(hist, "\n"), strings.Join(wantHist, "\n"))
+	}
+}
+
+// TestOpenCodeFailureNoReset (OR9): a failed execution carries the class of
+// its error type, as OpenCode 2.0.19 names a provider failure (its
+// RateLimit, QuotaExceeded, Authentication, Transport and ProviderInternal
+// reasons): a rate limit or quota is a usage limit, auth is auth, a
+// transport, timeout, connect or internal error is a retryable provider
+// error, any other type a provider error. OpenCode reports no reset time.
+// A succeeded execution, or a failure with no error, carries no failure.
+func TestOpenCodeFailureNoReset(t *testing.T) {
+	m := mapper{seq: map[string]int64{}, turn: map[string]string{}}
+	limit := &loomharness.Failure{Class: loomharness.FailureUsageLimit, Retryable: true}
+	retry := &loomharness.Failure{Class: loomharness.FailureProvider, Retryable: true}
+	for typ, want := range map[string]*loomharness.Failure{
+		"provider.rate-limit":     limit,
+		"provider.quota":          limit,
+		"provider.auth":           {Class: loomharness.FailureAuth},
+		"provider.transport":      retry,
+		"provider.timeout":        retry,
+		"provider.connect":        retry,
+		"provider.internal":       retry,
+		"provider.invalid-output": {Class: loomharness.FailureProvider},
+		"provider.content-filter": {Class: loomharness.FailureProvider},
+	} {
+		e, ok := m.mapEvent([]byte(`{"type":"session.execution.failed","data":{"sessionID":"ses_1","error":{"type":"` + typ + `","message":"m"}}}`))
+		if !ok || e.StopReason != "failed" || e.Failure == nil || *e.Failure != *want {
+			t.Errorf("%s -> %+v; want %+v", typ, e.Failure, want)
+		}
+	}
+	for _, raw := range []string{
+		`{"type":"session.execution.failed","data":{"sessionID":"ses_1"}}`,
+		`{"type":"session.execution.succeeded","data":{"sessionID":"ses_1"}}`,
+	} {
+		if e, ok := m.mapEvent([]byte(raw)); !ok || e.Failure != nil {
+			t.Errorf("%s -> %+v", raw, e.Failure)
+		}
+	}
+
+	// History: the failed step's stored error (session.step.failed keeps
+	// the execution's error shape on the assistant message) classes the
+	// failed idle marker, as the live feed does; a succeeded turn, or a
+	// failed one with no step error, carries none.
+	ctx := context.Background()
+	st := newStore()
+	c := fakeServer(t, st)
+	ref, _ := c.Open(ctx, loomharness.OpenSpec{Key: "agent-1", Dir: "/repo"})
+	st.messages[ref.NativeID] = []map[string]any{
+		{"id": "msg_u1", "type": "user", "text": "one"},
+		{"id": "msg_a1", "type": "assistant", "finish": "error", "error": map[string]string{"type": "provider.rate-limit", "message": "slow down"}},
+		{"id": "msg_i1", "type": "idle", "outcome": "failed"},
+		{"id": "msg_u2", "type": "user", "text": "two"},
+		{"id": "msg_i2", "type": "idle", "outcome": "failed"},
+		{"id": "msg_u3", "type": "user", "text": "three"},
+		{"id": "msg_a3", "type": "assistant", "finish": "stop", "content": []map[string]any{{"type": "text", "text": "ok"}}},
+		{"id": "msg_i3", "type": "idle", "outcome": "succeeded"},
+	}
+	page, err := c.Session(ref).Messages(ctx, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []*loomharness.Failure
+	for _, e := range page.Events {
+		if e.Type == loomharness.EventTurnCompleted {
+			got = append(got, e.Failure)
+		}
+	}
+	if want := []*loomharness.Failure{limit, nil, nil}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("history failures %+v, want %+v", got, want)
 	}
 }

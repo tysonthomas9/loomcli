@@ -146,3 +146,25 @@ func TestCustomModelsRoute(t *testing.T) {
 		t.Fatalf("catalog after remove = %d %v", status, out)
 	}
 }
+
+// TestLimitResumeRoute (OR7): usage-limit auto-resume is off until a PUT
+// turns it on for the workspace; GET reads it.
+func TestLimitResumeRoute(t *testing.T) {
+	srv := modelServer(t)
+	status, out := call(t, srv, "GET", "ws/v1/settings/limit-resume", "", "")
+	if status != 200 || out["enabled"] != false {
+		t.Fatalf("default = %d %v; want off", status, out)
+	}
+	for _, on := range []bool{true, false} {
+		body := `{"enabled":false}`
+		if on {
+			body = `{"enabled":true}`
+		}
+		if status, out = call(t, srv, "PUT", "ws/v1/settings/limit-resume", "", body); status != 200 || out["enabled"] != on {
+			t.Fatalf("put %s = %d %v", body, status, out)
+		}
+		if status, out = call(t, srv, "GET", "ws/v1/settings/limit-resume", "", ""); status != 200 || out["enabled"] != on {
+			t.Fatalf("get after put %s = %d %v", body, status, out)
+		}
+	}
+}

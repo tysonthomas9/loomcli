@@ -182,6 +182,9 @@ vi.mock("@/hooks/workspace", async () => {
 // stub it here (this suite tests connection state, not the agent list).
 // The collapsed rail's Agent API agents need a router and the Agent API.
 vi.mock("../ApiAgentRailItems", () => ({ ApiAgentRailItems: () => null }));
+vi.mock("../AgentRosterOwner", () => ({
+  AgentRosterOwner: ({ children }: { children: React.ReactNode }) => children,
+}));
 vi.mock("../AgentSection", () => ({ AgentSection: () => null }));
 
 describe("WorkspaceTree connection state", () => {

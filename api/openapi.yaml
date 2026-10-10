@@ -4591,6 +4591,36 @@ paths:
         "200": {description: The saved custom model ids, content: {application/json: {schema: {$ref: "#/components/schemas/AgentV1CustomModels"}}}}
         default: {$ref: "#/components/responses/AgentV1Error"}
 
+  /api/workspaces/{ws}/v1/settings/limit-resume:
+    get:
+      operationId: getLimitResumeV1
+      tags: [agents-v1]
+      summary: Get whether this workspace auto-resumes agents after a usage limit
+      description: >-
+        Off by default. When on, a persistent agent whose turn ends on a usage limit (failure class usage_limit, any
+        harness) is sent "Continue where you left off." from loom:limit-resume after 15m, then 30m, 1h, 1h, 1h and 2h
+        for each further limit in a row; after six no more is sent. Any other turn end or message ends the run.
+      security: [{BearerAuth: []}, {AgentBridgeToken: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200": {description: The setting, content: {application/json: {schema: {$ref: "#/components/schemas/AgentV1LimitResume"}}}}
+        default: {$ref: "#/components/responses/AgentV1Error"}
+    put:
+      operationId: setLimitResumeV1
+      tags: [agents-v1]
+      summary: Turn usage-limit auto-resume on or off for this workspace
+      description: Turning it off also drops any resume not yet sent, when it comes due.
+      security: [{BearerAuth: []}, {AgentBridgeToken: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/AgentV1LimitResume"}}}
+      responses:
+        "200": {description: The saved setting, content: {application/json: {schema: {$ref: "#/components/schemas/AgentV1LimitResume"}}}}
+        default: {$ref: "#/components/responses/AgentV1Error"}
+
   /api/workspaces/{ws}/v1/presets:
     get:
       operationId: listAgentPresetsV1
@@ -4944,6 +4974,12 @@ components:
       properties:
         harness: {type: string, description: Set on responses}
         models: {type: array, items: {type: string}}
+    AgentV1LimitResume:
+      type: object
+      description: Whether the workspace auto-resumes agents after a usage limit.
+      required: [enabled]
+      properties:
+        enabled: {type: boolean}
     AgentV1OptionDescriptor:
       type: object
       description: One option a model takes. current_value is the value used when none is set.

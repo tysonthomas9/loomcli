@@ -3,7 +3,8 @@
  * Simplified layout (Aether V3): WorkspaceSelectorBar → AgentSection →
  * RunningSection → ReposSection (with the Add Repo entry at its bottom).
  * Collapsing the tree swaps in the
- * vertical CollapsedAgentRail (wireframe pin 24).
+ * vertical CollapsedAgentRail (wireframe pin 24); both read the one Agent API
+ * roster the tree owns, so the swap keeps it.
  */
 
 import { useState, useCallback, useEffect, type CSSProperties } from "react";
@@ -23,6 +24,7 @@ import { AddRepoModal } from "@/components/AddRepoModal";
 import { CompactRailHost } from "@/components/CompactRail";
 
 import { WorkspaceSelectorBar } from "./WorkspaceSelectorBar";
+import { AgentRosterOwner } from "./AgentRosterOwner";
 import { AgentSection } from "./AgentSection";
 import { TerminalSection } from "./TerminalSection";
 import { RunningSection } from "./RunningSection";
@@ -64,6 +66,11 @@ export interface WorkspaceTreeProps {
   onTreeSelect?: (issueId: string) => void;
   /** Current main view — terminal view swaps the agent list for terminals. */
   activeView?: ViewMode;
+  /**
+   * Shown as the phone's agents drawer (MOB2): always expanded, with the full
+   * agent list on every view; the saved collapse preference is kept as is.
+   */
+  inDrawer?: boolean;
 }
 
 // Scoped key suffix for workspace-specific collapse state
@@ -111,7 +118,15 @@ function ChevronRightIcon(): JSX.Element {
   );
 }
 
-export function WorkspaceTree({
+export function WorkspaceTree(props: WorkspaceTreeProps): JSX.Element {
+  return (
+    <AgentRosterOwner workspaceId={useWorkspaceContext().workspaceId}>
+      <Tree {...props} />
+    </AgentRosterOwner>
+  );
+}
+
+function Tree({
   className,
   defaultCollapsed = false,
   onWorkspaceSwitch,
@@ -125,8 +140,10 @@ export function WorkspaceTree({
   disconnectedSince,
   onRetryConnection,
   onTreeSelect,
-  activeView = "kanban",
+  activeView: view = "kanban",
+  inDrawer = false,
 }: WorkspaceTreeProps): JSX.Element {
+  const activeView = inDrawer ? "agents" : view;
   const workspaceContext = useWorkspaceContext();
   const {
     workspaceId,
@@ -146,11 +163,12 @@ export function WorkspaceTree({
   } = useWorkspaceTreeWidth(workspaceId);
 
   // Load initial collapsed state from scoped localStorage
-  const [isCollapsed, setIsCollapsed] = useState(() => {
+  const [savedCollapsed, setIsCollapsed] = useState(() => {
     if (!workspaceId) return defaultCollapsed;
     const stored = wsGet(workspaceId, SK_COLLAPSED);
     return stored !== null ? stored === "true" : defaultCollapsed;
   });
+  const isCollapsed = savedCollapsed && !inDrawer;
 
   const workspaceConnection = workspaceContext as typeof workspaceContext & {
     connectionState?:
@@ -193,8 +211,8 @@ export function WorkspaceTree({
 
   // Persist collapsed state to scoped storage
   useEffect(() => {
-    if (workspaceId) wsSet(workspaceId, SK_COLLAPSED, String(isCollapsed));
-  }, [isCollapsed, workspaceId]);
+    if (workspaceId) wsSet(workspaceId, SK_COLLAPSED, String(savedCollapsed));
+  }, [savedCollapsed, workspaceId]);
 
   // Keep maximized issue panels aligned to the right of the workspace tree.
   useEffect(() => {
@@ -276,16 +294,19 @@ export function WorkspaceTree({
               onAddWorkspace={onAddWorkspaceClick}
             />
           ) : null}
-          <button
-            type="button"
-            className={`${styles.toggleButton} ${styles.collapseButton}`}
-            onClick={handleToggle}
-            aria-expanded={true}
-            title="Collapse sidebar"
-            aria-label="Collapse workspace tree"
-          >
-            <ChevronLeftIcon />
-          </button>
+          {/* Nothing to collapse in the phone drawer. */}
+          {!inDrawer && (
+            <button
+              type="button"
+              className={`${styles.toggleButton} ${styles.collapseButton}`}
+              onClick={handleToggle}
+              aria-expanded={true}
+              title="Collapse sidebar"
+              aria-label="Collapse workspace tree"
+            >
+              <ChevronLeftIcon />
+            </button>
+          )}
         </div>
       )}
 
@@ -439,7 +460,7 @@ export function WorkspaceTree({
           </CompactRailHost>
         )}
 
-      {!isCollapsed && (
+      {!isCollapsed && !inDrawer && (
         <SidebarResizeHandle
           width={sidebarWidth}
           onDelta={applyDelta}

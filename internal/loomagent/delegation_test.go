@@ -271,6 +271,142 @@ func TestTaskCompletedSweepAfterCrash(t *testing.T) {
 	}
 }
 
+// TestChildCreatedNamesItsCall: a child the lead creates while exactly one
+// of the lead's tool calls runs names that call on its child.created (CL5),
+// whatever the call's saved input holds; with none or two running, or a
+// child someone else creates for the lead, it names none.
+func TestChildCreatedNamesItsCall(t *testing.T) {
+	ctx := context.Background()
+	e := newCreateEnv(t)
+	s := e.service(ServiceConfig{})
+	lead, ref := newLead(t, e, s, "lead")
+	tool := func(typ loomharness.EventType, id string) {
+		t.Helper()
+		if _, err := s.ingest(ctx, "opencode", loomharness.Event{Type: typ, Session: ref, TurnID: "T1", ItemID: id,
+			ItemKind: "tool", Tool: &loomharness.Tool{Name: "execute"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	create := func(name string, by ActorRef) string {
+		t.Helper()
+		info, err := s.Create(ctx, CreateRequest{Envelope: Envelope{RequestID: name}, Preset: "task", Name: name,
+			Parent: lead.AgentID, Repo: "/repo", Overrides: Overrides{Harness: "opencode"}, FirstMessage: "do it", Actor: by})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return info.AgentID
+	}
+	call := func(child string) any {
+		t.Helper()
+		page, err := e.st.ListEvents(ctx, loomstore.EventQuery{AgentID: lead.AgentID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, ev := range page.Events {
+			var p map[string]any
+			if ev.Kind == KindChildCreated && json.Unmarshal(ev.Payload, &p) == nil && p["child"] == child {
+				return p["call"]
+			}
+		}
+		t.Fatalf("no child.created for %s", child)
+		return nil
+	}
+	byLead := ActorRef{Kind: "agent", ID: lead.AgentID}
+	// A tool start while no turn runs, of another turn, or from the
+	// lead's older session, is no call.
+	tool(loomharness.EventItemStarted, "idle")
+	to := s.get(t, lead.AgentID).StateOf()
+	to.State, to.RunningTurn = StateActive, sp("T1")
+	if _, err := s.setState(ctx, s.get(t, lead.AgentID), to); err != nil {
+		t.Fatal(err)
+	}
+	old := loomharness.NativeRef{Root: ref.Root, NativeID: ref.NativeID + "-old"}
+	if err := s.store.RecordNativeSession(ctx, loomstore.NativeSession{AgentID: lead.AgentID, Harness: "opencode",
+		NativeRoot: old.Root, NativeID: old.NativeID}); err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range []loomharness.Event{
+		{Type: loomharness.EventItemStarted, Session: old, TurnID: "T1", ItemID: "old", ItemKind: "tool"},
+		{Type: loomharness.EventItemStarted, Session: ref, TurnID: "T0", ItemID: "late", ItemKind: "tool"},
+	} {
+		if _, err := s.ingest(ctx, "opencode", ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tool(loomharness.EventItemStarted, "call1")
+	if got := call(create("c1", byLead)); got != "call1" {
+		t.Fatalf("c1 call = %v, want call1", got)
+	}
+	if got := call(create("c2", ActorRef{})); got != nil {
+		t.Fatalf("c2, created by the user, call = %v", got)
+	}
+	tool(loomharness.EventItemStarted, "call2")
+	if got := call(create("c3", byLead)); got != nil {
+		t.Fatalf("c3, two calls running, call = %v", got)
+	}
+	tool(loomharness.EventItemCompleted, "call1")
+	if got := call(create("c4", byLead)); got != "call2" {
+		t.Fatalf("c4 call = %v, want call2", got)
+	}
+	tool(loomharness.EventItemCompleted, "call2")
+	if got := call(create("c5", byLead)); got != nil {
+		t.Fatalf("c5, no call running, call = %v", got)
+	}
+	// A call left running when its turn ended, however it ended, is not
+	// the next turn's.
+	tool(loomharness.EventItemStarted, "call3")
+	finishTurn(t, s, lead.AgentID, "cancelled")
+	if got := call(create("c6", byLead)); got != nil {
+		t.Fatalf("c6, after the turn ended, call = %v", got)
+	}
+	// A turn a harness switch stops never ends through endTurn.
+	run := func(turn, item string) {
+		t.Helper()
+		to := s.get(t, lead.AgentID).StateOf()
+		to.State, to.RunningTurn = StateActive, sp(turn)
+		if _, err := s.setState(ctx, s.get(t, lead.AgentID), to); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.ingest(ctx, "opencode", loomharness.Event{Type: loomharness.EventItemStarted, Session: ref,
+			TurnID: turn, ItemID: item, ItemKind: "tool"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run("T2", "stopped")
+	run("T3", "call4")
+	if got := call(create("c7", byLead)); got != "call4" {
+		t.Fatalf("c7 call = %v, want call4", got)
+	}
+	// Known race, pinned: call4 ended and call5 made c8, but neither event
+	// was ingested before c8's Create committed, so c8 names call4.
+	if got := call(create("c8", byLead)); got != "call4" {
+		t.Fatalf("c8 call = %v, want call4 (the known race)", got)
+	}
+	tracked := func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		_, ok := s.calls[lead.AgentID]
+		return ok
+	}
+	// Calls are forgotten once none runs, once no turn runs, and on delete.
+	tool(loomharness.EventItemCompleted, "call4")
+	if tracked() {
+		t.Fatal("calls kept after the last one completed")
+	}
+	run("T5", "call6")
+	finishTurn(t, s, lead.AgentID, "cancelled")
+	if tracked() {
+		t.Fatal("calls kept after the turn ended")
+	}
+	run("T6", "call7")
+	if err := s.tombstone(ctx, s.get(t, lead.AgentID)); err != nil {
+		t.Fatal(err)
+	}
+	if tracked() {
+		t.Fatal("calls kept after the lead was deleted")
+	}
+}
+
 // TestTaskCompletedReconcileOnce: a child's turn ends while Loom is down;
 // Reconcile finishes it and records task_completed on the lead once, with
 // child.created before it, and a repeat Reconcile adds nothing.

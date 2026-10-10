@@ -54,7 +54,8 @@ export interface SidebarRows {
 /**
  * The sidebar's top-level Agent API rows (SB2/SB4): Leads first, then other
  * agents, then workers, in the saved order; archived and gone agents leave.
- * A child whose parent is hidden (archived) rises to the top while it shows.
+ * A child whose parent is hidden (archived, deleted, or not listed, as List
+ * leaves archived agents out) rises to the top only while it shows.
  */
 export function sidebarRows(
   roster: Roster,
@@ -68,10 +69,7 @@ export function sidebarRows(
     ),
   );
   const top = (kids.get("") ?? []).filter(
-    (a) =>
-      !a.parent_agent_id ||
-      !roster.has(a.parent_agent_id) ||
-      childVisible(a, kids, openId),
+    (a) => !a.parent_agent_id || childVisible(a, kids, openId),
   );
   const isWorker = (a: Agent) => a.role_kind === "worker";
   const isLead = (a: Agent) => a.preset === "lead";
@@ -108,8 +106,9 @@ export function sidebarAgents(
   roster: Roster,
   openId: string | undefined,
   order: readonly string[],
+  gone: ReadonlySet<string> = new Set(),
 ): Agent[] {
-  const { kids, main, background } = sidebarRows(roster, openId, order);
+  const { kids, main, background } = sidebarRows(roster, openId, order, gone);
   const out: Agent[] = [];
   const walk = (a: Agent) => {
     out.push(a);

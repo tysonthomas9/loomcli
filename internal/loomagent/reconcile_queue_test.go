@@ -679,6 +679,9 @@ func deleteUnsavedNotRetried(t *testing.T, creating bool) {
 	if err := s.Delete(ctx, DeleteRequest{AgentID: a.AgentID, Fingerprint: fp}); err != nil {
 		t.Fatal(err)
 	}
+	if got, err := s.Get(ctx, a.AgentID); err != nil || got.State != StateDeleted || got.AttentionReason != nil {
+		t.Fatalf("Get = %s, Attention %q, %v; want deleted with no Attention", got.State, deref(got.AttentionReason), err)
+	}
 }
 
 // countStatus counts the unsaved-work checks of a deleteWorkspace.

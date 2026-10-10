@@ -786,3 +786,84 @@ func TestEmulatorSubagentTool(t *testing.T) {
 		}
 	}
 }
+
+// The emulator keeps OpenCode 2.0.19's per-session instruction entries
+// (PUT/DELETE /api/experimental/session/{id}/instructions/entries/{name}),
+// which the adapter's Open uses to install a preset persona: an Open with a
+// persona stores it on the session, a repeat Open without one removes it, a
+// missing session is SessionNotFoundError and a body without a string value
+// is refused.
+func TestEmulatorSessionInstructionEntries(t *testing.T) {
+	ctx := context.Background()
+	state := filepath.Join(t.TempDir(), "state.json")
+	c, url, _ := emuURL(t, state, "")
+	entries := func(id string) map[string]string {
+		t.Helper()
+		var st struct {
+			Sessions map[string]struct {
+				Instructions map[string]string `json:"instructions"`
+			} `json:"sessions"`
+		}
+		b, err := os.ReadFile(state)
+		if err != nil {
+			t.Fatalf("read state: %v", err)
+		}
+		if err := json.Unmarshal(b, &st); err != nil {
+			t.Fatalf("decode state: %v", err)
+		}
+		return st.Sessions[id].Instructions
+	}
+	dir := t.TempDir()
+	spec := loomharness.OpenSpec{Key: "p", Dir: dir, Metadata: map[string]string{"agent_id": "p"},
+		Preset: loomharness.PresetConfig{Persona: "PERSONA-LEAD"}}
+	ref, err := c.Open(ctx, spec)
+	if err != nil {
+		t.Fatalf("Open with a persona: %v", err)
+	}
+	if got := entries(ref.NativeID); got["loom-persona"] != "PERSONA-LEAD" {
+		t.Fatalf("entries after Open = %v", got)
+	}
+	spec.Preset.Persona = ""
+	if _, err := c.Open(ctx, spec); err != nil {
+		t.Fatalf("repeat Open without a persona: %v", err)
+	}
+	if got := entries(ref.NativeID); len(got) != 0 {
+		t.Fatalf("entries after the persona was cleared = %v", got)
+	}
+	entry := url + "/api/experimental/session/" + ref.NativeID + "/instructions/entries/loom-persona"
+	if code, b := send(t, "DELETE", entry, ""); code != 204 {
+		t.Fatalf("DELETE of an absent entry = %d %s", code, b)
+	}
+	if code, b := send(t, "PUT", entry, `{"value":1}`); code != 400 {
+		t.Fatalf("PUT without a string value = %d %s; want 400", code, b)
+	}
+	code, b := send(t, "PUT", url+"/api/experimental/session/ses_none/instructions/entries/loom-persona", `{"value":"x"}`)
+	if code != 404 || !strings.Contains(b, `"_tag":"SessionNotFoundError"`) {
+		t.Fatalf("PUT on a missing session = %d %s", code, b)
+	}
+}
+
+// TestEmulatorFailSessionCreate: while the test-owned flag file beside the
+// scenario file exists, creating a session answers 503 and keeps no
+// session; once it is removed, creating works again (S3 C2 drives
+// create_retrying with it).
+func TestEmulatorFailSessionCreate(t *testing.T) {
+	sc := scenarios(t, nil)
+	_, url, _ := emuURL(t, filepath.Join(t.TempDir(), "state.json"), sc)
+	flag := sc + harnessemu.FailSessionCreate
+	if err := os.WriteFile(flag, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code, b := send(t, "POST", url+"/api/session", `{"id":"ses_flagged"}`); code != http.StatusServiceUnavailable {
+		t.Fatalf("POST /api/session with the flag = %d %s; want 503", code, b)
+	}
+	if code, b := send(t, "GET", url+"/api/session/ses_flagged", ""); code != http.StatusNotFound {
+		t.Fatalf("GET of the refused session = %d %s; want 404", code, b)
+	}
+	if err := os.Remove(flag); err != nil {
+		t.Fatal(err)
+	}
+	if code, b := send(t, "POST", url+"/api/session", `{"id":"ses_flagged"}`); code != http.StatusOK {
+		t.Fatalf("POST /api/session without the flag = %d %s; want 200", code, b)
+	}
+}

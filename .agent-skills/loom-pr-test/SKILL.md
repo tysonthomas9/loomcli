@@ -122,6 +122,51 @@ make local-mode-down
 
 Use `127.0.0.1` in verifier/API commands if sandboxed `localhost` access is inconsistent with Podman-published ports.
 
+### Machine Slots (shared hosts)
+
+When several agents share one machine, run every heavy job (`make check-go`, race runs, AFT, local-mode stacks) through `scripts/loom-slot.sh` instead of picking ports by hand. It hands out `LOOM_SLOTS` slots (default 4); each slot gets its own compose project (`loomcli-slot-N`, so its own image tags and volumes), port block, `TMPDIR`, and the durable FleetDB/AFT inputs.
+
+```bash
+scripts/loom-slot.sh status                    # who holds which slot
+scripts/loom-slot.sh env 2                     # print slot 2's exports
+scripts/loom-slot.sh run -- make check-go      # first free slot; waits if all are busy
+scripts/loom-slot.sh run --slot 1 -- bash -c '
+  trap "trap - EXIT; make local-mode-down" EXIT INT TERM
+  LOCAL_MODE_COMPOSE_UP_FLAGS="--build -d" make local-mode-up && make local-mode-verify'
+scripts/loom-slot.sh run -- env LOOM_HARNESS_EMU=1 \
+  AFT_SUITES=tests/aft/suites/agents-v1-lead.test.yaml tests/aft/run-aft.sh --strict
+```
+
+Slot N uses ports `B+80/82/83` (FleetDB/API/UI) and `B+90/91` (AFT `E2E_PORT`/`E2E_FRONTEND_PORT`), with `B = LOOM_SLOT_PORT_BASE (18000) + N*100`, so slot 1 is 18180/18182/18183 and 18190/18191. `LOCAL_MODE_API_URL` is set to the slot's API, so `make local-mode-verify` needs no flags. `FLEET_DB_REPO` and `AFT_DIR` default to `~/.cache/loom/aft-inputs/{fleet-db,testing-app}`; `LOCAL_MODE_FLEETDB_CONTEXT` points the compose fleet-db build at `FLEET_DB_REPO`. The Go build cache stays shared (it is safe for concurrent use).
+
+Run the whole up/verify/down sequence inside one `run` so the slot is held while the stack exists, and tear down from a trap inside it (as above) so an interrupted run still removes its stack. The command runs in its own process group: on INT/TERM the slot signals the whole group (INT is followed by TERM after 5s), waits for it to exit, sends KILL after `LOOM_SLOT_STOP_SECS` (default 60), and only then releases the lock. A lock whose owner died is reclaimed, one waiter at a time. If a stack was left behind anyway, remove it with `scripts/loom-slot.sh run --slot N -- make local-mode-down`. Compose selection is unchanged: Podman when installed, otherwise `docker compose`; set `LOCAL_MODE_COMPOSE` to force one.
+
+#### Gates on a Linux host
+
+A gate run with a throwaway `HOME` (see AGENTS.md) has no git identity there, and Linux cannot guess one, so tests that commit fail. Pass one to the gate only, as CI does. Do not export it from the slot or your shell: `GIT_AUTHOR_*` overrides `git -c user.name=...`, so a real commit made in the same env would carry the gate identity.
+
+```bash
+tmphome=$(mktemp -d)
+scripts/loom-slot.sh run -- env -u LOOM_WORKSPACE -u LOOM_CONFIG_DIR -u LOOM_NOTIFY_TOKEN \
+  GIT_AUTHOR_NAME="Loom Gate" GIT_AUTHOR_EMAIL=gate@loomcli.test \
+  GIT_COMMITTER_NAME="Loom Gate" GIT_COMMITTER_EMAIL=gate@loomcli.test \
+  HOME="$tmphome" GOPATH="$HOME/go" GOCACHE="$HOME/.cache/go-build" GOMODCACHE="$HOME/go/pkg/mod" \
+  make check-go
+```
+
+(Unset the rest of the `LOOM_*` desktop vars listed in AGENTS.md too.)
+
+Known host-only failure: `TestKillOrphanedWorktreeProcesses_StartupSweep` (internal/cli/daemon/supervisor) fails on a Linux desktop because orphans are adopted by the `systemd --user` subreaper, not PID 1 (it passes on macOS, CI and in a container). Until PROC1 lands, treat it as known: confirm the rest of step 12 and step 13 with that one test skipped (`go test ... -skip '^TestKillOrphanedWorktreeProcesses_StartupSweep$' ./...` followed by `COVERAGE_THRESHOLD=60 scripts/check-coverage.sh <profile>`, exactly as the Makefile's check-go steps 12–13 run them) and report both runs.
+
+The pinned OpenCode 2.0.19 (needed by non-EMU agents-v1 AFT) lives at `~/.loom/harness/opencode/2.0.19/opencode`. If it is missing, build it from the Dockerfile's `opencode` stage (pinned bun 1.4.2, sst/opencode b30c4d0) and copy it out; no credentials are involved:
+
+```bash
+docker build --target opencode -t loom-opencode-2.0.19 -f test/local-mode/Dockerfile .
+mkdir -p ~/.loom/harness/opencode/2.0.19
+cid=$(docker create loom-opencode-2.0.19) && docker cp "$cid":/opencode ~/.loom/harness/opencode/2.0.19/opencode && docker rm "$cid"
+~/.loom/harness/opencode/2.0.19/opencode --version   # opencode v2.0.19
+```
+
 ## Compose Overrides
 
 Use `LOCAL_MODE_COMPOSE` to force the compose runner when auto-detection picks the wrong one. Use `LOCAL_MODE_COMPOSE_FILES` for real compatibility overrides, not for fabricated state.

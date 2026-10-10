@@ -412,7 +412,7 @@ tests:
       - run: >-
           python3 "$AFT_TESTS_DIR/scripts/coverage-children-activity.py" sidebar_child sidebar-b sidebar-task finished-open
         intent: Check the same finished child ID under its Lead with completed dot, full name and logo
-      - click: { role: button, name: Git, exact: true }
+      - click: { role: tab, name: Git, exact: true }
         intent: Open the finished child's Git tab through the UI
       - wait: { fn: "location.search.includes('tab=git')" }
         intent: Screenshot the selected Git tab and retained child identity

@@ -22,6 +22,7 @@ type Handler struct {
 	validateToken func(token, workspace string) (string, error)
 	tokens        *Tokens
 	github        GitHubReader
+	prWatch       PRWatcher
 }
 
 // New returns a Handler. services returns the workspace's Agent API service,
@@ -70,7 +71,11 @@ func (h *Handler) Register(mux *http.ServeMux, workspace middleware.Middleware,
 		"GET " + p + "harnesses/{harness}/models":      h.listModels,
 		"GET " + p + "harnesses/{harness}/custom":      getCustomModels,
 		"PUT " + p + "harnesses/{harness}/custom":      putCustomModels,
+		"GET " + p + "settings/limit-resume":           getLimitResume,
+		"PUT " + p + "settings/limit-resume":           putLimitResume,
 		"POST " + p + "github/read":                    h.githubRead,
+		"POST " + p + "github/watch":                   h.githubWatch,
+		"POST " + p + "github/unwatch":                 h.githubUnwatch,
 	} {
 		mux.Handle(pattern, workspace(h.serve(fn)))
 	}

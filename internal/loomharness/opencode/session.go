@@ -1,6 +1,7 @@
 package opencode
 
 import (
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -10,7 +11,6 @@ import (
 	"net/url"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -29,15 +29,8 @@ func (c *Client) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharne
 	if err := c.bridge(ctx, spec.Dir, spec.Launch.Env); err != nil {
 		return loomharness.NativeRef{}, err
 	}
-	if spec.Preset.Name != "" {
-		agent := "loom-" + spec.Preset.Name
-		if err := c.hasAgent(ctx, agent, spec.Dir); err != nil {
-			return loomharness.NativeRef{}, err
-		}
-		body["agent"] = agent
-	}
-	if provider, model, ok := strings.Cut(spec.Model, "/"); ok {
-		body["model"] = map[string]string{"providerID": provider, "id": model}
+	if err := c.selectAgent(ctx, spec, body); err != nil {
+		return loomharness.NativeRef{}, err
 	}
 	rules, err := nativeRules(spec.Rules)
 	if err != nil {
@@ -78,6 +71,22 @@ func (c *Client) Open(ctx context.Context, spec loomharness.OpenSpec) (loomharne
 		return loomharness.NativeRef{}, err // not this Open's to remove
 	}
 	return c.discard(ref, err)
+}
+
+// selectAgent adds the preset's native agent, which must exist, and the model
+// to the create body.
+func (c *Client) selectAgent(ctx context.Context, spec loomharness.OpenSpec, body map[string]any) error {
+	if spec.Preset.Name != "" {
+		agent := "loom-" + spec.Preset.Name
+		if err := c.hasAgent(ctx, agent, spec.Dir); err != nil {
+			return err
+		}
+		body["agent"] = agent
+	}
+	if provider, model, ok := strings.Cut(spec.Model, "/"); ok {
+		body["model"] = map[string]string{"providerID": provider, "id": model}
+	}
+	return nil
 }
 
 // persona installs the saved per-agent text as a durable native instruction
@@ -544,10 +553,11 @@ func (s *Session) HasInput(ctx context.Context, key string) (loomharness.Landed,
 // still streaming has no end marker, so history gives its item.completed
 // only once a later part exists or its step has ended.
 //
-// The cursor is OpenCode's own plus the open turn ("c=<native>&t=<turn>");
-// a bare OpenCode cursor still works, with the open turn read back.
+// The cursor is OpenCode's own plus the open turn and its failed step's
+// error type ("c=<native>&t=<turn>&f=<type>", see turnEvents); a bare
+// OpenCode cursor still works, with the open turn read back.
 func (s *Session) Messages(ctx context.Context, after string, limit int) (loomharness.MessagePage, error) {
-	native, turn, known := parseCursor(after)
+	native, turn, failed, known := parseCursor(after)
 	page, err := s.list(ctx, native, limit)
 	if err != nil {
 		return loomharness.MessagePage{}, err
@@ -555,6 +565,7 @@ func (s *Session) Messages(ctx context.Context, after string, limit int) (loomha
 	ref := loomharness.NativeRef{Root: s.c.rootOf(s.ref.NativeID), NativeID: s.ref.NativeID}
 	var out loomharness.MessagePage
 	for _, m := range page.Data {
+		failed = cmp.Or(m.failedStep(), failed)
 		if !m.opens() {
 			continue
 		}
@@ -576,19 +587,16 @@ func (s *Session) Messages(ctx context.Context, after string, limit int) (loomha
 			}
 			out.Events = append(out.Events, start)
 		}
-		for _, e := range m.events(ref) {
-			e.TurnID = turn
-			out.Events = append(out.Events, e)
-		}
+		out.Events = append(out.Events, m.turnEvents(ref, turn, failed)...)
 		if m.declined() { // no idle marker follows: end the turn as the feed does
 			out.Events = append(out.Events, loomharness.Event{Type: loomharness.EventTurnCompleted, Session: ref, TurnID: turn, StopReason: "declined", Time: m.created()})
 		}
 		if m.Type == "idle" || m.declined() {
-			turn = ""
+			turn, failed = "", ""
 		}
 	}
 	if limit > 0 && len(page.Data) == limit && page.Cursor.Next != "" {
-		out.Next = url.Values{"c": {page.Cursor.Next}, "t": {turn}}.Encode()
+		out.Next = url.Values{"c": {page.Cursor.Next}, "t": {turn}, "f": {failed}}.Encode()
 		return out, nil
 	}
 	asks, err := s.pendingAsks(ctx, ref, turn)
@@ -601,11 +609,11 @@ func (s *Session) Messages(ctx context.Context, after string, limit int) (loomha
 
 // parseCursor splits a Messages cursor into OpenCode's cursor and the open
 // turn; known is false for a bare OpenCode cursor.
-func parseCursor(after string) (native, turn string, known bool) {
+func parseCursor(after string) (native, turn, failed string, known bool) {
 	if q, err := url.ParseQuery(after); err == nil && q.Has("c") {
-		return q.Get("c"), q.Get("t"), true
+		return q.Get("c"), q.Get("t"), q.Get("f"), true
 	}
-	return after, "", after == ""
+	return after, "", "", after == ""
 }
 
 // pendingAsks lists the session's pending permission and form asks as
@@ -857,160 +865,4 @@ func (s *Session) Unload(ctx context.Context) error {
 func (s *Session) Close(ctx context.Context) error {
 	_, err := s.Interrupt(ctx)
 	return err
-}
-
-type messagePage struct {
-	Data   []message `json:"data"`
-	Cursor struct {
-		Next string `json:"next"`
-	} `json:"cursor"`
-}
-
-type message struct {
-	ID   string `json:"id"`
-	Type string `json:"type"` // user | assistant | synthetic | idle | ...
-	Text string `json:"text"`
-	Time struct {
-		Created   json.RawMessage `json:"created"`
-		Completed json.RawMessage `json:"completed"`
-	} `json:"time"`
-	Outcome  string          `json:"outcome"`
-	Finish   string          `json:"finish"` // assistant: set when its step ended
-	Error    json.RawMessage `json:"error"`  // assistant: set when its step failed
-	Cost     float64         `json:"cost"`   // assistant: its step's cost
-	Tokens   tokens          `json:"tokens"` // assistant: its step's tokens
-	Metadata struct {
-		Notice string `json:"notice"`
-	} `json:"metadata"`
-	Content []struct {
-		Type  string `json:"type"` // text | reasoning | tool
-		ID    string `json:"id"`
-		Text  string `json:"text"`
-		Name  string `json:"name"` // tool
-		State struct {
-			Status  string          `json:"status"` // tool: streaming | running | completed | error
-			Input   json.RawMessage `json:"input"`
-			Content toolContent     `json:"content"`
-			Error   *toolError      `json:"error"`
-		} `json:"state"`
-	} `json:"content"`
-}
-
-// created reads the message's creation time, stored as epoch ms or an ISO
-// string depending on the message type.
-func (m message) created() time.Time {
-	var ms int64
-	if json.Unmarshal(m.Time.Created, &ms) == nil {
-		return time.UnixMilli(ms)
-	}
-	var t time.Time
-	_ = json.Unmarshal(m.Time.Created, &t)
-	return t
-}
-
-// opens reports whether the live feed maps an event for this message, so
-// that it can be the first message of a turn (see mapper).
-func (m message) opens() bool {
-	switch m.Type {
-	case "user", "idle":
-		return true
-	case "synthetic":
-		return m.Metadata.Notice == "restart"
-	case "assistant":
-		return len(m.Content) > 0 || m.usage()
-	}
-	return false
-}
-
-// declinedCall is the error OpenCode b30c4d0 gives a tool call whose
-// permission was rejected (core/src/session/runner/step.ts).
-const declinedCall = "The user declined this tool call"
-
-// declined: the step's tool call was declined, which ends the turn with no
-// idle marker (see mapper).
-func (m message) declined() bool {
-	for _, c := range m.Content {
-		if c.Type == "tool" && c.State.Error != nil && c.State.Error.Message == declinedCall {
-			return true
-		}
-	}
-	return false
-}
-
-// usage: the step ended (session.step.ended) rather than failed.
-func (m message) usage() bool {
-	return m.Finish != "" && (len(m.Error) == 0 || string(m.Error) == "null")
-}
-
-func (m message) ended() bool {
-	return m.Finish != "" || (len(m.Time.Completed) > 0 && string(m.Time.Completed) != "null")
-}
-
-func (s *Session) list(ctx context.Context, after string, limit int) (messagePage, error) {
-	q := url.Values{}
-	if after != "" {
-		q.Set("cursor", after)
-	} else {
-		q.Set("order", "asc")
-	}
-	if limit > 0 {
-		q.Set("limit", strconv.Itoa(limit))
-	}
-	var page messagePage
-	if err := s.c.call(ctx, "GET", s.path("/message?"+q.Encode()), nil, &page); err != nil {
-		return messagePage{}, fmt.Errorf("list messages: %w", err)
-	}
-	return page, nil
-}
-
-// events maps one stored message to the events the live feed gives for it,
-// with the same ids; Messages adds the TurnID.
-func (m message) events(ref loomharness.NativeRef) []loomharness.Event {
-	e := loomharness.Event{Session: ref, Time: m.created()}
-	switch m.Type {
-	case "user":
-		e.Type, e.ItemKind, e.ItemID, e.InputKey, e.Text = loomharness.EventMessageDelivered, "message", m.ID, m.ID, m.Text
-	case "synthetic":
-		if m.Metadata.Notice != "restart" {
-			return nil
-		}
-		e.Type, e.ItemID, e.Text = loomharness.EventTurnResumed, m.ID, m.Text
-	case "idle":
-		e.Type, e.StopReason = loomharness.EventTurnCompleted, stopReason(m.Outcome)
-	case "assistant":
-		var out []loomharness.Event
-		ord := map[string]int{}
-		for i, c := range m.Content {
-			item := e
-			item.Type, item.Text = loomharness.EventItemCompleted, c.Text
-			switch c.Type {
-			case "text", "reasoning":
-				item.ItemKind = kind(c.Type)
-				item.ItemID = partItem(m.ID, c.Type, ord[c.Type])
-				ord[c.Type]++
-				if !m.ended() && i == len(m.Content)-1 {
-					continue // still streaming
-				}
-			case "tool":
-				if c.State.Status != "completed" && c.State.Status != "error" {
-					continue
-				}
-				out, failed := toolOutput(c.State.Content, c.State.Error)
-				item.ItemKind, item.ItemID, item.Text = "tool", toolItem(m.ID, c.ID), ""
-				item.Tool = &loomharness.Tool{Name: c.Name, Input: toolInput(c.State.Input), Output: out, Failed: failed}
-			default:
-				continue
-			}
-			out = append(out, item)
-		}
-		if m.usage() {
-			u := e
-			u.Type, u.ItemID, u.Usage = loomharness.EventUsage, m.ID, m.Tokens.usage(m.Cost)
-			out = append(out, u)
-		}
-		return out
-	default:
-		return nil
-	}
-	return []loomharness.Event{e}
 }

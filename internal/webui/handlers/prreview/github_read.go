@@ -47,6 +47,13 @@ func (m *Module) githubRead(ctx context.Context, ws, agentID, repoPath, op strin
 	if op == "stack_health" {
 		return m.stackHealth(ctx, owner, repo, args)
 	}
+	return m.dispatchRead(ctx, ws, "agent-github-read:"+agentID+":", owner, repo, op, args)
+}
+
+// dispatchRead is one github.read op on owner/repo through the dispatcher,
+// which authorizes it and hands the provider the host credential in CallSpec
+// only. The run is runPrefix and a nonce.
+func (m *Module) dispatchRead(ctx context.Context, ws, runPrefix, owner, repo, op string, args map[string]any) (map[string]any, error) {
 	nonce, err := randomHex(8)
 	if err != nil {
 		return nil, err
@@ -57,7 +64,7 @@ func (m *Module) githubRead(ctx context.Context, ws, agentID, repoPath, op strin
 			call[k] = v
 		}
 	}
-	res, err := m.dispatcher.Dispatch(ctx, connector.Request{WorkspaceKey: ws, RunID: "agent-github-read:" + agentID + ":" + nonce,
+	res, err := m.dispatcher.Dispatch(ctx, connector.Request{WorkspaceKey: ws, RunID: runPrefix + nonce,
 		BindingID: bindingID, ConnectorID: connectorID, Action: providers.ActionGitHubRead,
 		Resource: prResource(owner, repo), Args: call})
 	return res.Body, err

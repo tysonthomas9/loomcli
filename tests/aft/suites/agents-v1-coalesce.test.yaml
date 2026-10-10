@@ -1,0 +1,161 @@
+# Lead wake coalescing (OR4c) on OpenCode (or its emulator with
+# LOOM_HARNESS_EMU=1). Only the model is scripted: the lead's model calls
+# loom.agent_create through Code Mode's execute tool, and the Loom bridge
+# makes real task children. A step the lead's follow-up takes is marked
+# next: "tool" and one a child's first prompt takes next: "prompt", so the
+# two never race for the shared queue.
+#
+# Go-owned, not here: OR4d (a child's later Send or Withdraw keeps its
+# waiting completion record) and OR4e (a child's message and record as one
+# segment). Both need a task child to Send to its Lead, and no product
+# surface allows that: a bridge token reaches only its own children
+# (ownChild in internal/webui/handlers/agentsv1/agentsv1.go, design v2 §6.1).
+# internal/loomagent/slot_records_test.go, withdraw_records_test.go and
+# coalesce_test.go cover them.
+suite: agents-v1-coalesce
+classification: { area: agents, feature: agent-api-children, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: |
+  set -e
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-COALESCE" >/dev/null || true
+  repo="$AFT_WORK_DIR/agv1-coalesce-repo"
+  mkdir -p "$repo"
+  git -C "$repo" init -q -b main
+  echo "agents-v1 coalesce ${RUN_ID:-local}" > "$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" -c user.email=e2e@x -c user.name=e2e commit -q -m init
+  printf '{"name":"e2e-agv1-coalesce","type":"empty","repos":["%s"]}' "$repo" |
+    curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @- >/dev/null
+teardown: |
+  set +e
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-COALESCE" >/dev/null
+
+tests:
+  - name: D1 one hand-over - two children finishing while the Lead's turn runs reach the Lead as one input with both records, and the Lead replies once
+    intent: An OpenCode lead starts two children and keeps working; both children finish while its turn runs, so both result cards wait for the Lead. When the Lead's turn ends, its next input carries both records at once (OR4c), saved as one delivery naming both children; the Lead's model is prompted once with both notices and writes one reply. The chat shows two delivered result cards and one reply, the same after a reload, with no raw task_completed text.
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-COALESCE/v1/agents
+          headers: { Idempotency-Key: "agv1-co-d1-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-co-d1-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-coalesce-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: d1LeadId
+        intent: "Create an OpenCode lead through the Agent API"
+      - run: |
+          set -e
+          # The lead creates both children in one step, one execute call each
+          # (the emulator runs one Code Mode call per execute). Its follow-up
+          # holds its turn (a tool the emulator does not run waits until
+          # interrupted); each child's first prompt finishes at once.
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          python3 -c 'import json,sys
+          mk = lambda n: {"name": "execute", "arguments": {"code": "return await tools.loom.agent_create(%s)" % json.dumps({"name": n, "brief": "do the task"})}}
+          done = {"next": "prompt", "text": "AGV1-CO-KID-DONE"}
+          print(json.dumps({"steps": [{"next": "prompt", "tool_calls": [mk(sys.argv[1]), mk(sys.argv[2])]},
+            {"next": "tool", "tool_calls": [{"name": "df1_hold"}]}, done, done]}))' "agv1-co-a-${RUN_ID:-local}" "agv1-co-b-${RUN_ID:-local}" |
+            curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" -d @- >/dev/null
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-COALESCE/chat/$(cat "$AFT_WORK_DIR/d1LeadId")"
+        intent: "Script the lead's two agent_create calls, its held follow-up and both children's finishing replies, and open the lead's chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the lead's chat is ready"
+      - fill: { label: Message, value: "start two workers" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const r = Array.from(document.querySelectorAll('[data-testid=completion-record]'));
+              const t = r.map((e) => e.textContent || '');
+              const m = Array.from(document.querySelectorAll('[data-testid=started-marker]')).map((e) => e.textContent || '').join(' ');
+              const once = (n) => m.split(n).length === 2;
+              return once('agv1-co-a-${RUN_ID:-local}') && once('agv1-co-b-${RUN_ID:-local}') && r.length === 2 &&
+                r.every((e) => e.dataset.outcome === 'completed' && e.dataset.delivery === 'waiting') &&
+                t.some((x) => x.includes('agv1-co-a-${RUN_ID:-local}')) && t.some((x) => x.includes('agv1-co-b-${RUN_ID:-local}')) &&
+                !!document.querySelector('[data-kind=working]') && !document.body.textContent.includes('task_completed:'); })()
+        budget: 90000
+        intent: "Wait until, while the lead's turn still runs, both children's result cards show and both wait for the Lead"
+      - run: |
+          set -e
+          lead="$(cat "$AFT_WORK_DIR/d1LeadId")" api="$AFT_BASE_URL/api/workspaces/E2E-AGV1-COALESCE/v1/agents"
+          # Nothing from a child reached the lead while its turn ran.
+          curl -sf "$api/$lead/events?kind=message.delivered&limit=100" | python3 -c 'import json,sys
+          es = [e for e in json.load(sys.stdin)["events"] if e["kind"] == "message.delivered" and str((e.get("payload") or {}).get("sender", "")).startswith("agent:")]
+          assert not es, "a child input reached the busy lead: %s" % es'
+          # Only now script the lead's one reply, so no child could take it.
+          printf '{"steps":[{"next":"prompt","text":"AGV1-CO-REPLY both workers are done."}]}' |
+            curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" -d @- >/dev/null
+          curl -sf -X POST "$api/$lead/messages" -H "Content-Type: application/json" \
+            -H "Idempotency-Key: agv1-co-d1-stop-${RUN_ID:-local}" -d '{"text":"","delivery":"interrupt"}' >/dev/null
+        intent: "Check no child input reached the busy lead, script its one reply, then stop the lead's turn so it takes the waiting results"
+      - wait:
+          fn: >-
+            (() => { const r = Array.from(document.querySelectorAll('[data-testid=completion-record]'));
+              const t = document.body.textContent || '';
+              const replies = Array.from(document.querySelectorAll('[data-testid=chat-transcript] > li[data-kind=agent]'));
+              return r.length === 2 && r.every((e) => e.dataset.delivery === 'delivered') &&
+                replies.length === 1 && replies[0].textContent.includes('AGV1-CO-REPLY') &&
+                t.split('AGV1-CO-REPLY').length === 2 && !document.querySelector('[data-kind=working]') &&
+                !t.includes('task_completed:'); })()
+        budget: 90000
+        intent: "Wait until both result cards are marked delivered and the lead's one reply is its only reply"
+      - run: |
+          set -e
+          lead="$(cat "$AFT_WORK_DIR/d1LeadId")" api="$AFT_BASE_URL/api/workspaces/E2E-AGV1-COALESCE/v1/agents"
+          kids="$(curl -sf "$api?parent=$lead" | python3 -c 'import json,sys
+          ids = {a["name"]: a["agent_id"] for a in json.load(sys.stdin)["agents"]}
+          print(ids[sys.argv[1]], ids[sys.argv[2]])' "agv1-co-a-${RUN_ID:-local}" "agv1-co-b-${RUN_ID:-local}")"
+          # The lead's saved deliveries: exactly one from a child, naming
+          # both children's records (OR4c), and no other child input.
+          echo "$kids" > "$AFT_WORK_DIR/d1-kids"
+          cat > "$AFT_WORK_DIR/d1-one-delivery" <<'SH'
+          #!/bin/sh
+          set -e
+          curl -sf "$1/$2/events?kind=message.delivered&limit=100" > "$AFT_WORK_DIR/d1-delivered.json"
+          python3 - $(cat "$AFT_WORK_DIR/d1-kids") "$AFT_WORK_DIR/d1-delivered.json" <<'PY'
+          import json, sys
+          a, b, path = sys.argv[1:4]
+          es = [e for e in json.load(open(path))["events"] if e["kind"] == "message.delivered" and str((e.get("payload") or {}).get("sender", "")).startswith("agent:")]
+          assert len(es) == 1, "%d child inputs reached the lead; want one: %s" % (len(es), es)
+          done = sorted((c["child"], c["attempt"]) for c in es[0]["payload"].get("completions") or [])
+          assert done == sorted([(a, 0), (b, 0)]), "the one input named %s; want both children's first attempt" % done
+          PY
+          SH
+          chmod +x "$AFT_WORK_DIR/d1-one-delivery"
+          # The UI wait above already saw both cards delivered and the reply.
+          "$AFT_WORK_DIR/d1-one-delivery" "$api" "$lead"
+          # The lead's model: exactly one lead prompt carries any child's
+          # notice, and it carries both.
+          curl -sf "$AFT_FAKE_MODEL_URL/__requests" > "$AFT_WORK_DIR/d1-requests.json"
+          python3 - $kids "$AFT_WORK_DIR/d1-requests.json" <<'PY'
+          import json, sys
+          a, b, path = sys.argv[1:4]
+          reqs = [r["messages"] for r in json.load(open(path))["requests"]
+                  if any("start two workers" in json.dumps(m.get("content")) for m in r.get("messages", []))]
+          last = [json.dumps(m[-1].get("content")) for m in reqs if m and m[-1].get("role") == "user"]
+          withNotice = [x for x in last if "task_completed:" in x]
+          assert len(withNotice) == 1, "the lead was prompted %d times with child notices; want once" % len(withNotice)
+          for k in (a, b):
+              assert "task_completed:%s:" % k in withNotice[0], "the lead's one prompt lacks %s's notice" % k
+          PY
+        intent: "Check the lead saved exactly one child delivery naming both children's records, and its model was prompted once, with both notices"
+      - reload: true
+      - wait:
+          fn: >-
+            (() => { const r = Array.from(document.querySelectorAll('[data-testid=completion-record]'));
+              const t = document.body.textContent || '';
+              const m = Array.from(document.querySelectorAll('[data-testid=started-marker]')).map((e) => e.textContent || '').join(' ');
+              const once = (n) => m.split(n).length === 2;
+              const replies = Array.from(document.querySelectorAll('[data-testid=chat-transcript] > li[data-kind=agent]'));
+              return document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode' &&
+                once('agv1-co-a-${RUN_ID:-local}') && once('agv1-co-b-${RUN_ID:-local}') &&
+                r.length === 2 && r.every((e) => e.dataset.delivery === 'delivered') &&
+                replies.length === 1 && replies[0].textContent.includes('AGV1-CO-REPLY') &&
+                t.split('AGV1-CO-REPLY').length === 2 && !document.querySelector('[data-testid=agent-tray]') &&
+                !t.includes('task_completed:'); })()
+        intent: "Wait until a reload replays each child's Started marker once, the two delivered result cards and the lead's one reply, none duplicated, with no tray and no raw task_completed text"
+      - run: |
+          set -e
+          "$AFT_WORK_DIR/d1-one-delivery" "$AFT_BASE_URL/api/workspaces/E2E-AGV1-COALESCE/v1/agents" "$(cat "$AFT_WORK_DIR/d1LeadId")"
+        intent: "Check again after the reload that the lead has saved exactly one child delivery, naming both children's records"

@@ -6,6 +6,7 @@ export * from "./tree";
 
 // New sidebar section components (sidebar redesign)
 export { AgentList } from "./AgentList";
+export { AgentRosterOwner } from "./AgentRosterOwner";
 export type { AgentListProps } from "./AgentList";
 export { AgentSection } from "./AgentSection";
 export type { AgentSectionProps } from "./AgentSection";

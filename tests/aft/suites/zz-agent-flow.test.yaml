@@ -226,7 +226,7 @@ tests:
               return Date.now() - window.__aftAgentsPageStableAt >= 300;
             })()
         intent: "Wait until the agents page is ready"
-      - click: { role: button, name: Diff, exact: true }
+      - click: { role: tab, name: Diff, exact: true }
       - run: >-
           file="$(cat "$AFT_WORK_DIR/agent-diff-file.name")"; for i in $(seq 1 10); do curl -sf "$AFT_BASE_URL/api/workspaces/E2E-WS-AGENT/agents/nova/diff/files?to=HEAD" > "$AFT_WORK_DIR/agent-diff-files.json" && python3 -c 'import json,sys; f=sys.argv[2]; d=json.load(open(sys.argv[1])); files=(d.get("data") or {}).get("files") or []; assert any(x.get("path")==f for x in files), files' "$AFT_WORK_DIR/agent-diff-files.json" "$file" && exit 0; sleep 1; done; echo "agent diff file never appeared"; exit 1
         intent: "An operator waits until nova's seeded changed file appears in Diff"

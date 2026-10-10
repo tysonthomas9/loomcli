@@ -18,6 +18,7 @@ export const ROSTER_KINDS = [
   "agent.deleted",
   "tool.started",
   "item.completed",
+  "turn.started",
 ];
 
 /** An agent's latest step this turn, and when the turn started, if seen. */
@@ -25,6 +26,8 @@ export interface Activity {
   /** A tool.started, or a completed tool or reasoning item. */
   step?: AgentEvent;
   turnAt?: string;
+  /** The turn's id, once its turn.started is seen. */
+  turn?: string;
 }
 
 export type Activities = ReadonlyMap<string, Activity>;
@@ -35,8 +38,10 @@ const WORKING = new Set(["creating", "active", "waiting", "stopping"]);
 /**
  * Applies stream events and notices to each agent's activity: a change to
  * active from a resting state starts a turn (its time, no step yet), one to
- * a resting state drops the agent, and a tool start or completed tool or
- * reasoning item is its latest step. Other events change nothing.
+ * a resting state drops the agent, a turn.started for another turn starts
+ * that turn (a Stop with a message starts one with no state change), and a
+ * tool start or completed tool or reasoning item is its latest step. Other
+ * events change nothing.
  */
 export function applyActivity(m: Activities, events: AgentEvent[]): Activities {
   let next: Map<string, Activity> | null = null;
@@ -51,6 +56,9 @@ export function applyActivity(m: Activities, events: AgentEvent[]): Activities {
       if (!WORKING.has(p.to)) edit().delete(e.agent_id);
       else if (p.to === "active" && !WORKING.has(p.from ?? ""))
         edit().set(e.agent_id, { turnAt: e.created_at });
+    } else if (e.kind === "turn.started") {
+      if ((next ?? m).get(e.agent_id)?.turn !== e.turn_id)
+        edit().set(e.agent_id, { turnAt: e.created_at, turn: e.turn_id });
     } else if (
       e.kind === "tool.started" ||
       (e.kind === "item.completed" &&

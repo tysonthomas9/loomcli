@@ -42,6 +42,11 @@ func (p Port) Remove(ctx context.Context, s loomagent.WorkspaceSpec) error {
 	return p.W.Remove(ctx, Spec(s))
 }
 
+// Checkpoint implements loomagent.Workspace with Worktrees.Checkpoint.
+func (p Port) Checkpoint(ctx context.Context, s loomagent.WorkspaceSpec, ref string) error {
+	return p.W.Checkpoint(ctx, Spec(s), ref)
+}
+
 // Publish implements loomagent.Workspace; ticket 2.10 completes it.
 func (Port) Publish(context.Context, loomagent.PublishRequest) (loomagent.PublishResult, error) {
 	return loomagent.PublishResult{}, ErrNotImplemented

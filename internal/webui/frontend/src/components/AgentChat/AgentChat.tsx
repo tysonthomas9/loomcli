@@ -96,6 +96,8 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
     unarchive,
     expired,
     synced,
+    notFound,
+    deleted,
   } = useAgentChat(workspaceId, agentId);
   const compact = useNarrow(COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX);
   const own = ownSender(useAuth().user?.id);
@@ -173,6 +175,23 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
   };
 
   const empty = rows.length === 0 && waiting.length === 0 && !running;
+
+  if (notFound || deleted)
+    return (
+      <section className={page.chat} aria-label="Agent chat">
+        <div className={page.notFound} data-testid="agent-not-found">
+          <h2>{deleted ? "This agent was deleted" : "Agent not found"}</h2>
+          <p>
+            {deleted
+              ? "It can no longer receive messages."
+              : "This agent no longer exists. It may have been deleted."}
+          </p>
+          <Link to={`/ws/${encodeURIComponent(workspaceId)}/home`}>
+            Go home
+          </Link>
+        </div>
+      </section>
+    );
 
   return (
     <section className={page.chat} aria-label="Agent chat">
@@ -405,6 +424,7 @@ const ATTENTION: Record<string, string> = {
   history_too_large: "the history is too large to load in full.",
   session_missing: "the native session is missing.",
   create_incomplete: "creating the agent did not finish.",
+  create_retrying: "retrying start…",
   delete_incomplete: "deleting the agent did not finish.",
 };
 const attentionText = (reason: string) => ATTENTION[reason] ?? reason;

@@ -1,0 +1,344 @@
+# Agent API sidebar rows and the compact rail (SB4, SB5, RAIL1) on OpenCode
+# (or its emulator with LOOM_HARNESS_EMU=1), with the model scripted by 2.0d's
+# fake model. Each case has its own workspace, so the sidebar's saved order
+# and collapsed state (both per workspace) start clean.
+suite: agents-v1-sidebar
+classification: { area: agents, feature: agent-api-sidebar, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: |
+  set -e
+  curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+  for ws in sbe1 sbe2 sbe3; do
+    WS="$(echo "$ws" | tr a-z A-Z)"
+    curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-$WS" >/dev/null || true
+    repo="$AFT_WORK_DIR/agv1-$ws-repo"
+    mkdir -p "$repo"
+    git -C "$repo" init -q -b main
+    echo "agents-v1 sidebar $ws ${RUN_ID:-local}" > "$repo/README.md"
+    git -C "$repo" add README.md
+    git -C "$repo" -c user.email=e2e@x -c user.name=e2e commit -q -m init
+    printf '{"name":"e2e-agv1-%s","type":"empty","repos":["%s"]}' "$ws" "$repo" |
+      curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @- >/dev/null
+  done
+teardown: |
+  set +e
+  for ws in SBE1 SBE2 SBE3; do
+    curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-$ws" >/dev/null
+  done
+
+tests:
+  - name: E1 unarchive after a reload - a Lead archived from the sidebar menu and unarchived from its reloaded chat is back in the sidebar at once and after another reload, in its old place
+    intent: An operator archives the middle of three OpenCode Leads from its sidebar context menu, opens its chat by URL and reloads it, then presses Unarchive; the row returns to the sidebar without a reload, between the other two, and stays there after a reload (SB5)
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-SBE1/v1/agents
+          headers: { Idempotency-Key: "agv1-sbe1-a-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-sbe1-a-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-sbe1-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: sbe1A
+        intent: "Create the first OpenCode Lead through the Agent API"
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-SBE1/v1/agents
+          headers: { Idempotency-Key: "agv1-sbe1-b-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-sbe1-b-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-sbe1-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: sbe1B
+        intent: "Create the second OpenCode Lead through the Agent API"
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-SBE1/v1/agents
+          headers: { Idempotency-Key: "agv1-sbe1-c-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-sbe1-c-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-sbe1-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: sbe1C
+        intent: "Create the third OpenCode Lead through the Agent API"
+      - run: |
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-SBE1/chat/$(cat "$AFT_WORK_DIR/sbe1A")"
+        intent: "Open the first Lead's chat"
+      - wait:
+          fn: >-
+            (() => { const names = Array.from(document.querySelectorAll('nav[aria-label=Agents] [data-testid=sortable-agent-row] > a[href] [data-testid=agent-list-name]')).map((x) => x.textContent.trim());
+              return names.join('|') === ['a', 'b', 'c'].map((x) => 'agv1-sbe1-' + x + '-${RUN_ID:-local}').join('|'); })()
+        intent: "Wait until the sidebar lists the three Leads in creation order"
+      - run: '"$AFT_TESTS_DIR/scripts/agents-v1-sidebar.sh" menu "$(cat "$AFT_WORK_DIR/sbe1B")"'
+        intent: "Open the second Lead's sidebar context menu"
+      - click: { testid: agent-context-menu-archive }
+      - wait:
+          fn: >-
+            (() => { const names = Array.from(document.querySelectorAll('nav[aria-label=Agents] [data-testid=sortable-agent-row] > a[href] [data-testid=agent-list-name]')).map((x) => x.textContent.trim());
+              return names.join('|') === ['a', 'c'].map((x) => 'agv1-sbe1-' + x + '-${RUN_ID:-local}').join('|'); })()
+        intent: "Wait until the archived Lead leaves the sidebar and the other two stay"
+      - api:
+          method: GET
+          path: "/api/workspaces/E2E-AGV1-SBE1/v1/agents/${var:sbe1B}"
+          assert:
+            - path: state
+              equals: archived
+        intent: "Check that the context-menu Archive archived the Lead"
+      - run: |
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-SBE1/chat/$(cat "$AFT_WORK_DIR/sbe1B")"
+        intent: "Open the archived Lead's chat by its URL"
+      - reload: true
+      - wait:
+          fn: >-
+            (() => { const names = Array.from(document.querySelectorAll('nav[aria-label=Agents] [data-testid=sortable-agent-row] > a[href] [data-testid=agent-list-name]')).map((x) => x.textContent.trim());
+              return !!document.querySelector('[data-testid=agent-archived-notice]') && !!document.querySelector('[data-testid=agent-unarchive]') &&
+                (document.querySelector('section[aria-label="Agent chat"] header h2')?.textContent || '').trim() === 'agv1-sbe1-b-${RUN_ID:-local}' &&
+                names.join('|') === ['a', 'c'].map((x) => 'agv1-sbe1-' + x + '-${RUN_ID:-local}').join('|'); })()
+        intent: "Wait until the reloaded chat shows the Lead archived with Unarchive, while the sidebar still leaves it out"
+      - run: |
+          agent-browser --session "$AFT_SESSION" eval "(() => { window.__sbUnarchiveAt = undefined;
+            document.addEventListener('click', (e) => { if (e.target.closest?.('[data-testid=agent-unarchive]')) window.__sbUnarchiveAt = performance.now(); }, { capture: true });
+            return true; })()" >/dev/null
+        intent: "Have the page note the moment Unarchive is clicked, to bound how soon the row returns"
+      - click: { testid: agent-unarchive }
+      - wait:
+          fn: >-
+            (() => { const rows = Array.from(document.querySelectorAll('nav[aria-label=Agents] [data-testid=sortable-agent-row] > a[href]'));
+              const names = rows.map((a) => a.querySelector('[data-testid=agent-list-name]')?.textContent.trim());
+              const b = rows[names.indexOf('agv1-sbe1-b-${RUN_ID:-local}')];
+              return names.join('|') === ['a', 'b', 'c'].map((x) => 'agv1-sbe1-' + x + '-${RUN_ID:-local}').join('|') &&
+                b?.getAttribute('aria-current') === 'page' && !document.querySelector('[data-testid=agent-archived-notice]') &&
+                performance.now() - window.__sbUnarchiveAt < 5000; })()
+        intent: "Wait until, without a reload and within 5 s of Unarchive, the Lead is back in the sidebar between the other two and marked current"
+      - reload: true
+      - wait:
+          fn: >-
+            (() => { const rows = Array.from(document.querySelectorAll('nav[aria-label=Agents] [data-testid=sortable-agent-row] > a[href]'));
+              const names = rows.map((a) => a.querySelector('[data-testid=agent-list-name]')?.textContent.trim());
+              const b = rows[names.indexOf('agv1-sbe1-b-${RUN_ID:-local}')];
+              return names.join('|') === ['a', 'b', 'c'].map((x) => 'agv1-sbe1-' + x + '-${RUN_ID:-local}').join('|') &&
+                b?.getAttribute('aria-current') === 'page' && !document.querySelector('[data-testid=agent-archived-notice]'); })()
+        intent: "Wait until, after another reload, the Lead is still in the same place and marked current"
+      - api:
+          method: GET
+          path: "/api/workspaces/E2E-AGV1-SBE1/v1/agents/${var:sbe1B}"
+          assert:
+            - path: state
+              equals: idle
+        intent: "Check that the unarchived Lead is idle in the API"
+
+  - name: E2 compact rail - the collapsed rail shows one avatar per Lead plus a working child, opens a chat as current, keeps the selection after a reload, drops the child when it finishes, and Home counts the idle Leads
+    intent: An operator with two OpenCode Leads, one running a child, collapses the sidebar; the rail shows exactly the two Leads and the working child, matched to their Agent API ids. Clicking a Lead's avatar opens its chat marked current, which survives a reload. Home's idle count includes the two idle Leads but not the working child. When the child finishes it leaves the rail (RAIL1)
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-SBE2/v1/agents
+          headers: { Idempotency-Key: "agv1-sbe2-a-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-sbe2-a-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-sbe2-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: sbe2A
+        intent: "Create the first OpenCode Lead through the Agent API"
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-SBE2/v1/agents
+          headers: { Idempotency-Key: "agv1-sbe2-b-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-sbe2-b-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-sbe2-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: sbe2B
+        intent: "Create the second OpenCode Lead through the Agent API"
+      - run: |
+          set -e
+          "$AFT_TESTS_DIR/scripts/agents-v1-sidebar.sh" kid "agv1-sbe2-kid-${RUN_ID:-local}" AGV1-SBE2-STARTED
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-SBE2/chat/$(cat "$AFT_WORK_DIR/sbe2B")"
+        intent: "Script the second Lead's child, which keeps working, and open that Lead's chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the Lead's chat is ready"
+      - fill: { label: Message, value: "start a worker" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const lead = Array.from(document.querySelectorAll('nav[aria-label=Agents] a')).find((a) => (a.textContent || '').startsWith('agv1-sbe2-b-${RUN_ID:-local}'));
+              const kids = Array.from(lead?.closest('[data-testid=sortable-agent-item]')?.querySelectorAll(':scope > [role=group] > [data-testid=sortable-agent-item] > [data-testid=sortable-agent-row] > a') || []);
+              return (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-SBE2-STARTED') &&
+                (document.querySelector('section[aria-label="Agent chat"] header')?.textContent || '').includes('idle') &&
+                kids.length === 1 && kids[0].textContent.startsWith('agv1-sbe2-kid-${RUN_ID:-local}'); })()
+        intent: "Wait until the Lead's turn ends idle and its working child shows nested under it"
+      - click: { role: button, name: "Collapse workspace tree" }
+      - wait:
+          fn: >-
+            (() => { const rail = document.querySelector('[data-testid=collapsed-agent-rail]');
+              const items = Array.from(rail?.querySelectorAll('[data-agent-id]') || []);
+              const label = (n) => items.filter((x) => (x.getAttribute('aria-label') || '').startsWith(n + ' '));
+              const cur = items.filter((x) => x.getAttribute('aria-current') === 'page');
+              const A = 'agv1-sbe2-a-${RUN_ID:-local}', B = 'agv1-sbe2-b-${RUN_ID:-local}', K = 'agv1-sbe2-kid-${RUN_ID:-local}';
+              return items.length === 3 && label(A).length === 1 && label(B).length === 1 && label(K).length === 1 &&
+                cur.length === 1 && cur[0] === label(B)[0] && ['creating', 'active', 'waiting', 'stopping'].includes(label(K)[0].dataset.state) &&
+                !document.querySelector('[data-testid=sortable-agent-row]'); })()
+        intent: "Wait until the collapsed rail shows exactly the two Leads and the working child, with the open Lead current"
+      - run: |
+          set -e
+          a="$(cat "$AFT_WORK_DIR/sbe2A")" b="$(cat "$AFT_WORK_DIR/sbe2B")"
+          kid="$("$AFT_TESTS_DIR/scripts/agents-v1-sidebar.sh" child-id E2E-AGV1-SBE2 "$b" "agv1-sbe2-kid-${RUN_ID:-local}")"
+          got="$("$AFT_TESTS_DIR/scripts/agents-v1-sidebar.sh" rail-ids)"
+          [ "$got" = "$a,$b,$kid" ] || { echo "rail ids '$got', want '$a,$b,$kid'" >&2; exit 1; }
+          echo "$kid" > "$AFT_WORK_DIR/sbe2Kid"
+        intent: "Check that the rail's avatars are the two Leads and the child by their Agent API ids, Leads in sidebar order and the child after its Lead"
+      - click: { selector: "[data-testid=collapsed-agent-rail] a[aria-label^='agv1-sbe2-a-${RUN_ID:-local} ']" }
+      - wait:
+          fn: >-
+            (() => { const items = Array.from(document.querySelectorAll('[data-testid=collapsed-agent-rail] [data-agent-id]'));
+              const cur = items.filter((x) => x.getAttribute('aria-current') === 'page');
+              return items.length === 3 && cur.length === 1 && (cur[0].getAttribute('aria-label') || '').startsWith('agv1-sbe2-a-${RUN_ID:-local} ') &&
+                location.pathname.endsWith('/chat/' + cur[0].dataset.agentId) &&
+                (document.querySelector('section[aria-label="Agent chat"] header h2')?.textContent || '').trim() === 'agv1-sbe2-a-${RUN_ID:-local}'; })()
+        intent: "Wait until the first Lead's avatar opens its chat and is the one marked current"
+      - reload: true
+      - wait:
+          fn: >-
+            (() => { const items = Array.from(document.querySelectorAll('[data-testid=collapsed-agent-rail] [data-agent-id]'));
+              const cur = items.filter((x) => x.getAttribute('aria-current') === 'page');
+              return items.length === 3 && cur.length === 1 && (cur[0].getAttribute('aria-current') === 'page') &&
+                (cur[0].getAttribute('aria-label') || '').startsWith('agv1-sbe2-a-${RUN_ID:-local} ') &&
+                location.pathname.endsWith('/chat/' + cur[0].dataset.agentId) &&
+                !document.querySelector('[data-testid=sortable-agent-row]'); })()
+        intent: "Wait until, after a reload, the rail is still collapsed with the first Lead current"
+      - run: |
+          set -e
+          n="$(curl -sf "$AFT_BASE_URL/api/monitor/agents?workspace=E2E-AGV1-SBE2" | python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("agents") or []))')"
+          [ "$n" = 0 ] || { echo "the workspace has $n fleet agents; Home's count would include them" >&2; exit 1; }
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-SBE2/home"
+        intent: "Check the workspace has no fleet agents, so Home's idle count is Agent API agents only, and open Home"
+      - wait:
+          fn: >-
+            (document.querySelector('[data-stat=idle] strong')?.textContent || '').trim() === '2 agents'
+        intent: "Wait until Home counts the two idle Leads and not the working child"
+      - run: |
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-SBE2/chat/$(cat "$AFT_WORK_DIR/sbe2A")"
+        intent: "Go back to the first Lead's chat"
+      - run: '"$AFT_TESTS_DIR/scripts/agents-v1-sidebar.sh" stop E2E-AGV1-SBE2 "$(cat "$AFT_WORK_DIR/sbe2B")" "agv1-sbe2-kid-${RUN_ID:-local}"'
+        intent: "Stop the child, which ends its task"
+      - wait:
+          fn: >-
+            (() => { const items = Array.from(document.querySelectorAll('[data-testid=collapsed-agent-rail] [data-agent-id]'));
+              const label = (n) => items.filter((x) => (x.getAttribute('aria-label') || '').startsWith(n + ' '));
+              return items.length === 2 && label('agv1-sbe2-a-${RUN_ID:-local}').length === 1 && label('agv1-sbe2-b-${RUN_ID:-local}').length === 1 &&
+                label('agv1-sbe2-kid-${RUN_ID:-local}').length === 0; })()
+        intent: "Wait until the finished child leaves the rail and both Leads stay"
+      - run: |
+          set -e
+          kid="$(cat "$AFT_WORK_DIR/sbe2Kid")"
+          state="$(curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-SBE2/v1/agents/$kid" | python3 -c 'import json,sys; print(json.load(sys.stdin)["state"])')"
+          [ "$state" = finished ] || { echo "the child is $state, want finished" >&2; exit 1; }
+        intent: "Check that the API reports the child finished"
+      - click: { role: button, name: "Expand workspace tree" }
+
+  - name: E3 sidebar reorder, archive and underline - a keyboard drag moves a Lead and its child above another and persists, rows show no underline on hover, and both Archive paths remove a row
+    intent: An operator keyboard-drags the second of three OpenCode Leads, which has a working child, above the first; the order holds after a reload and the child stays nested under its Lead. Hovering a row shows its Archive action and no underline. Archive from the context menu and from the hover action each remove that row (SB4)
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-SBE3/v1/agents
+          headers: { Idempotency-Key: "agv1-sbe3-a-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-sbe3-a-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-sbe3-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: sbe3A
+        intent: "Create the first OpenCode Lead through the Agent API"
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-SBE3/v1/agents
+          headers: { Idempotency-Key: "agv1-sbe3-b-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-sbe3-b-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-sbe3-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: sbe3B
+        intent: "Create the second OpenCode Lead through the Agent API"
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-SBE3/v1/agents
+          headers: { Idempotency-Key: "agv1-sbe3-c-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-sbe3-c-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-sbe3-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: sbe3C
+        intent: "Create the third OpenCode Lead through the Agent API"
+      - run: |
+          set -e
+          "$AFT_TESTS_DIR/scripts/agents-v1-sidebar.sh" kid "agv1-sbe3-kid-${RUN_ID:-local}" AGV1-SBE3-STARTED
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-SBE3/chat/$(cat "$AFT_WORK_DIR/sbe3B")"
+        intent: "Script the second Lead's child, which keeps working, and open that Lead's chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the Lead's chat is ready"
+      - fill: { label: Message, value: "start a worker" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const top = Array.from(document.querySelectorAll('nav[aria-label=Agents] [data-testid=sortable-agent-row] > a[href]')).filter((a) => !a.closest('[role=group]')).map((a) => a.querySelector('[data-testid=agent-list-name]')?.textContent.trim());
+              const lead = Array.from(document.querySelectorAll('nav[aria-label=Agents] a')).find((a) => (a.textContent || '').startsWith('agv1-sbe3-b-${RUN_ID:-local}'));
+              const kids = Array.from(lead?.closest('[data-testid=sortable-agent-item]')?.querySelectorAll(':scope > [role=group] > [data-testid=sortable-agent-item] > [data-testid=sortable-agent-row] > a') || []);
+              return (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-SBE3-STARTED') &&
+                top.join('|') === ['a', 'b', 'c'].map((x) => 'agv1-sbe3-' + x + '-${RUN_ID:-local}').join('|') &&
+                kids.length === 1 && kids[0].textContent.startsWith('agv1-sbe3-kid-${RUN_ID:-local}'); })()
+        intent: "Wait until the three Leads show in creation order with the working child nested under the second"
+      - run: '"$AFT_TESTS_DIR/scripts/agents-v1-sidebar.sh" drag-up "agv1-sbe3-b-${RUN_ID:-local}"'
+        intent: "Keyboard-drag the second Lead above the first: focus its drag handle, lift with Space, move up, drop with Space"
+      - wait:
+          fn: >-
+            (() => { const top = Array.from(document.querySelectorAll('nav[aria-label=Agents] [data-testid=sortable-agent-row] > a[href]')).filter((a) => !a.closest('[role=group]')).map((a) => a.querySelector('[data-testid=agent-list-name]')?.textContent.trim());
+              const lead = Array.from(document.querySelectorAll('nav[aria-label=Agents] a')).find((a) => (a.textContent || '').startsWith('agv1-sbe3-b-${RUN_ID:-local}'));
+              const kids = Array.from(lead?.closest('[data-testid=sortable-agent-item]')?.querySelectorAll(':scope > [role=group] > [data-testid=sortable-agent-item] > [data-testid=sortable-agent-row] > a') || []);
+              return top.join('|') === ['b', 'a', 'c'].map((x) => 'agv1-sbe3-' + x + '-${RUN_ID:-local}').join('|') &&
+                kids.length === 1 && kids[0].textContent.startsWith('agv1-sbe3-kid-${RUN_ID:-local}'); })()
+        intent: "Wait until the second Lead is first, with its child still nested under it"
+      - reload: true
+      - wait:
+          fn: >-
+            (() => { const top = Array.from(document.querySelectorAll('nav[aria-label=Agents] [data-testid=sortable-agent-row] > a[href]')).filter((a) => !a.closest('[role=group]')).map((a) => a.querySelector('[data-testid=agent-list-name]')?.textContent.trim());
+              const lead = Array.from(document.querySelectorAll('nav[aria-label=Agents] a')).find((a) => (a.textContent || '').startsWith('agv1-sbe3-b-${RUN_ID:-local}'));
+              const kids = Array.from(lead?.closest('[data-testid=sortable-agent-item]')?.querySelectorAll(':scope > [role=group] > [data-testid=sortable-agent-item] > [data-testid=sortable-agent-row] > a') || []);
+              return top.join('|') === ['b', 'a', 'c'].map((x) => 'agv1-sbe3-' + x + '-${RUN_ID:-local}').join('|') &&
+                kids.length === 1 && kids[0].textContent.startsWith('agv1-sbe3-kid-${RUN_ID:-local}'); })()
+        intent: "Wait until, after a reload, the new order holds and the child is still nested under its Lead"
+      - run: '"$AFT_TESTS_DIR/scripts/agents-v1-sidebar.sh" hover "$(cat "$AFT_WORK_DIR/sbe3A")" "agv1-sbe3-a-${RUN_ID:-local}"'
+        intent: "Hover the first Lead's row and check it has no underline and shows its Archive action"
+      - run: '"$AFT_TESTS_DIR/scripts/agents-v1-sidebar.sh" menu "$(cat "$AFT_WORK_DIR/sbe3A")"'
+        intent: "Open the first Lead's sidebar context menu"
+      - click: { testid: agent-context-menu-archive }
+      - wait:
+          fn: >-
+            (() => { const top = Array.from(document.querySelectorAll('nav[aria-label=Agents] [data-testid=sortable-agent-row] > a[href]')).filter((a) => !a.closest('[role=group]')).map((a) => a.querySelector('[data-testid=agent-list-name]')?.textContent.trim());
+              return top.join('|') === ['b', 'c'].map((x) => 'agv1-sbe3-' + x + '-${RUN_ID:-local}').join('|'); })()
+        intent: "Wait until the context-menu Archive removes the first Lead's row"
+      - run: '"$AFT_TESTS_DIR/scripts/agents-v1-sidebar.sh" hover-archive "$(cat "$AFT_WORK_DIR/sbe3C")" "agv1-sbe3-c-${RUN_ID:-local}"'
+        intent: "Hover the third Lead's row and press its Archive action"
+      - wait:
+          fn: >-
+            (() => { const top = Array.from(document.querySelectorAll('nav[aria-label=Agents] [data-testid=sortable-agent-row] > a[href]')).filter((a) => !a.closest('[role=group]')).map((a) => a.querySelector('[data-testid=agent-list-name]')?.textContent.trim());
+              const lead = Array.from(document.querySelectorAll('nav[aria-label=Agents] a')).find((a) => (a.textContent || '').startsWith('agv1-sbe3-b-${RUN_ID:-local}'));
+              const kids = Array.from(lead?.closest('[data-testid=sortable-agent-item]')?.querySelectorAll(':scope > [role=group] > [data-testid=sortable-agent-item] > [data-testid=sortable-agent-row] > a') || []);
+              return top.join('|') === 'agv1-sbe3-b-${RUN_ID:-local}' && kids.length === 1; })()
+        intent: "Wait until the hover Archive removes the third Lead's row, leaving the second Lead and its child"
+      - api:
+          method: GET
+          path: "/api/workspaces/E2E-AGV1-SBE3/v1/agents/${var:sbe3A}"
+          assert:
+            - path: state
+              equals: archived
+        intent: "Check that the context-menu Archive archived the first Lead"
+      - api:
+          method: GET
+          path: "/api/workspaces/E2E-AGV1-SBE3/v1/agents/${var:sbe3C}"
+          assert:
+            - path: state
+              equals: archived
+        intent: "Check that the hover Archive archived the third Lead"
+      - reload: true
+      - wait:
+          fn: >-
+            (() => { const top = Array.from(document.querySelectorAll('nav[aria-label=Agents] [data-testid=sortable-agent-row] > a[href]')).filter((a) => !a.closest('[role=group]')).map((a) => a.querySelector('[data-testid=agent-list-name]')?.textContent.trim());
+              return top.join('|') === 'agv1-sbe3-b-${RUN_ID:-local}'; })()
+        intent: "Wait until, after a reload, only the second Lead's row is left"
+      - run: '"$AFT_TESTS_DIR/scripts/agents-v1-sidebar.sh" stop E2E-AGV1-SBE3 "$(cat "$AFT_WORK_DIR/sbe3B")" "agv1-sbe3-kid-${RUN_ID:-local}"'
+        intent: "Stop the child, which ends its task"

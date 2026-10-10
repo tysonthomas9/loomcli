@@ -74,6 +74,18 @@ const AGENTS = [
   }),
 ];
 
+// ORPH1: a finished child whose Lead was archived. List leaves the archived
+// Lead out, so the child's parent is not in the roster.
+const ORPHAN = agent("k3", {
+  name: "echo-c",
+  preset: "task",
+  role_kind: "worker",
+  state: "finished",
+  outcome: "completed",
+  parent_agent_id: "archived-lead",
+  created_at: "2026-10-04T00:00:04Z",
+});
+
 const json = (route: Route, body: unknown, status = 200) =>
   route.fulfill({
     status,
@@ -83,7 +95,9 @@ const json = (route: Route, body: unknown, status = 200) =>
 const ok = (route: Route, data: unknown) =>
   json(route, { success: true, data });
 
-async function open(page: Page) {
+type Fixture = ReturnType<typeof agent>;
+
+async function open(page: Page, agents: Fixture[] = AGENTS) {
   await page.route("**/api/config", (r) => json(r, { mode: "open" }));
   await page.route("**/api/health", (r) => json(r, { status: "ok" }));
   await page.route("**/api/backends", (r) => ok(r, []));
@@ -98,6 +112,8 @@ async function open(page: Page) {
       readyState = 1;
       constructor(public url: string) {
         super();
+        const w = window as unknown as { __sse?: EventTarget[] };
+        (w.__sse ??= []).push(this);
         setTimeout(() => this.onopen?.(new Event("open")));
       }
       close() {
@@ -122,14 +138,14 @@ async function open(page: Page) {
       const path = url.pathname;
       if (path.endsWith("/v1/agents")) {
         const parent = url.searchParams.get("parent");
-        const agents = parent
-          ? AGENTS.filter((a) => a.parent_agent_id === parent)
-          : AGENTS;
-        return json(r, { agents, next: "" });
+        const listed = parent
+          ? agents.filter((a) => a.parent_agent_id === parent)
+          : agents;
+        return json(r, { agents: listed, next: "" });
       }
       if (path.endsWith("/events"))
         return json(r, { events: [], snapshot_seq: 0, next: 0, more: false });
-      const a = AGENTS.find((x) => path.endsWith(`/${x.agent_id}`));
+      const a = agents.find((x) => path.endsWith(`/${x.agent_id}`));
       return a ? json(r, a) : r.fulfill({ status: 404 });
     },
   );
@@ -194,4 +210,91 @@ test("the collapsed rail lists Agent API Leads and working children, opens a cha
       });
     }
   }
+});
+
+test("a finished child of an archived Lead leaves the rail, the tree and the home count (ORPH1)", async ({
+  page,
+}) => {
+  await open(page, [...AGENTS, ORPHAN]);
+
+  const links = rail(page).getByRole("link");
+  await expect(links).toHaveCount(3);
+  await expect(railAgent(page, "echo-c")).toHaveCount(0);
+  // Only the two idle Leads count toward the home dashboard's idle stat.
+  await expect(
+    page.locator('[data-testid="queue-stat"][data-stat="idle"]'),
+  ).toHaveText(/^2 agents/);
+  if (SHOTS)
+    await page.screenshot({
+      path: `${SHOTS}/orph1-collapsed-desktop.png`,
+      clip: { x: 0, y: 0, width: 420, height: 520 },
+    });
+
+  await page.getByRole("button", { name: "Expand workspace tree" }).click();
+  await expect(page.getByTestId("agent-list-name")).toHaveText([
+    "lead1",
+    "busy-kid",
+    "lead2",
+  ]);
+  if (SHOTS) {
+    await page.screenshot({ path: `${SHOTS}/orph1-expanded-desktop.png` });
+    await page.setViewportSize({ width: 390, height: 844 });
+    // The first-run checklist covers the phone layout; dismiss it for the shot.
+    await page.getByRole("button", { name: "Dismiss" }).click();
+    await expect(
+      page.locator('[data-testid="queue-stat"][data-stat="idle"]'),
+    ).toHaveText(/^2 agents/);
+    await page.screenshot({ path: `${SHOTS}/orph1-390.png`, fullPage: true });
+  }
+});
+
+test("a Lead deleted outside the UI leaves the open tree with its finished child (DEL2)", async ({
+  page,
+}) => {
+  await open(
+    page,
+    AGENTS.filter((a) => a.agent_id !== "k1"),
+  );
+  await page.getByRole("button", { name: "Expand workspace tree" }).click();
+  await expect(page.getByTestId("agent-list-name")).toHaveText([
+    "lead1",
+    "lead2",
+  ]);
+  await page.waitForFunction(() =>
+    (
+      window as unknown as { __sse: { url: string; readyState: number }[] }
+    ).__sse.some((s) => s.readyState === 1 && s.url.includes("/v1/events")),
+  );
+  // From here no List answers, so only the stream can drop the row.
+  await page.route(
+    (u) => u.pathname.endsWith("/v1/agents"),
+    () => {},
+  );
+
+  // Another tab deletes lead1. The server purges its history first, so its
+  // agent.deleted is live only (seq 0).
+  await page.evaluate(() => {
+    const data = JSON.stringify({
+      agent_id: "a1",
+      seq: 0,
+      event_id: "a1:deleted:agent.deleted",
+      kind: "agent.deleted",
+      turn_id: "",
+      payload: {},
+      created_at: "2026-10-04T00:01:00Z",
+    });
+    const w = window as unknown as {
+      __sse: (EventTarget & { url: string; readyState: number })[];
+    };
+    for (const s of w.__sse)
+      if (
+        s.readyState !== 2 &&
+        new URL(s.url).searchParams.get("agents")?.split(",").includes("a1")
+      )
+        s.dispatchEvent(new MessageEvent("event", { data }));
+  });
+  // Its finished child (done-kid) stays hidden with it.
+  await expect(page.getByTestId("agent-list-name")).toHaveText(["lead2"], {
+    timeout: 3000,
+  });
 });

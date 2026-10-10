@@ -78,6 +78,7 @@ vi.mock("@/api/agentsv1", () => ({
 
 import { useRosterAgent } from "@/hooks";
 import { AgentList } from "../AgentList";
+import { AgentRosterOwner } from "../AgentRosterOwner";
 
 let created = 0;
 function agent(id: string, over: Partial<Agent> = {}): Agent {
@@ -139,7 +140,9 @@ function renderList(at = "/ws/ws1/chat/lead") {
     <KeyboardShortcutProvider>
       <MemoryRouter initialEntries={[at]}>
         <Nav />
-        <AgentList workspaceId="ws1" />
+        <AgentRosterOwner workspaceId="ws1">
+          <AgentList workspaceId="ws1" />
+        </AgentRosterOwner>
       </MemoryRouter>
     </KeyboardShortcutProvider>,
   );
@@ -203,7 +206,9 @@ describe("AgentList", () => {
     }
     render(
       <MemoryRouter initialEntries={["/ws/ws1/chat/lead"]}>
-        <AgentList workspaceId="ws1" />
+        <AgentRosterOwner workspaceId="ws1">
+          <AgentList workspaceId="ws1" />
+        </AgentRosterOwner>
         <Card />
       </MemoryRouter>,
     );
@@ -498,7 +503,9 @@ describe("AgentList", () => {
     ];
     const { unmount } = render(
       <MemoryRouter initialEntries={["/ws/ws1/agents"]}>
-        <AgentList workspaceId="ws1" />
+        <AgentRosterOwner workspaceId="ws1">
+          <AgentList workspaceId="ws1" />
+        </AgentRosterOwner>
       </MemoryRouter>,
     );
     await waitFor(() => expect(names()).toEqual(["lead", "kid", "lead2"]));
@@ -770,11 +777,26 @@ describe("AgentList", () => {
     await waitFor(() => expect(names()).toEqual(["kid"]));
   });
 
+  it("drops an archived or deleted Lead's finished children after a reload, keeping a working one (ORPH1)", async () => {
+    // List leaves archived and deleted agents out, so their children's
+    // parents are not in the roster.
+    api.agents = [
+      agent("lead2", { preset: "lead" }),
+      agent("done", { parent_agent_id: "gone-lead", state: "finished" }),
+      agent("idle", { parent_agent_id: "gone-lead", state: "idle" }),
+      agent("kid", { parent_agent_id: "gone-lead", state: "active" }),
+    ];
+    renderList("/ws/ws1/agents");
+    await waitFor(() => expect(names()).toEqual(["lead2", "kid"]));
+  });
+
   it("closes the row menu when the workspace changes", async () => {
     const tree = (ws: string) => (
       <KeyboardShortcutProvider>
         <MemoryRouter initialEntries={["/ws/ws1/agents"]}>
-          <AgentList workspaceId={ws} />
+          <AgentRosterOwner workspaceId={ws}>
+            <AgentList workspaceId={ws} />
+          </AgentRosterOwner>
         </MemoryRouter>
       </KeyboardShortcutProvider>
     );

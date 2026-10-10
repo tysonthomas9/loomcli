@@ -506,6 +506,59 @@ func (s *Service) ingest(ctx context.Context, harness string, e loomharness.Even
 	return true, s.HarnessEvent(ctx, id, e)
 }
 
+// trackCall notes a's tool call e starting in a's running turn, forgetting
+// calls of a's earlier turns, or its item completing; e is of a's current
+// session.
+func (s *Service) trackCall(a loomstore.Agent, e loomharness.Event) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch {
+	case e.Type == loomharness.EventItemStarted && e.ItemKind == "tool" && e.ItemID != "" && e.TurnID != "" &&
+		e.TurnID == deref(a.RunningTurnID):
+		calls := map[string]string{e.ItemID: e.TurnID}
+		for id, turn := range s.calls[a.AgentID] {
+			if turn == e.TurnID {
+				calls[id] = turn
+			}
+		}
+		s.calls[a.AgentID] = calls
+	case e.Type == loomharness.EventItemCompleted:
+		delete(s.calls[a.AgentID], e.ItemID)
+		if len(s.calls[a.AgentID]) == 0 {
+			delete(s.calls, a.AgentID)
+		}
+	}
+}
+
+// forgetCalls drops agentID's tracked calls: no turn of it runs, or it is
+// deleted.
+func (s *Service) forgetCalls(agentID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.calls, agentID)
+}
+
+// runningCall is a's one running tool call in its running turn, or "" when
+// it runs none or more than one. It is a best guess from a's harness
+// events, which reach Loom apart from the bridge's Create: if a's call A
+// ended and its call B started in the same turn, but neither event was
+// ingested before B's Create commits, the child names A. Exact attribution
+// needs each harness to hand the bridge its tool-call ID.
+func (s *Service) runningCall(a loomstore.Agent) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	call, n := "", 0
+	for id, turn := range s.calls[a.AgentID] {
+		if a.RunningTurnID != nil && turn == *a.RunningTurnID {
+			call, n = id, n+1
+		}
+	}
+	if n != 1 {
+		return ""
+	}
+	return call
+}
+
 // withText sets a message.delivered event's Text and Sender to the text Loom
 // handed over with its input key and its slot's sender, kept on the Send's
 // receipt, so every harness
@@ -590,23 +643,24 @@ func nativeRow(agentID, kind string, e loomharness.Event) loomstore.Event {
 	}
 	u := e.Usage // a usage step's own counts; a row without them reads as zero
 	b, _ := json.Marshal(struct {
-		Session          string            `json:"session"`
-		ItemID           string            `json:"itemId,omitempty"`
-		ItemKind         string            `json:"itemKind,omitempty"`
-		InputKey         string            `json:"inputKey,omitempty"`
-		AskID            string            `json:"askId,omitempty"`
-		Text             string            `json:"text,omitempty"`
-		Sender           string            `json:"sender,omitempty"`
-		StopReason       string            `json:"stopReason,omitempty"`
-		Error            string            `json:"error,omitempty"`
-		InputTokens      int64             `json:"inputTokens,omitempty"`
-		OutputTokens     int64             `json:"outputTokens,omitempty"`
-		CacheReadTokens  int64             `json:"cacheReadTokens,omitempty"`
-		CacheWriteTokens int64             `json:"cacheWriteTokens,omitempty"`
-		CostUSD          float64           `json:"costUsd,omitempty"`
-		CostTotalUSD     float64           `json:"costTotalUsd,omitempty"`
-		Tool             *loomharness.Tool `json:"tool,omitempty"`
-	}{e.Session.NativeID, e.ItemID, e.ItemKind, e.InputKey, e.AskID, e.Text, e.Sender, e.StopReason, capText(e.Error),
+		Session          string               `json:"session"`
+		ItemID           string               `json:"itemId,omitempty"`
+		ItemKind         string               `json:"itemKind,omitempty"`
+		InputKey         string               `json:"inputKey,omitempty"`
+		AskID            string               `json:"askId,omitempty"`
+		Text             string               `json:"text,omitempty"`
+		Sender           string               `json:"sender,omitempty"`
+		StopReason       string               `json:"stopReason,omitempty"`
+		Error            string               `json:"error,omitempty"`
+		Failure          *loomharness.Failure `json:"failure,omitempty"`
+		InputTokens      int64                `json:"inputTokens,omitempty"`
+		OutputTokens     int64                `json:"outputTokens,omitempty"`
+		CacheReadTokens  int64                `json:"cacheReadTokens,omitempty"`
+		CacheWriteTokens int64                `json:"cacheWriteTokens,omitempty"`
+		CostUSD          float64              `json:"costUsd,omitempty"`
+		CostTotalUSD     float64              `json:"costTotalUsd,omitempty"`
+		Tool             *loomharness.Tool    `json:"tool,omitempty"`
+	}{e.Session.NativeID, e.ItemID, e.ItemKind, e.InputKey, e.AskID, e.Text, e.Sender, e.StopReason, capText(e.Error), e.Failure,
 		u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens, u.CostUSD, u.CostTotalUSD, capTool(e.Tool)})
 	return loomstore.Event{AgentID: agentID, Kind: kind, TurnID: e.TurnID, Payload: b,
 		EventID: kind + ":" + e.Session.Root + ":" + e.Session.NativeID + ":" + key}

@@ -37,6 +37,11 @@
     box-shadow var(--transition-fast);
 }
 
+/* The sidebar shows the agents above phone width (MOB2). */
+.agentsButton {
+  display: none;
+}
+
 .navButton:hover {
   background-color: var(--color-bg-hover);
   color: var(--color-text-primary);
@@ -310,7 +315,7 @@
     width: 100%;
     min-width: unset;
     height: var(--nav-bottom-height);
-    padding: 0 var(--space-2);
+    padding: 0 var(--space-1);
     position: fixed;
     bottom: 0;
     left: 0;
@@ -321,10 +326,18 @@
     justify-content: space-around;
   }
 
+  /* With the Agents button the row is full on phones: the buttons give up
+     some width (never height) so the switcher keeps one whole item and room
+     for its chevrons. */
   .navButton {
-    flex-shrink: 0;
+    flex: 0 1 auto;
     width: var(--touch-target-min);
+    min-width: 36px;
     height: var(--touch-target-min);
+  }
+
+  .agentsButton {
+    display: inline-flex;
   }
 
   .spacer,
@@ -343,7 +356,7 @@
     flex: 1 1 0;
     align-items: center;
     justify-content: center;
-    min-width: 0;
+    min-width: 62px;
     container-type: inline-size;
   }
 
@@ -351,8 +364,8 @@
     flex: 0 0 auto;
     flex-direction: row;
     gap: 11px;
-    /* Never wider than the slot: on the smallest phones it is under one
-       item with its padding, and the snap still shows that item whole. */
+    /* Never wider than the slot, and always one whole item with its
+       padding (the slot is at least 62px). */
     width: min(100cqw, max(38px, calc(round(down, 100cqw - 21px, 41px) - 3px)));
     min-width: 0;
     padding: 4px;
@@ -391,15 +404,33 @@
     right: 0;
   }
 
-  /* No room beside a one-item window (smallest phones): the chevrons sit just
-     outside it, in the blank edge of the neighbouring buttons. */
-  @container (width < 62px) {
-    .moreHint[data-more-hint="left"] {
-      left: -12px;
+  /* With room (wider than a phone's one-item slot) the chevrons are 44px
+     buttons that scroll by one item; the window gives up their width. The
+     one switch point, mirrored by CHEVRON_BUTTONS_MIN_SLOT_PX in NavRail. */
+  @container (width >= 126px) {
+    .workspaceSwitcher {
+      width: calc(round(down, 100cqw - 85px, 41px) - 3px);
     }
 
-    .moreHint[data-more-hint="right"] {
-      right: -12px;
+    button.moreHint {
+      width: var(--touch-target-min);
+      height: var(--touch-target-min);
+      padding: 0;
+      border: none;
+      border-radius: 10px;
+      background: none;
+      pointer-events: auto;
+      cursor: pointer;
+    }
+
+    button.moreHint:hover {
+      background-color: var(--color-bg-hover);
+      color: var(--color-text-primary);
+    }
+
+    button.moreHint:focus-visible {
+      outline: 2px solid var(--color-primary);
+      outline-offset: -2px;
     }
   }
 
@@ -414,5 +445,14 @@
 
   .tooltip {
     display: none;
+  }
+}
+
+/* Below 360px the rail still fits on screen: the buttons narrow further so
+   the switcher keeps one whole item, ring included, and its chevrons beside
+   it, clear of the buttons' icons. */
+@media (width < 360px) {
+  .navButton {
+    min-width: 31px;
   }
 }

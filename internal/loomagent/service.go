@@ -11,6 +11,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
+	"github.com/tysonthomas9/loomcli/internal/prwatch"
 )
 
 // Agent states (design v2 §5.1).
@@ -102,6 +103,9 @@ type ServiceConfig struct {
 	// first Reconcile of each wired harness has finished (a serve start,
 	// design v2 §4.14).
 	RecoverFirst bool
+	// PRWatchHost is the host GitHub connector the dispatcher reads watched
+	// PRs through (OR8); nil sweeps none.
+	PRWatchHost prwatch.Host
 }
 
 // Backend is a workspace default harness and model.
@@ -131,6 +135,10 @@ type Service struct {
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
 	asks  map[string]map[string]Ask // open asks by agent and ask ID, under mu
+	// calls are, by agent, the turn of each of its tool calls that started
+	// in its running turn and has not completed, under mu: a child its one
+	// such call creates names that call (CL5).
+	calls map[string]map[string]string
 	// resumed holds, by harness, the sessions this process opened or
 	// resumed, under mu: Reconcile resumes each live session once, so its
 	// policy is installed here, and again after its harness restarts.
@@ -153,6 +161,14 @@ type Service struct {
 	// backoff timer: time's own, or a test's.
 	tick  ticker
 	after func(time.Duration) <-chan time.Time
+	// now is the usage-limit resume and PR-watch clock (OR7, OR8): time's own, or a test's.
+	now func() time.Time
+	// prHost is the host GitHub connector PR watches read through (OR8);
+	// nil sweeps none. prTick passes the resync clock's ticks to the PR-watch
+	// loop; prDue is when its next sweep is due, read and set only by it.
+	prHost prwatch.Host
+	prTick chan struct{}
+	prDue  time.Time
 	// queue is the reconcile queue by agent ID, under mu; queueWake tells
 	// the dispatcher it changed.
 	queue     map[string]*queued
@@ -164,11 +180,11 @@ func New(cfg ServiceConfig) *Service {
 	s := &Service{Bus: NewBus(), store: cfg.Store, events: cfg.Events, workspace: cfg.Workspace,
 		resolveRepo: cfg.ResolveRepo, prepare: cfg.PrepareWorktree, target: cfg.Target,
 		interrupt: cfg.Interrupt, purge: cfg.Purge, harnesses: cfg.Harnesses, launch: cfg.Launch,
-		retire: cfg.Retire, workspaceID: cfg.WorkspaceID, presets: cfg.Presets, backend: cfg.DefaultBackend, bridge: cfg.Bridge,
+		retire: cfg.Retire, prHost: cfg.PRWatchHost, workspaceID: cfg.WorkspaceID, presets: cfg.Presets, backend: cfg.DefaultBackend, bridge: cfg.Bridge,
 		inputKey: cfg.InputKey, catalogWait: 15 * time.Second, catalogPoll: 250 * time.Millisecond,
-		catalogWarmUp: cfg.CatalogWarmUp, listed: map[string]time.Time{}, tick: realTicker, after: time.After,
-		queue: map[string]*queued{}, queueWake: make(chan struct{}, 1),
-		locks: map[string]*sync.Mutex{}, asks: map[string]map[string]Ask{}, resumed: map[string]map[loomharness.NativeRef]bool{}}
+		catalogWarmUp: cfg.CatalogWarmUp, listed: map[string]time.Time{}, tick: realTicker, after: time.After, now: time.Now,
+		queue: map[string]*queued{}, queueWake: make(chan struct{}, 1), prTick: make(chan struct{}, 1),
+		locks: map[string]*sync.Mutex{}, asks: map[string]map[string]Ask{}, calls: map[string]map[string]string{}, resumed: map[string]map[loomharness.NativeRef]bool{}}
 	if cfg.RecoverFirst {
 		s.ready = make(chan struct{})
 		s.recovered = sync.OnceFunc(func() { close(s.ready) })
@@ -325,6 +341,9 @@ func (s *Service) changeState(ctx context.Context, a loomstore.Agent, to loomsto
 	}, s.busPublish(out))
 	if err != nil {
 		return before, err
+	}
+	if a.RunningTurnID == nil {
+		s.forgetCalls(a.AgentID)
 	}
 	return a, nil
 }

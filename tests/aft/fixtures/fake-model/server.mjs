@@ -8,6 +8,9 @@
 //                                          a bash "ask" rule OpenCode stops for approval
 //   {error: "message"}                     answer HTTP 400 with an OpenAI error, so the
 //                                          turn fails with that message
+// A step with gate: "name" answers only once that gate is opened, so a turn
+// stays mid model call (for example across a loom serve restart) until the
+// test lets it go.
 // A step with next: "tool" answers only a request whose last message is a
 // tool result (a turn's follow-up after its tool call), and next: "prompt"
 // only one whose last message is not (a new prompt); a request takes the
@@ -19,7 +22,10 @@
 // Control plane:
 //   POST /__script    {steps: [...]} appends steps to the queue
 //   GET  /__requests  every chat request body received, in order
-//   POST /__reset     clear the queue and the request log
+//   GET  /__held      how many replies wait on a gate, and the oldest one's age (oldest_ms)
+//   POST /__open      {gate: "name"} opens the gate: its waiting and later replies go
+//   POST /__reset     clear the queue, the request log and the open gates, and
+//                     answer every reply still waiting on a gate
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 
@@ -27,6 +33,8 @@ export function createFakeModel() {
   let steps = [];
   let requests = [];
   let calls = 0;
+  let open = new Set();
+  let held = []; // {gate, at, answer} for each reply waiting on a gate
 
   function stream(res, deltas, finish) {
     res.writeHead(200, { "Content-Type": "text/event-stream" });
@@ -68,8 +76,24 @@ export function createFakeModel() {
         steps.push(...body.steps);
         return json(200, { queued: steps.length });
       }
+      if (req.method === "POST" && path === "/__open") {
+        let body;
+        try { body = JSON.parse(raw); } catch { return json(400, { error: "invalid JSON" }); }
+        if (typeof body?.gate !== "string" || !body.gate) return json(400, { error: "gate must be a name" });
+        open.add(body.gate);
+        const go = held.filter((h) => h.gate === body.gate);
+        held = held.filter((h) => h.gate !== body.gate);
+        go.forEach((h) => h.answer());
+        return json(200, { released: go.length });
+      }
       if (req.method === "GET" && path === "/__requests") return json(200, { requests, queued: steps.length });
-      if (req.method === "POST" && path === "/__reset") { steps = []; requests = []; return json(200, { ok: true }); }
+      if (req.method === "GET" && path === "/__held") return json(200, { held: held.length, oldest_ms: held.length ? Date.now() - Math.min(...held.map((h) => h.at)) : 0 });
+      if (req.method === "POST" && path === "/__reset") {
+        const go = held;
+        steps = []; requests = []; open = new Set(); held = [];
+        go.forEach((h) => h.answer());
+        return json(200, { ok: true });
+      }
       if (req.method === "POST" && path.endsWith("/chat/completions")) {
         let body = {};
         try { body = JSON.parse(raw); } catch { return json(400, { error: "invalid JSON" }); }
@@ -78,7 +102,14 @@ export function createFakeModel() {
         if (system.includes("You are a title generator")) return reply(res, { text: "Title" });
         const kind = (body.messages ?? []).at(-1)?.role === "tool" ? "tool" : "prompt";
         const i = steps.findIndex((s) => !s.next || s.next === kind);
-        return reply(res, i < 0 ? { text: "ok" } : steps.splice(i, 1)[0]);
+        const step = i < 0 ? { text: "ok" } : steps.splice(i, 1)[0];
+        if (step.gate !== undefined && !open.has(step.gate)) {
+          // A caller that gave up (its client timed out) no longer waits.
+          const h = { gate: step.gate, at: Date.now(), answer: () => reply(res, step) };
+          held.push(h);
+          return void res.on("close", () => { held = held.filter((x) => x !== h); });
+        }
+        return reply(res, step);
       }
       json(404, { error: `no route ${req.method} ${path}` });
     });

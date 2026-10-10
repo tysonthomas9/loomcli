@@ -1,0 +1,430 @@
+# Two answers to the same open ask at once (OR5a, 1.6b; the rt2 two-tab
+# race). Each case opens the agent's chat in the AFT browser and in a second
+# agent-browser session of its own, the two tabs. The agent uses the
+# pr-review-interactive preset, whose bash rule asks, so a real OpenCode
+# raises the same approval the emulator (LOOM_HARNESS_EMU=1) is scripted to.
+# Only the model is scripted; no paid model runs.
+suite: agents-v1-asks-race
+classification: { area: agents, feature: agent-api-asks, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: |
+  set -e
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-ASKS" >/dev/null || true
+  repo="$AFT_WORK_DIR/agv1-asks-repo"
+  mkdir -p "$repo"
+  git -C "$repo" init -q -b main
+  echo "agents-v1 asks race ${RUN_ID:-local}" > "$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" -c user.email=e2e@x -c user.name=e2e commit -q -m init
+  printf '{"name":"e2e-agv1-asks","type":"empty","repos":["%s"]}' "$repo" |
+    curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @- >/dev/null
+  : > "$AFT_WORK_DIR/asks-tab2-sessions"
+  # asks-script <agent id> <tag>: one turn that asks to run
+  # "echo AGV1-<tag>-RAN" and then says AGV1-<tag>-AFTER.
+  cat > "$AFT_WORK_DIR/asks-script" <<'SH'
+  #!/bin/sh
+  set -e
+  curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+  python3 - "$1" "$2" "${AFT_EMU_SCENARIOS:-}" "$AFT_FAKE_MODEL_URL" <<'PY'
+  import json, sys, urllib.request
+  agent, tag, scenarios, model = sys.argv[1:5]
+  cmd = "echo AGV1-%s-RAN" % tag
+  if scenarios:
+      # The emulator asks the scripted permission as OpenCode's bash "ask" rule does.
+      turn = {"tools": [{"id": "call_%s_bash" % tag.lower(), "name": "shell", "input": {"command": cmd},
+                         "output": "AGV1-%s-RAN" % tag,
+                         "permission": {"action": "bash", "resources": [cmd], "save": ["echo *"]}}],
+              "text": "AGV1-%s-AFTER" % tag}
+      json.dump({agent: [turn]}, open(scenarios, "w"))
+  else:
+      steps = [{"bash": cmd}, {"text": "AGV1-%s-AFTER" % tag}]
+      req = urllib.request.Request(model + "/__script", data=json.dumps({"steps": steps}).encode(),
+                                   headers={"Content-Type": "application/json"})
+      urllib.request.urlopen(req).read()
+  PY
+  SH
+  chmod +x "$AFT_WORK_DIR/asks-script"
+  # asks-tab2 <agent-browser args>: the second tab, an agent-browser session
+  # of its own, named after this test's session; asks-close-tab2 closes it.
+  cat > "$AFT_WORK_DIR/asks-tab2" <<'SH'
+  #!/bin/sh
+  s="$AFT_SESSION-tab2"
+  grep -qxF "$s" "$AFT_WORK_DIR/asks-tab2-sessions" || echo "$s" >> "$AFT_WORK_DIR/asks-tab2-sessions"
+  exec agent-browser --session "$s" "$@"
+  SH
+  chmod +x "$AFT_WORK_DIR/asks-tab2"
+  # asks-close-tab2 [session]: closes a second tab and fails if it is still listed.
+  cat > "$AFT_WORK_DIR/asks-close-tab2" <<'SH'
+  #!/bin/sh
+  s="${1:-$AFT_SESSION-tab2}"
+  agent-browser --session "$s" close >/dev/null 2>&1
+  # Absence counts only from a listing that succeeded.
+  for _ in $(seq 1 25); do
+    if list="$(agent-browser session list 2>/dev/null)"; then
+      printf '%s\n' "$list" | grep -qxF "  $s" || exit 0
+    fi
+    sleep 0.2
+  done
+  echo "second tab $s is still open, or the session list never answered" >&2; exit 1
+  SH
+  chmod +x "$AFT_WORK_DIR/asks-close-tab2"
+  # asks-card <session>: the tab's state as JSON: whether its approval card
+  # shows, the command the card names, any error alert text, and the transcript.
+  cat > "$AFT_WORK_DIR/asks-card" <<'SH'
+  #!/bin/sh
+  agent-browser --session "$1" eval "JSON.stringify({card: !!document.querySelector('[data-testid=ask-card]'),
+    about: document.querySelector('[data-testid=ask-card] [aria-label=\"Approval request\"]')?.textContent || '',
+    alerts: Array.from(document.querySelectorAll('[role=alert]')).map((e) => e.textContent).join(' | '),
+    transcript: document.querySelector('[data-testid=chat-transcript]')?.textContent || ''})" |
+    python3 -c 'import json,sys; print(json.dumps(json.loads(json.loads(sys.stdin.read()))))'
+  SH
+  chmod +x "$AFT_WORK_DIR/asks-card"
+  # asks-tabs <deadline epoch s> <python condition on a, b> <message>: polls both
+  # tabs at once until the condition holds; fails at the deadline with both
+  # states. A reading counts only if both tabs answered by the deadline.
+  cat > "$AFT_WORK_DIR/asks-tabs" <<'SH'
+  #!/bin/sh
+  python3 - "$AFT_WORK_DIR/asks-card" "$AFT_SESSION" "$AFT_SESSION-tab2" "$@" <<'PY'
+  import json, os, signal, subprocess, sys, time
+  card, sa, sb, deadline, cond, msg = sys.argv[1:7]
+  deadline = float(deadline)
+  a = b = None
+  while time.time() <= deadline:
+      ps = [subprocess.Popen([card, s], stdout=subprocess.PIPE, text=True, start_new_session=True) for s in (sa, sb)]
+      try:
+          outs = [p.communicate(timeout=max(0.1, deadline - time.time()))[0] for p in ps]
+          a, b = [json.loads(o) for o in outs]
+      except (subprocess.TimeoutExpired, ValueError):
+          a = b = None
+      finally:
+          for p in ps:
+              if p.poll() is None:  # a reading still running at the deadline
+                  try:
+                      os.killpg(p.pid, signal.SIGKILL)  # its whole pipeline, agent-browser too
+                  except ProcessLookupError:
+                      pass  # it exited after the poll
+              p.wait()
+      if a is not None and time.time() <= deadline and eval(cond):
+          print("held %.1f s before the deadline" % (deadline - time.time()))
+          sys.exit(0)
+      time.sleep(0.2)
+  sys.exit("%s; last reading, tab A: %s; tab B: %s" % (msg, a, b))
+  PY
+  SH
+  chmod +x "$AFT_WORK_DIR/asks-tabs"
+  # asks-idle <agent id>: waits up to 30 s for the agent to be idle.
+  cat > "$AFT_WORK_DIR/asks-idle" <<'SH'
+  #!/bin/sh
+  for _ in $(seq 1 60); do
+    st="$(curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-ASKS/v1/agents/$1" | python3 -c 'import json,sys; print(json.load(sys.stdin)["state"])')"
+    [ "$st" = idle ] && exit 0
+    sleep 0.5
+  done
+  echo "the agent is $st, not idle, 30 s after the answer" >&2; exit 1
+  SH
+  chmod +x "$AFT_WORK_DIR/asks-idle"
+  # asks-events <agent id> <out>: the agent's saved events.
+  cat > "$AFT_WORK_DIR/asks-events" <<'SH'
+  #!/bin/sh
+  curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-ASKS/v1/agents/$1/events?limit=1000" > "$2"
+  SH
+  chmod +x "$AFT_WORK_DIR/asks-events"
+teardown: |
+  # A test that failed before its last step leaves its second tab open.
+  left=0
+  while read -r s; do [ -n "$s" ] && { "$AFT_WORK_DIR/asks-close-tab2" "$s" || left=1; }; done < "$AFT_WORK_DIR/asks-tab2-sessions"
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-ASKS" >/dev/null
+  exit $left
+
+tests:
+  - name: A1 two-tab ask race - two answers sent at once get one 204 and one 409 already_answered, both tabs drop the card, and a replay is idempotent
+    intent: Two Agent API clients answer the same approval at the same moment while an operator watches the agent's chat in two tabs; exactly one answer wins, the other client is told which request answered, both of the operator's tabs drop the card within 5 s with no error, the winner's retry is idempotent, a changed retry conflicts, and the agent runs the command once
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-ASKS/v1/agents
+          headers: { Idempotency-Key: "agv1-a1-${RUN_ID:-local}" }
+          body: { preset: pr-review-interactive, name: "agv1-a1-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-asks-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1A1Id
+        intent: "An API client creates an OpenCode agent whose preset asks before running a shell command"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1A1Id")"
+          "$AFT_WORK_DIR/asks-script" "$id" A1
+          url="$AFT_BASE_URL/ws/E2E-AGV1-ASKS/chat/$id"
+          agent-browser --session "$AFT_SESSION" open "$url"
+          "$AFT_WORK_DIR/asks-tab2" open "$url" >/dev/null
+        intent: "The harness scripts a turn that asks to run a shell command, and the operator opens the agent's chat in two tabs"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "The operator waits until the first tab's chat is ready"
+      - fill: { label: Message, value: "run the check" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=ask-card] [aria-label="Approval request"]')?.textContent || '').includes('echo AGV1-A1-RAN')
+        budget: 90000
+        intent: "The operator waits until the first tab shows the approval card with the command it asks to run"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1A1Id")"
+          "$AFT_WORK_DIR/asks-tabs" "$(python3 -c 'import time; print(time.time() + 30)')" \
+            "'echo AGV1-A1-RAN' in a['about'] and 'echo AGV1-A1-RAN' in b['about']" "the two tabs never both showed the card"
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-ASKS/v1/agents/$id" |
+            python3 -c 'import json,sys; a=json.load(sys.stdin)["open_asks"]; assert len(a)==1 and a[0]["type"]=="approval", a; print(a[0]["id"])' > "$AFT_WORK_DIR/agv1-a1-ask"
+        intent: "The operator waits until both tabs show the same card, and an API client reads the one open ask's id"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1A1Id")"; ask="$(cat "$AFT_WORK_DIR/agv1-a1-ask")"
+          url="$AFT_BASE_URL/api/workspaces/E2E-AGV1-ASKS/v1/agents/$id/asks/$ask"
+          # Two clients, each already connected, released together by one
+          # barrier. Each records when its request was written to the socket
+          # and when its response was read.
+          python3 - "$url" "$AFT_WORK_DIR" "${RUN_ID:-local}" <<'PY'
+          import http.client, json, os, sys, threading, time, urllib.parse
+          url, d, run = sys.argv[1:4]
+          u = urllib.parse.urlsplit(url)
+          gate = threading.Barrier(2)
+          def send(t):
+              conn = http.client.HTTPConnection(u.hostname, u.port, timeout=60)
+              conn.connect()
+              gate.wait()
+              conn.request("POST", u.path, body=b'{"decision":"allow_once"}',
+                           headers={"Content-Type": "application/json", "Idempotency-Key": "agv1-a1-client-%s-%s" % (t, run)})
+              sent = time.time()
+              r = conn.getresponse()
+              code, body = r.status, r.read().decode()
+              done = time.time()
+              conn.close()
+              json.dump({"code": code, "body": body, "sent": sent, "done": done}, open(os.path.join(d, "agv1-a1-%s.json" % t), "w"))
+          ts = [threading.Thread(target=send, args=(t,)) for t in "ab"]
+          for x in ts: x.start()
+          for x in ts: x.join()
+          PY
+          python3 - "$AFT_WORK_DIR" "${RUN_ID:-local}" <<'PY'
+          import json, os, sys
+          d, run = sys.argv[1:3]
+          res = {t: json.load(open(os.path.join(d, "agv1-a1-%s.json" % t))) for t in "ab"}
+          got = {t: (str(r["code"]), r["body"]) for t, r in res.items()}
+          assert max(r["sent"] for r in res.values()) < min(r["done"] for r in res.values()), \
+              "both requests must be on the wire before either response is read: %s" % res
+          print(got)
+          assert sorted(c for c, _ in got.values()) == ["204", "409"], "want one 204 and one 409, got %s" % got
+          win = [t for t, (c, _) in got.items() if c == "204"][0]
+          lose = "b" if win == "a" else "a"
+          err = json.loads(got[lose][1])
+          assert err["code"] == "already_answered", err
+          assert ("agv1-a1-client-%s-%s" % (win, run)) in err["error"], "the 409 does not name the winning request: %s" % err
+          open(os.path.join(d, "agv1-a1-winner"), "w").write(win)
+          # The 5 s bound for the tabs starts when the winning answer returned.
+          open(os.path.join(d, "agv1-a1-deadline"), "w").write(str(res[win]["done"] + 5))
+          PY
+        intent: "Two API clients answer the ask at the same moment with different request ids; one gets 204 and the other 409 already_answered naming the winner's request"
+      - run: |
+          set -e
+          "$AFT_WORK_DIR/asks-tabs" "$(cat "$AFT_WORK_DIR/agv1-a1-deadline")" \
+            "not a['card'] and not b['card'] and not a['alerts'] and not b['alerts']" \
+            "both tabs must drop the card with no error within 5 s of the winning answer"
+        intent: "The operator sees both tabs drop the card within 5 s of the winning answer, with no error shown"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1A1Id")"; ask="$(cat "$AFT_WORK_DIR/agv1-a1-ask")"; win="$(cat "$AFT_WORK_DIR/agv1-a1-winner")"
+          url="$AFT_BASE_URL/api/workspaces/E2E-AGV1-ASKS/v1/agents/$id/asks/$ask"
+          key="agv1-a1-client-$win-${RUN_ID:-local}"
+          same="$(curl -s -o "$AFT_WORK_DIR/agv1-a1-same.body" -w '%{http_code}' -X POST "$url" -H "Content-Type: application/json" -H "Idempotency-Key: $key" -d '{"decision":"allow_once"}')"
+          changed="$(curl -s -o "$AFT_WORK_DIR/agv1-a1-changed.body" -w '%{http_code}' -X POST "$url" -H "Content-Type: application/json" -H "Idempotency-Key: $key" -d '{"decision":"deny"}')"
+          echo "same=$same changed=$changed $(cat "$AFT_WORK_DIR/agv1-a1-changed.body")"
+          [ "$same" = 204 ] || { echo "the winner's replay got $same: $(cat "$AFT_WORK_DIR/agv1-a1-same.body")" >&2; exit 1; }
+          [ "$changed" = 409 ] || { echo "the winner's changed replay got $changed" >&2; exit 1; }
+          python3 -c 'import json,sys; e=json.load(open(sys.argv[1])); assert e["code"]=="conflict", e' "$AFT_WORK_DIR/agv1-a1-changed.body"
+        intent: "The winning API client retries with the same request id and answer (204), then with the same id and a changed answer (409 conflict)"
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-A1-AFTER')
+        budget: 60000
+        intent: "The operator waits until the agent replies after running the command"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1A1Id")"; ask="$(cat "$AFT_WORK_DIR/agv1-a1-ask")"
+          "$AFT_WORK_DIR/asks-idle" "$id"
+          "$AFT_WORK_DIR/asks-events" "$id" "$AFT_WORK_DIR/agv1-a1-events.json"
+          [ -n "${AFT_EMU_SCENARIOS:-}" ] || curl -sf "$AFT_FAKE_MODEL_URL/__requests" > "$AFT_WORK_DIR/agv1-a1-requests.json"
+          python3 - "$AFT_WORK_DIR/agv1-a1-events.json" "$ask" "$AFT_WORK_DIR/agv1-a1-requests.json" <<'PY'
+          import json, os, sys
+          ev = json.load(open(sys.argv[1]))["events"]
+          ask = sys.argv[2]
+          resolved = [e for e in ev if e["kind"] == "ask.resolved" and e["payload"].get("askId") == ask]
+          assert len(resolved) == 1, "want one ask.resolved for %s, got %d: %s" % (ask, len(resolved), [e["kind"] for e in ev])
+          # Loom's saved events: the command's tool item finished once, with its output.
+          ran = [e for e in ev if e["kind"] == "item.completed" and (e["payload"].get("tool") or {}).get("output", "").strip() == "AGV1-A1-RAN"]
+          assert len(ran) == 1, "want the command's result once in the events, got %d" % len(ran)
+          if os.path.exists(sys.argv[3]):
+              # Real OpenCode: the turn's last model request carries its whole history.
+              reqs = [r for r in json.load(open(sys.argv[3]))["requests"] if "AGV1-A1-RAN" in json.dumps(r.get("messages", []))]
+              assert reqs, "the command's result never reached the model"
+              tools = [m for m in reqs[-1]["messages"] if m.get("role") == "tool"]
+              assert len(tools) == 1 and "AGV1-A1-RAN" in json.dumps(tools[0].get("content")), \
+                  "want the model to see the command's one result, got %s" % tools
+          PY
+        intent: "An API client checks the agent is idle with one ask.resolved for the ask and one result of the command, which the model saw once"
+      - run: |
+          "$AFT_WORK_DIR/asks-close-tab2"
+        intent: "The operator closes the second tab, and it is gone"
+
+  - name: A2 two-tab UI clicks - Approve in one tab and Decline in the other at once give one outcome and no error in either tab
+    intent: An operator clicks Approve on an approval card in one tab while a second operator clicks Decline on the same card in another tab at the same moment; both answers reach the server, one wins and the other is told already_answered, both cards close, neither tab shows an error, and the agent and both tabs follow only the winning answer
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-ASKS/v1/agents
+          headers: { Idempotency-Key: "agv1-a2-${RUN_ID:-local}" }
+          body: { preset: pr-review-interactive, name: "agv1-a2-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-asks-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1A2Id
+        intent: "An API client creates an OpenCode agent whose preset asks before running a shell command"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1A2Id")"
+          "$AFT_WORK_DIR/asks-script" "$id" A2
+          url="$AFT_BASE_URL/ws/E2E-AGV1-ASKS/chat/$id"
+          agent-browser --session "$AFT_SESSION" open "$url"
+          "$AFT_WORK_DIR/asks-tab2" open "$url" >/dev/null
+        intent: "The harness scripts a turn that asks to run a shell command, and the two operators open the agent's chat in their tabs"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "The first operator waits until the chat is ready"
+      - fill: { label: Message, value: "run the check" }
+      - press: Enter
+      - run: |
+          set -e
+          "$AFT_WORK_DIR/asks-tabs" "$(python3 -c 'import time; print(time.time() + 90)')" \
+            "'echo AGV1-A2-RAN' in a['about'] and 'echo AGV1-A2-RAN' in b['about']" "the two tabs never both showed the card"
+        intent: "Both operators wait until their tab shows the approval card with the command it asks to run"
+      - run: |
+          set -e
+          # Network tracking is on and cleared in both tabs before the shared
+          # instant is chosen; each tab arms its click for that instant, and
+          # the arm fails if the instant has already passed.
+          for s in "$AFT_SESSION" "$AFT_SESSION-tab2"; do
+            agent-browser --session "$s" network requests >/dev/null
+            agent-browser --session "$s" network requests --clear >/dev/null
+          done
+          at="$(python3 -c 'import time; print(int(time.time() * 1000) + 1500)')"
+          arm() {
+            agent-browser --session "$1" eval "(() => { window.__agv1a2 = null; const wait = $at - Date.now();
+                if (wait <= 0) return 'late';
+                setTimeout(() => {
+                  const b = Array.from(document.querySelectorAll('[data-testid=ask-card] button')).find((e) => e.textContent.trim() === '$2');
+                  if (!b || b.disabled) { window.__agv1a2 = JSON.stringify({how: 'missed'}); return; }
+                  const t = Date.now(); b.click(); window.__agv1a2 = JSON.stringify({how: 'clicked', t}); }, wait);
+                return 'armed'; })()" > "$AFT_WORK_DIR/agv1-a2-arm-$3"
+          }
+          arm "$AFT_SESSION" Approve A & arm "$AFT_SESSION-tab2" Decline B & wait
+          python3 - "$AFT_WORK_DIR" "$at" "$AFT_SESSION" "$AFT_SESSION-tab2" <<'PY'
+          import json, subprocess, sys, time
+          d, at, sa, sb = sys.argv[1:5]
+          at = int(at)
+          for t in "AB":
+              r = open("%s/agv1-a2-arm-%s" % (d, t)).read().strip()
+              assert r == '"armed"', "tab %s armed its click too late: %s" % (t, r)
+          clicks, deadline = {}, time.time() + 10
+          while len(clicks) < 2 and time.time() < deadline:
+              for t, s in (("A", sa), ("B", sb)):
+                  if t not in clicks:
+                      v = json.loads(subprocess.run(["agent-browser", "--session", s, "eval", "window.__agv1a2"],
+                                                    capture_output=True, text=True).stdout or "null")
+                      if v:
+                          clicks[t] = json.loads(v)
+              time.sleep(0.1)
+          print("at=%d clicks=%s" % (at, clicks))
+          assert len(clicks) == 2, "a tab never fired its click: %s" % clicks
+          for t, c in clicks.items():
+              assert c["how"] == "clicked" and c["t"] >= at, "tab %s did not click at the shared instant: %s" % (t, c)
+          assert abs(clicks["A"]["t"] - clicks["B"]["t"]) <= 100, "the clicks were not at one instant: %s" % clicks
+          PY
+        intent: "The first operator clicks Approve and the second clicks Decline at the same instant"
+      - run: |
+          set -e
+          # Each tab's one ask POST, read until both responses (and the 409's body) are complete.
+          python3 - "$AFT_WORK_DIR" "$AFT_SESSION" "$AFT_SESSION-tab2" <<'PY'
+          import json, subprocess, sys, time
+          d, sa, sb = sys.argv[1:4]
+          def ab(*args):
+              out = subprocess.run(["agent-browser", "--json", *args], capture_output=True, text=True).stdout
+              return json.loads(out)["data"]
+          def done(p):
+              if str(p.get("status")) == "204":
+                  return True
+              try:
+                  return "code" in json.loads(p.get("responseBody") or "")
+              except ValueError:
+                  return False
+          post, deadline = {}, time.time() + 15
+          while len(post) < 2 and time.time() < deadline:
+              for t, s in (("A", sa), ("B", sb)):
+                  if t in post:
+                      continue
+                  rs = ab("--session", s, "network", "requests", "--filter", "/asks/", "--method", "POST")["requests"]
+                  assert len(rs) <= 1, "tab %s sent %d answers: %s" % (t, len(rs), rs)
+                  if rs and rs[0].get("status"):
+                      p = ab("--session", s, "network", "request", rs[0]["requestId"])
+                      if done(p):
+                          post[t] = p
+              time.sleep(0.2)
+          assert len(post) == 2, "both tabs' answers never completed: %s" % sorted(post)
+          json.dump(post, open("%s/agv1-a2-posts.json" % d, "w"))
+          for t, p in post.items():
+              key = {k.lower(): v for k, v in p["headers"].items()}.get("idempotency-key")
+              print(t, p["status"], p["postData"], key, (p.get("responseBody") or "")[:200])
+          assert sorted(str(p["status"]) for p in post.values()) == ["204", "409"], "want one 204 and one 409: %s" % {t: p["status"] for t, p in post.items()}
+          win = [t for t, p in post.items() if str(p["status"]) == "204"][0]
+          lose = "B" if win == "A" else "A"
+          err = json.loads(post[lose]["responseBody"])
+          key = {k.lower(): v for k, v in post[win]["headers"].items()}["idempotency-key"]
+          assert err["code"] == "already_answered" and key in err["error"], "the loser's 409 should name the winner's request %s: %s" % (key, err)
+          sent = {t: json.loads(p["postData"])["decision"] for t, p in post.items()}
+          assert sent == {"A": "allow_once", "B": "deny"}, "Approve must send allow_once and Decline deny: %s" % sent
+          open("%s/agv1-a2-winner" % d, "w").write(win)
+          PY
+        intent: "Both tabs' answers reached the server: one got 204 and the other 409 already_answered naming the winning request"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1A2Id")"
+          "$AFT_WORK_DIR/asks-idle" "$id"
+          if [ "$(cat "$AFT_WORK_DIR/agv1-a2-winner")" = A ]; then
+            cond="all('AGV1-A2-AFTER' in t['transcript'] and 'Turn declined' not in t['transcript'] for t in (a, b))"
+          else
+            cond="all('Turn declined' in t['transcript'] and 'AGV1-A2-AFTER' not in t['transcript'] for t in (a, b))"
+          fi
+          "$AFT_WORK_DIR/asks-tabs" "$(python3 -c 'import time; print(time.time() + 10)')" \
+            "not a['card'] and not b['card'] and not a['alerts'] and not b['alerts'] and $cond" \
+            "each tab must drop the card, show no error, and show only the winning answer's outcome"
+        intent: "Each operator's tab drops the card, shows no error, and shows only the winning answer's outcome"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1A2Id")"
+          "$AFT_WORK_DIR/asks-events" "$id" "$AFT_WORK_DIR/agv1-a2-events.json"
+          python3 - "$AFT_WORK_DIR/agv1-a2-events.json" "$(cat "$AFT_WORK_DIR/agv1-a2-winner")" <<'PY'
+          import json, sys
+          ev = json.load(open(sys.argv[1]))["events"]
+          win = sys.argv[2]
+          resolved = [e for e in ev if e["kind"] == "ask.resolved"]
+          assert len(resolved) == 1, "want one ask.resolved, got %d" % len(resolved)
+          ran = any(e["kind"] == "item.completed" and (e["payload"].get("tool") or {}).get("output", "").strip() == "AGV1-A2-RAN" for e in ev)
+          after = any(e["kind"] == "item.completed" and e["payload"].get("text") == "AGV1-A2-AFTER" for e in ev)
+          ended = [e["payload"].get("stopReason") for e in ev if e["kind"] == "agent.turn_completed"]
+          print("winner=%s ran=%s after=%s ended=%s" % (win, ran, after, ended))
+          if win == "A":
+              assert ran and after and ended == ["completed"], "Approve won, so the command runs and the turn completes once"
+          else:
+              assert not ran and not after and ended == ["declined"], "Decline won, so nothing runs and the turn ends declined once"
+          PY
+        intent: "An API client checks there is one ask.resolved and the agent followed only the winning answer"
+      - run: |
+          "$AFT_WORK_DIR/asks-close-tab2"
+        intent: "The second operator closes their tab, and it is gone"

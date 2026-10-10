@@ -26,6 +26,7 @@ type Step struct {
 	About     string                 // what the Ask asks about (its ask.opened Text)
 	Questions []loomharness.Question // the Ask's questions
 	Fail      string                 // ends the turn failed with this error
+	Failure   *loomharness.Failure   // the Fail's class
 	Crash     bool                   // the harness process dies here, mid-turn
 	Gap       bool                   // the live Feed misses this step's event (it gets feed.gap); Messages still has it
 	Usage     *loomharness.Usage     // emits a usage event with these counts
@@ -305,7 +306,7 @@ func (h *Harness) run(s *session) {
 			h.emit(s, loomharness.Event{Type: loomharness.EventAskOpened, AskID: st.Ask, ItemKind: kind, Text: st.About, Questions: st.Questions}, !st.Gap)
 			return
 		case st.Fail != "":
-			h.endTurn(s, "failed", st.Fail)
+			h.endTurn(s, "failed", st.Fail, st.Failure, !st.Gap)
 			return
 		case st.Usage != nil:
 			h.emit(s, loomharness.Event{Type: loomharness.EventUsage, Usage: *st.Usage}, !st.Gap)
@@ -319,17 +320,17 @@ func (h *Harness) run(s *session) {
 			h.emit(s, loomharness.Event{Type: loomharness.EventDelta, ItemID: s.turnID + "/msg", ItemKind: "message", Text: st.Delta}, !st.Gap)
 		}
 	}
-	h.endTurn(s, "completed", "")
+	h.endTurn(s, "completed", "", nil, true)
 }
 
-func (h *Harness) endTurn(s *session, reason, errText string) {
+func (h *Harness) endTurn(s *session, reason, errText string, failure *loomharness.Failure, live bool) {
 	if s.ask != "" {
 		h.emit(s, loomharness.Event{Type: loomharness.EventAskLost, AskID: s.ask}, true)
 		s.ask = ""
 	}
 	s.running, s.crashed = false, false
 	s.lastInterrupt = reason == "cancelled"
-	h.emit(s, loomharness.Event{Type: loomharness.EventTurnCompleted, StopReason: reason, Error: errText}, true)
+	h.emit(s, loomharness.Event{Type: loomharness.EventTurnCompleted, StopReason: reason, Error: errText, Failure: failure}, live)
 }
 
 // lookup returns the live session for ref, under h.mu.
@@ -401,7 +402,7 @@ func (x *sessionHandle) Resume(_ context.Context, l loomharness.Launch, rules []
 			x.h.emit(s, loomharness.Event{Type: loomharness.EventTurnResumed}, true)
 			x.h.run(s)
 		} else {
-			x.h.endTurn(s, "cancelled", "")
+			x.h.endTurn(s, "cancelled", "", nil, true)
 		}
 	}
 	return s.ref, nil
@@ -456,7 +457,7 @@ func (x *sessionHandle) Interrupt(context.Context) (bool, error) {
 	if err != nil || !s.running || s.crashed {
 		return false, err
 	}
-	x.h.endTurn(s, "cancelled", "")
+	x.h.endTurn(s, "cancelled", "", nil, true)
 	return true, nil
 }
 

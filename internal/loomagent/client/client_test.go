@@ -35,6 +35,8 @@ func (workspace) CheckBase(context.Context, string, string) error { return nil }
 
 func (workspace) Remove(context.Context, loomagent.WorkspaceSpec) error { return nil }
 
+func (workspace) Checkpoint(context.Context, loomagent.WorkspaceSpec, string) error { return nil }
+
 func (workspace) Publish(context.Context, loomagent.PublishRequest) (loomagent.PublishResult, error) {
 	return loomagent.PublishResult{}, nil
 }

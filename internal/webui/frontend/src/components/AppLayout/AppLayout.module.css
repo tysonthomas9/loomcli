@@ -79,6 +79,11 @@
   display: contents;
 }
 
+/* The phone drawer's backdrop (MOB2); there is no drawer above phone width. */
+.drawerScrim {
+  display: none;
+}
+
 .main {
   flex: 1;
   min-width: 0; /* Prevents flex item from overflowing */
@@ -112,6 +117,40 @@
 
   .sidebarSlot {
     display: none;
+  }
+
+  /* The sidebar as a drawer between the header and the bottom rail, which
+     both stay usable. */
+  .sidebarSlot[data-open] {
+    position: fixed;
+    top: var(--unified-header-height);
+    bottom: var(--nav-bottom-height);
+    left: 0;
+    /* Above the phone issue view and panels (z-overlay), under modals. */
+    z-index: calc(var(--z-overlay) + 3);
+    display: flex;
+    width: min(320px, 85vw);
+    box-shadow: var(--shadow-lg);
+  }
+
+  .sidebarSlot[data-open] > * {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+  }
+
+  .drawerScrim {
+    position: fixed;
+    top: var(--unified-header-height);
+    bottom: var(--nav-bottom-height);
+    left: 0;
+    right: 0;
+    z-index: calc(var(--z-overlay) + 2);
+    display: block;
+    padding: 0;
+    border: none;
+    background: rgb(0 0 0 / 0.35);
+    cursor: default;
   }
 }
 

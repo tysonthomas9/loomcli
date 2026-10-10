@@ -394,6 +394,48 @@ func (e *toolError) text() string {
 	return e.Message
 }
 
+// failure is a failed execution's class, from its error type; nil when it
+// has no error. OpenCode 2.0.19 types a provider failure by its reason:
+// RateLimit, QuotaExceeded, Authentication, Transport, ProviderInternal.
+func (e *toolError) failure() *loomharness.Failure {
+	if e == nil {
+		return nil
+	}
+	switch e.Type {
+	case "provider.rate-limit", "provider.quota":
+		return &loomharness.Failure{Class: loomharness.FailureUsageLimit, Retryable: true}
+	case "provider.auth":
+		return &loomharness.Failure{Class: loomharness.FailureAuth}
+	case "provider.transport", "provider.timeout", "provider.connect", "provider.internal":
+		return &loomharness.Failure{Class: loomharness.FailureProvider, Retryable: true}
+	}
+	return &loomharness.Failure{Class: loomharness.FailureProvider}
+}
+
+// failedStep is a failed assistant step's error type; "" for any other message.
+func (m message) failedStep() string {
+	var err toolError
+	if m.Type != "assistant" || json.Unmarshal(m.Error, &err) != nil {
+		return ""
+	}
+	return err.Type
+}
+
+// turnEvents is m's events in turn; a failed idle marker is classed by
+// failed, the error type of the turn's failed step, which
+// session.step.failed stores on the assistant message in the shape
+// session.execution.failed gives the live feed.
+func (m message) turnEvents(ref loomharness.NativeRef, turn, failed string) []loomharness.Event {
+	out := m.events(ref)
+	for i := range out {
+		out[i].TurnID = turn
+		if out[i].Type == loomharness.EventTurnCompleted && out[i].StopReason == "failed" && failed != "" {
+			out[i].Failure = (&toolError{Type: failed}).failure()
+		}
+	}
+	return out
+}
+
 // toolInput is a tool call's input object as text; "" when it has none.
 func toolInput(raw json.RawMessage) string {
 	switch string(raw) {
@@ -492,7 +534,7 @@ func (m *mapper) fill(e *loomharness.Event, w wireEvent) bool {
 		}
 	case "session.execution.succeeded", "session.execution.failed":
 		e.Type, e.StopReason = loomharness.EventTurnCompleted, stopReason(lastDot(w.Type))
-		e.Error = d.Error.text()
+		e.Error, e.Failure = d.Error.text(), d.Error.failure()
 	case "permission.asked":
 		e.Type, e.AskID = loomharness.EventAskOpened, d.ID
 		e.Text = permissionAbout(d.Action, d.Message, d.Resources, d.Metadata.Files)

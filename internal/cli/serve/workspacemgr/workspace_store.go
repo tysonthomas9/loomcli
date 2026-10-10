@@ -33,6 +33,27 @@ func BuildStoreBackedCreateWorkspace(s storepkg.Store) service.WorkspaceCreateFn
 	}
 }
 
+// FlushAfterCreate makes a created workspace durable before the API returns.
+// The embedded store otherwise reaches disk only on its periodic snapshot or a
+// clean shutdown, so a hard kill right after the create lost the workspace.
+func FlushAfterCreate(create service.WorkspaceCreateFn, flush func(context.Context) error) service.WorkspaceCreateFn {
+	if create == nil {
+		return nil
+	}
+	return func(ctx context.Context, req service.WorkspaceCreateRequest) (service.WorkspaceCreateResult, error) {
+		res, err := create(ctx, req)
+		if err == nil {
+			if ferr := flush(ctx); ferr != nil && ctx.Err() != nil {
+				return res, ctx.Err()
+			} else if ferr != nil {
+				slog.Warn("workspace created but not yet flushed to disk", "workspace", res.WorkspaceID, "err", ferr)
+				service.AddCreateWarning(ctx, "workspace created but not yet saved to disk; a crash in the next 30s may lose it: "+ferr.Error())
+			}
+		}
+		return res, err
+	}
+}
+
 // BuildStoreBackedAddRepos returns a repo attachment function for fleet-db
 // store mode. It creates git worktrees, then registers those repos in the
 // store and local state cache as one rollback-aware operation.

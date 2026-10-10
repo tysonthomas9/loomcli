@@ -1,6 +1,7 @@
 package loomagent
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -39,6 +40,7 @@ type createEnv struct {
 	path string // the store's file
 	h    *openRec
 	ws   *fakeWorkspace
+	name string // the harness h is wired as; "" is opencode
 }
 
 func newCreateEnv(t *testing.T) *createEnv {
@@ -55,7 +57,7 @@ func newCreateEnv(t *testing.T) *createEnv {
 // service starts a service on e, as after a loom serve (re)start.
 func (e *createEnv) service(cfg ServiceConfig) *Service {
 	cfg.Store, cfg.Events, cfg.Workspace, cfg.WorkspaceID = e.st, NewEventLog(e.st), e.ws, "ws"
-	cfg.Harnesses = map[string]loomharness.Harness{"opencode": e.h}
+	cfg.Harnesses = map[string]loomharness.Harness{cmp.Or(e.name, "opencode"): e.h}
 	if cfg.Bridge == nil { // a host bridge that registers no capabilities
 		cfg.Bridge = func(context.Context, Preset) (BridgeCaps, error) { return BridgeCaps{}, nil }
 	}

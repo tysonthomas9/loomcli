@@ -6,6 +6,12 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import "@testing-library/jest-dom";
 
+import {
+  KeyboardShortcutProvider,
+  LAYER_TERMINAL_PANEL,
+  useRegisterEscapeLayer,
+} from "@/hooks/ui/useKeyboardShortcuts";
+
 import { AetherModal } from "../AetherModal";
 
 function renderModal(
@@ -95,5 +101,70 @@ describe("AetherModal: explicit close controls", () => {
     fireEvent.click(screen.getByTestId("test-modal-close"));
 
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+function LowerLayer({ onEscape }: { onEscape: () => void }): null {
+  useRegisterEscapeLayer(LAYER_TERMINAL_PANEL, onEscape, true);
+  return null;
+}
+
+describe("AetherModal: Escape", () => {
+  it("closes on Escape through the app's Escape layers, also from a field", () => {
+    const onClose = vi.fn();
+    render(
+      <KeyboardShortcutProvider>
+        <AetherModal isOpen title="Test modal" onClose={onClose}>
+          <input aria-label="Name" />
+        </AetherModal>
+      </KeyboardShortcutProvider>,
+    );
+    const name = screen.getByLabelText("Name");
+    name.focus();
+
+    fireEvent.keyDown(name, { key: "Escape" });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes before a lower layer (the agents drawer) under it", () => {
+    const onClose = vi.fn();
+    const onDrawerEscape = vi.fn();
+    render(
+      <KeyboardShortcutProvider>
+        <LowerLayer onEscape={onDrawerEscape} />
+        <AetherModal isOpen title="Test modal" onClose={onClose}>
+          <p>Modal body</p>
+        </AetherModal>
+      </KeyboardShortcutProvider>,
+    );
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onDrawerEscape).not.toHaveBeenCalled();
+  });
+
+  it("ignores Escape when closeOnEscape is false, and so do layers under it", () => {
+    const onClose = vi.fn();
+    const onDrawerEscape = vi.fn();
+    render(
+      <KeyboardShortcutProvider>
+        <LowerLayer onEscape={onDrawerEscape} />
+        <AetherModal
+          isOpen
+          title="Test modal"
+          onClose={onClose}
+          closeOnEscape={false}
+        >
+          <p>Modal body</p>
+        </AetherModal>
+      </KeyboardShortcutProvider>,
+    );
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onDrawerEscape).not.toHaveBeenCalled();
   });
 });

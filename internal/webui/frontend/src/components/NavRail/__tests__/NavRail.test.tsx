@@ -499,6 +499,46 @@ describe("NavRail", () => {
       });
     });
 
+    // App rebuilds the workspaces array on every render: a new array with the
+    // same workspaces must not scroll the switcher back to the active one
+    // after the user scrolled it (MB1c).
+    it("does not re-scroll for a new array of the same workspaces", () => {
+      const set = vi.fn();
+      const saved = Object.getOwnPropertyDescriptor(
+        Element.prototype,
+        "scrollLeft",
+      )!;
+      Object.defineProperty(Element.prototype, "scrollLeft", {
+        configurable: true,
+        get: () => 0,
+        set,
+      });
+      const props = {
+        activeView: "kanban" as const,
+        onChange: () => {},
+        activeWorkspaceId: "ws-7",
+      };
+      try {
+        const { rerender } = render(
+          <NavRail {...props} workspaces={manyWorkspaces} />,
+        );
+        // jsdom's zero rects read as "active is cut on the left".
+        expect(set).toHaveBeenCalled();
+        set.mockClear();
+        rerender(<NavRail {...props} workspaces={[...manyWorkspaces]} />);
+        expect(set).not.toHaveBeenCalled();
+        rerender(
+          <NavRail
+            {...props}
+            workspaces={[...manyWorkspaces, { id: "ws-8", name: "New" }]}
+          />,
+        );
+        expect(set).toHaveBeenCalled();
+      } finally {
+        Object.defineProperty(Element.prototype, "scrollLeft", saved);
+      }
+    });
+
     it("renders workspace selector with dividers and pinned add button", () => {
       render(
         <NavRail
@@ -665,6 +705,42 @@ describe("NavRail", () => {
       expect(
         screen.queryByLabelText("has unread output"),
       ).not.toBeInTheDocument();
+    });
+  });
+
+  describe("agents drawer button (MOB2)", () => {
+    it("is absent without onAgentsToggle", () => {
+      render(<NavRail activeView="home" onChange={() => {}} />);
+      expect(
+        screen.queryByRole("button", { name: "Agents" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("toggles the drawer and reports whether it is open", () => {
+      const onAgentsToggle = vi.fn();
+      const { rerender } = render(
+        <NavRail
+          activeView="home"
+          onChange={() => {}}
+          onAgentsToggle={onAgentsToggle}
+        />,
+      );
+      const button = screen.getByRole("button", { name: "Agents" });
+      expect(button).toHaveAttribute("aria-expanded", "false");
+      // Only while open: closed, the drawer may not be in the page.
+      expect(button).not.toHaveAttribute("aria-controls");
+      fireEvent.click(button);
+      expect(onAgentsToggle).toHaveBeenCalledTimes(1);
+      rerender(
+        <NavRail
+          activeView="home"
+          onChange={() => {}}
+          onAgentsToggle={onAgentsToggle}
+          agentsOpen
+        />,
+      );
+      expect(button).toHaveAttribute("aria-expanded", "true");
+      expect(button).toHaveAttribute("aria-controls", "agents-drawer");
     });
   });
 });

@@ -68,7 +68,7 @@ const ok = (route: Route, data: unknown) =>
 // The app's API only: a glob like **/api/** also matches Vite's /src/api/ modules.
 const API = (path: string) => new RegExp(`^https?://[^/]+/api/${path}`);
 
-async function open(page: Page) {
+async function open(page: Page, agents = [agent]) {
   // Playwright matches the last route first: the catch-all goes first so no
   // request reaches a real server.
   await page.route(API(""), (r) => json(r, { error: "not found" }, 404));
@@ -96,14 +96,17 @@ async function open(page: Page) {
     } as unknown as typeof EventSource;
   });
   await page.route(API("workspaces/w1/v1/agents(\\?.*)?$"), (r) =>
-    json(r, { agents: [agent], next: "" }),
+    json(r, { agents, next: "" }),
   );
-  await page.route(API("workspaces/w1/v1/agents/a1/events"), (r) =>
-    json(r, { events: [], snapshot_seq: 0, next: 0, more: false }),
-  );
-  await page.route(API("workspaces/w1/v1/agents/a1(\\?.*)?$"), (r) =>
-    json(r, agent),
-  );
+  for (const a of agents) {
+    await page.route(API(`workspaces/w1/v1/agents/${a.agent_id}/events`), (r) =>
+      json(r, { events: [], snapshot_seq: 0, next: 0, more: false }),
+    );
+    await page.route(
+      API(`workspaces/w1/v1/agents/${a.agent_id}(\\?.*)?$`),
+      (r) => json(r, a),
+    );
+  }
   await page.goto("/ws/w1/chat/a1");
   await expect(page.getByRole("heading", { name: NAME })).toBeVisible();
   await expect(page.getByPlaceholder("Ask anything...")).toBeVisible();
@@ -302,6 +305,31 @@ function switcherView(page: Page) {
         )
         .map((m) => `${h.dataset.moreHint} hint over ${m.label}`);
     });
+    // MB1c: a hint is either a 44px button clear of every other button's tap
+    // area, or lets taps through to whatever is under it.
+    const buttons = Array.from(nav.querySelectorAll("button"));
+    for (const h of hints) {
+      const r = h.getBoundingClientRect();
+      const side = h.dataset.moreHint;
+      if (h.tagName !== "BUTTON") {
+        const top = document.elementFromPoint(
+          r.left + r.width / 2,
+          r.top + r.height / 2,
+        );
+        if (top && h.contains(top)) covered.push(`${side} hint takes taps`);
+        continue;
+      }
+      if (r.width < 43.5 || r.height < 43.5)
+        covered.push(`${side} button is ${r.width}x${r.height}`);
+      for (const b of buttons) {
+        if (b === h) continue;
+        const o = b.getBoundingClientRect();
+        const left = s.contains(b) ? Math.max(o.left, w.left) : o.left;
+        const right = s.contains(b) ? Math.min(o.right, w.right) : o.right;
+        if (r.left < right - 0.5 && r.right > left + 0.5)
+          covered.push(`${side} button over ${b.getAttribute("aria-label")}`);
+      }
+    }
     return {
       covered,
       scrollLeft: s.scrollLeft,
@@ -316,6 +344,7 @@ function switcherView(page: Page) {
 // 360: a small phone, the switcher's slot is narrower than one item and its
 // padding. 470: two items show with more off-screen.
 for (const size of [
+  { width: 320, height: 640 },
   { width: 360, height: 800 },
   { width: 390, height: 844 },
   { width: 470, height: 844 },
@@ -382,8 +411,22 @@ for (const size of [
     });
     expect(overlaps, "rail buttons under the switcher").toEqual([]);
 
-    // As loaded, with the open workspace scrolled into view.
+    // As loaded, with the open workspace scrolled into view, its 4px ring
+    // (and the same-size focus ring) not clipped (MB1c).
     await settled("as loaded");
+    const sw = (await switcher.boundingBox())!;
+    const active = (await switcher
+      .getByRole("button", { name: "Switch to LOCALMODE" })
+      .boundingBox())!;
+    expect(active.x - 4, "ring cut on the left").toBeGreaterThanOrEqual(sw.x);
+    expect(
+      active.x + active.width + 4,
+      "ring cut on the right",
+    ).toBeLessThanOrEqual(sw.x + sw.width);
+    expect(active.y - 4, "ring cut on top").toBeGreaterThanOrEqual(sw.y);
+    expect(active.y + active.height + 4, "ring cut below").toBeLessThanOrEqual(
+      sw.y + sw.height,
+    );
 
     // Wherever a scroll leaves it (odd offsets included), once it settles no
     // avatar or Add is partly shown, and each side with hidden items says so.
@@ -397,3 +440,377 @@ for (const size of [
     if (size.width < 557) expect(max).toBeGreaterThan(0);
   });
 }
+
+// MB1c: where the slot has room, the chevrons are buttons that scroll the
+// switcher one item at a time, so a mouse or keyboard can reach every
+// workspace without swiping.
+test("switcher at 557px: the chevrons scroll one item at a time", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 557, height: 844 });
+  await open(page);
+  const rail = page.locator('nav[aria-label="Primary"]');
+  const switcher = rail.getByRole("region", { name: "Workspace selector" });
+  const left = rail.getByRole("button", { name: "Scroll workspaces left" });
+  const right = rail.getByRole("button", { name: "Scroll workspaces right" });
+  const at = () => switcher.evaluate((s) => s.scrollLeft);
+  await switcher.evaluate((s) => s.scrollTo({ left: 0 }));
+  await expect(right).toBeVisible();
+  await expect(left).toHaveCount(0);
+  const max = await switcher.evaluate((s) => s.scrollWidth - s.clientWidth);
+  expect(max).toBeGreaterThan(41);
+  for (let x = 41; x <= max; x += 41) {
+    await right.click();
+    await expect.poll(at).toBe(x);
+  }
+  await expect(right).toHaveCount(0);
+  // The keyboard keeps its place when its chevron goes away at the end.
+  await switcher.evaluate((s, left) => s.scrollTo({ left }), max - 41);
+  await right.focus();
+  await page.keyboard.press("Enter");
+  await expect.poll(at).toBe(max);
+  await expect(left).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect.poll(at).toBe(max - 41);
+  if (process.env.MB1C_SHOTS)
+    await page.screenshot({ path: `${process.env.MB1C_SHOTS}/mb1c-557.png` });
+});
+
+// MB1c: one switch point, the slot fitting two 44px buttons and an item.
+// A phone (390) is below it: passive hints, swipe scrolls. The narrowest
+// desktop window (500, Chrome's minimum) is above it: buttons.
+// 485/486 put the slot at 125/126px, either side of the switch point.
+for (const { width, buttons } of [
+  { width: 390, buttons: false },
+  { width: 485, buttons: false },
+  { width: 486, buttons: true },
+  { width: 500, buttons: true },
+]) {
+  test(`switcher at ${width}px: chevrons are ${buttons ? "" : "not "}buttons`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await open(page);
+    const rail = page.locator('nav[aria-label="Primary"]');
+    const hint = rail.locator("[data-more-hint]").first();
+    await expect(hint).toBeVisible();
+    // The window still shows a whole item, ring room included.
+    const sw = (await rail
+      .getByRole("region", { name: "Workspace selector" })
+      .boundingBox())!;
+    expect(sw.width).toBeGreaterThanOrEqual(38);
+    const chevrons = rail.getByRole("button", { name: /^Scroll workspaces / });
+    if (!buttons) {
+      await expect(chevrons).toHaveCount(0);
+      await expect(hint).toHaveCSS("pointer-events", "none");
+      return;
+    }
+    await expect(chevrons.first()).toBeVisible();
+    const box = (await chevrons.first().boundingBox())!;
+    expect(box.width).toBeGreaterThanOrEqual(44);
+    expect(box.height).toBeGreaterThanOrEqual(44);
+  });
+}
+
+// MB1c: crossing the switch point (a window resize) keeps the user's own
+// scroll position instead of snapping back to the open workspace.
+test("switcher: resizing across the switch point keeps the scroll", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 500, height: 844 });
+  await open(page);
+  const rail = page.locator('nav[aria-label="Primary"]');
+  const switcher = rail.getByRole("region", { name: "Workspace selector" });
+  await expect(
+    rail.getByRole("button", { name: "Scroll workspaces left" }),
+  ).toBeVisible();
+  await switcher.evaluate((s) => s.scrollTo({ left: 0 }));
+  await expect.poll(() => switcher.evaluate((s) => s.scrollLeft)).toBe(0);
+  // The keyboard is on a chevron that becomes a passive hint.
+  await rail.getByRole("button", { name: "Scroll workspaces right" }).focus();
+  await page.setViewportSize({ width: 470, height: 844 });
+  await expect(
+    rail.getByRole("button", { name: /^Scroll workspaces / }),
+  ).toHaveCount(0);
+  // Focus moves to a workspace that shows, not to the document.
+  await expect(switcher.locator("button:focus")).toHaveCount(1);
+  // Let any effect-driven scroll land: two frames after the re-render.
+  await page.evaluate(
+    () =>
+      new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
+  );
+  expect(await switcher.evaluate((s) => s.scrollLeft)).toBe(0);
+});
+
+// MB1c: a scroll that hides the focused chevron (a trackpad, not a click)
+// hands the keyboard to the other one.
+test("switcher at 557px: scrolling away a focused chevron keeps focus", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 557, height: 844 });
+  await open(page);
+  const rail = page.locator('nav[aria-label="Primary"]');
+  const switcher = rail.getByRole("region", { name: "Workspace selector" });
+  await switcher.evaluate((s) => s.scrollTo({ left: 0 }));
+  const right = rail.getByRole("button", { name: "Scroll workspaces right" });
+  await right.focus();
+  await switcher.evaluate((s) => s.scrollTo({ left: s.scrollWidth }));
+  await expect(right).toHaveCount(0);
+  await expect(
+    rail.getByRole("button", { name: "Scroll workspaces left" }),
+  ).toBeFocused();
+});
+
+// MB1c: widening until every workspace fits removes both chevrons; the
+// keyboard lands on a workspace, not the document.
+test("switcher: widening until all fit keeps focus in the switcher", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 557, height: 844 });
+  await open(page);
+  const rail = page.locator('nav[aria-label="Primary"]');
+  const switcher = rail.getByRole("region", { name: "Workspace selector" });
+  await switcher.evaluate((s) => s.scrollTo({ left: 0 }));
+  await rail.getByRole("button", { name: "Scroll workspaces right" }).focus();
+  await page.setViewportSize({ width: 768, height: 844 });
+  await expect(
+    rail.getByRole("button", { name: /^Scroll workspaces / }),
+  ).toHaveCount(0);
+  await expect(switcher.locator("button:focus")).toHaveCount(1);
+});
+
+// MOB2: on a phone the sidebar is hidden, so the bottom rail's Agents button
+// opens the same agent list as a drawer (MOB2_SHOTS=<dir> saves screenshots).
+const other = { ...agent, agent_id: "a2", name: "docs-writer" };
+for (const size of [
+  { width: 390, height: 844 },
+  { width: 557, height: 844 },
+]) {
+  test(`agents drawer at ${size.width}px: the rail's Agents button opens the agent list`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(size);
+    await open(page, [agent, other]);
+    const rail = page.locator('nav[aria-label="Primary"]');
+    const button = rail.getByRole("button", { name: "Agents" });
+    const row = page.getByRole("link", { name: /^docs-writer / });
+    await expect(button).toBeVisible();
+    await expect(button).toHaveAttribute("aria-expanded", "false");
+    await expect(row).toBeHidden();
+
+    await button.click();
+    await expect(button).toHaveAttribute("aria-expanded", "true");
+    await expect(row).toBeVisible();
+    // The open chat's row is marked as the current one.
+    await expect(
+      page.getByRole("link", { name: new RegExp(`^${NAME} `) }),
+    ).toHaveAttribute("aria-current", "page");
+    // The drawer sits between the header and the rail, inside the screen,
+    // and its rows can be clicked (nothing on top of them).
+    const drawer = page.getByRole("complementary", { name: "Agents" });
+    const d = (await drawer.boundingBox())!;
+    const r = (await rail.boundingBox())!;
+    expect(d.x).toBeGreaterThanOrEqual(0);
+    expect(d.x + d.width).toBeLessThanOrEqual(size.width);
+    expect(d.y + d.height).toBeLessThanOrEqual(r.y + 0.5);
+    expect(d.y).toBeGreaterThan(0);
+    await row.click({ trial: true });
+    expect((await overflowing(page)).out, "with the drawer open").toEqual([]);
+    if (process.env.MOB2_SHOTS)
+      for (const theme of ["light", "dark"]) {
+        await page.evaluate((t) => {
+          document.documentElement.dataset.theme = t;
+        }, theme);
+        await page.screenshot({
+          path: `${process.env.MOB2_SHOTS}/mob2-${size.width}-${theme}.png`,
+        });
+      }
+
+    // A row opens that agent's chat, as on the desktop, and the drawer closes.
+    await row.click();
+    await expect(page).toHaveURL(/\/ws\/w1\/chat\/a2$/);
+    await expect(
+      page.getByRole("heading", { name: "docs-writer" }),
+    ).toBeVisible();
+    await expect(row).toBeHidden();
+    await expect(button).toHaveAttribute("aria-expanded", "false");
+
+    // Escape closes it and gives focus back to the button.
+    await button.click();
+    await expect(row).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(row).toBeHidden();
+    await expect(button).toBeFocused();
+
+    // So does a tap outside it.
+    await button.click();
+    await expect(row).toBeVisible();
+    await page.mouse.click(size.width - 5, size.height / 2);
+    await expect(row).toBeHidden();
+
+    // Tapping the button again closes it too.
+    await button.click();
+    await expect(row).toBeVisible();
+    await button.click();
+    await expect(row).toBeHidden();
+  });
+}
+
+// Files and Settings bring their own tree and hide the sidebar; the drawer
+// still opens there, and a row still leads back to a chat.
+test("agents drawer at 390px: opens on a view without the sidebar", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await open(page, [agent, other]);
+  const rail = page.locator('nav[aria-label="Primary"]');
+  await rail.getByRole("button", { name: "Settings" }).click();
+  await expect(page).toHaveURL(/\/ws\/w1\/settings/);
+  const row = page.getByRole("link", { name: /^docs-writer / });
+  await expect(row).toBeHidden();
+  await rail.getByRole("button", { name: "Agents" }).click();
+  await expect(row).toBeVisible();
+  await row.click();
+  await expect(page).toHaveURL(/\/ws\/w1\/chat\/a2$/);
+  await expect(row).toBeHidden();
+});
+
+// The drawer always lists the agents as full rows (name shown): also when
+// the tree was collapsed, and on Terminal, whose sidebar otherwise lists
+// terminal sessions.
+test("agents drawer at 390px: full rows when the tree was collapsed", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() =>
+    localStorage.setItem("loom:w1:tree-collapsed", "true"),
+  );
+  await open(page, [agent, other]);
+  await page
+    .locator('nav[aria-label="Primary"]')
+    .getByRole("button", { name: "Agents" })
+    .click();
+  const name = page
+    .getByRole("link", { name: /^docs-writer / })
+    .getByTestId("agent-list-name");
+  await expect(name).toBeVisible();
+  // There is nothing to collapse or resize in the drawer.
+  await expect(
+    page.getByRole("button", { name: "Collapse workspace tree" }),
+  ).toBeHidden();
+  await expect(page.getByLabel("Resize workspace sidebar")).toHaveCount(0);
+  // The saved (desktop) collapse preference is left as it was.
+  expect(
+    await page.evaluate(() => localStorage.getItem("loom:w1:tree-collapsed")),
+  ).toBe("true");
+});
+
+test("agents drawer at 390px: lists the agents on Terminal", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await open(page, [agent, other]);
+  const rail = page.locator('nav[aria-label="Primary"]');
+  await rail.getByRole("button", { name: "Terminal" }).click();
+  await expect(page).toHaveURL(/\/ws\/w1\/terminal/);
+  await rail.getByRole("button", { name: "Agents" }).click();
+  await expect(
+    page
+      .getByRole("link", { name: /^docs-writer / })
+      .getByTestId("agent-list-name"),
+  ).toBeVisible();
+});
+
+// A dialog opened from the drawer (New Agent) is on top: the first Escape
+// closes only the dialog, the next one the drawer underneath it (ESC1).
+test("agents drawer at 390px: Escape closes a dialog opened from it, then the drawer", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await open(page, [agent, other]);
+  await page
+    .locator('nav[aria-label="Primary"]')
+    .getByRole("button", { name: "Agents" })
+    .click();
+  const row = page.getByRole("link", { name: /^docs-writer / });
+  await expect(row).toBeVisible();
+  await page.getByRole("button", { name: "+ Add agent" }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await expect(row).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(row).toBeHidden();
+});
+
+// ESC1: on the desktop the New Agent dialog closes on Escape, also with the
+// focus in its Name field.
+test("new agent dialog at 1440px: Escape from the Name field closes it", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await open(page, [agent, other]);
+  await page.getByRole("button", { name: "+ Add agent" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel("Name").focus();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+});
+
+// A row's context menu takes the first Escape, as on the desktop; the next
+// one closes the drawer.
+test("agents drawer at 390px: a row menu takes the first Escape", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await open(page, [agent, other]);
+  await page
+    .locator('nav[aria-label="Primary"]')
+    .getByRole("button", { name: "Agents" })
+    .click();
+  const row = page.getByRole("link", { name: /^docs-writer / });
+  await row.click({ button: "right" });
+  const menu = page.getByRole("menu");
+  await expect(menu).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(menu).toBeHidden();
+  await expect(row).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(row).toBeHidden();
+});
+
+// The smallest phones: the rail, Agents button included, fits on screen.
+test("rail at 320px: every control on screen", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 640 });
+  await open(page);
+  const rights = await page
+    .locator('nav[aria-label="Primary"] > button')
+    .evaluateAll((els) =>
+      els.map((e) => ({
+        label: e.getAttribute("aria-label"),
+        left: e.getBoundingClientRect().left,
+        right: e.getBoundingClientRect().right,
+      })),
+    );
+  expect(rights.map((r) => r.label)).toContain("Agents");
+  for (const r of rights) {
+    expect(r.left, String(r.label)).toBeGreaterThanOrEqual(0);
+    expect(r.right, String(r.label)).toBeLessThanOrEqual(320);
+  }
+  if (process.env.MOB2_SHOTS)
+    await page.screenshot({ path: `${process.env.MOB2_SHOTS}/mob2-320.png` });
+});
+
+test("agents drawer: no Agents button on the desktop, where the sidebar shows", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await open(page, [agent, other]);
+  await expect(page.getByRole("link", { name: /^docs-writer / })).toBeVisible();
+  await expect(
+    page
+      .locator('nav[aria-label="Primary"]')
+      .getByRole("button", { name: "Agents" }),
+  ).toBeHidden();
+});

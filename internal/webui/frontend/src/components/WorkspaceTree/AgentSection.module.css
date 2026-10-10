@@ -63,6 +63,17 @@
   transition: background-color 0.15s ease;
 }
 
+/* A selected Agent API row is highlighted across its full width, archive
+   button and drag grip included, not only behind its link (SB7). */
+.agentRow:has(> a[aria-current="page"]) {
+  background: color-mix(
+    in srgb,
+    var(--color-accent, #c96442) 12%,
+    var(--color-bg-primary, #fff)
+  );
+  box-shadow: inset 3px 0 0 var(--color-accent, #c96442);
+}
+
 .agentRow[data-dragging],
 .sortableItem[data-dragging] {
   z-index: 1;

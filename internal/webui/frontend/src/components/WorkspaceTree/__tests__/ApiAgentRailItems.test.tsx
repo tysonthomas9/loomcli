@@ -23,6 +23,7 @@ vi.mock("@/hooks", async (importOriginal) => {
   };
 });
 
+import { AgentRosterOwner } from "../AgentRosterOwner";
 import { ApiAgentRailItems } from "../ApiAgentRailItems";
 
 const api = (id: string, over: Partial<Agent> = {}): Agent =>
@@ -41,7 +42,9 @@ const api = (id: string, over: Partial<Agent> = {}): Agent =>
 const at = (path: string, empty?: JSX.Element) =>
   render(
     <MemoryRouter initialEntries={[path]}>
-      <ApiAgentRailItems workspaceId="w1" empty={empty} />
+      <AgentRosterOwner workspaceId="w1">
+        <ApiAgentRailItems workspaceId="w1" empty={empty} />
+      </AgentRosterOwner>
     </MemoryRouter>,
   );
 
@@ -59,6 +62,13 @@ describe("ApiAgentRailItems", () => {
         api("done", { parent_agent_id: "l1", state: "finished", preset: "t" }),
         api("l2"),
         api("old", { state: "archived" }),
+        // ORPH1: a finished child of an archived (unlisted) Lead leaves too.
+        api("echo", {
+          parent_agent_id: "unlisted",
+          state: "finished",
+          preset: "t",
+          role_kind: "worker",
+        }),
       ].map((a) => [a.agent_id, a]),
     );
 
@@ -73,6 +83,28 @@ describe("ApiAgentRailItems", () => {
     expect(links[2]).toHaveAttribute("href", "/ws/w1/chat/l2");
     expect(links[2]).toHaveAttribute("aria-current", "page");
     expect(links[0]).not.toHaveAttribute("aria-current");
+  });
+
+  it("names each link with the agent's status, which the dot only shows", () => {
+    mockRoster.current = new Map(
+      [
+        api("l1", { state: "active" }),
+        api("l2", { state: "waiting" }),
+        api("l3", { state: "finished", outcome: "failed" }),
+        api("l4"),
+      ].map((a) => [a.agent_id, a]),
+    );
+
+    at("/ws/w1/home");
+
+    expect(
+      screen.getAllByRole("link").map((l) => l.getAttribute("aria-label")),
+    ).toEqual([
+      "l1 — Lead · opencode · Working",
+      "l2 — Lead · opencode · Waiting",
+      "l3 — Lead · opencode · Failed",
+      "l4 — Lead · opencode · Idle",
+    ]);
   });
 
   it("shows the empty hint once the roster has no agents to show", () => {

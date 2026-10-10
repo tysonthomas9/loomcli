@@ -82,10 +82,7 @@ function renderAt(url: string) {
 }
 
 const active = () =>
-  screen
-    .getAllByRole("button")
-    .filter((b) => b.getAttribute("aria-current") === "page")
-    .map((b) => b.textContent);
+  screen.getAllByRole("tab", { selected: true }).map((b) => b.textContent);
 
 describe("AgentChatPage", () => {
   it("shows Chat | Info | Git | Diff | Files with Chat open and no Terminal", () => {
@@ -93,10 +90,10 @@ describe("AgentChatPage", () => {
 
     const tabs = ["Chat", "Info", "Git", "Diff", "Files"];
     for (const name of tabs) {
-      expect(screen.getByRole("button", { name })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name })).toBeInTheDocument();
     }
     expect(
-      screen.queryByRole("button", { name: "Terminal" }),
+      screen.queryByRole("tab", { name: "Terminal" }),
     ).not.toBeInTheDocument();
     expect(active()).toEqual(["Chat"]);
     expect(screen.getByTestId("chat")).toHaveTextContent("chat agt_1");
@@ -110,9 +107,9 @@ describe("AgentChatPage", () => {
     );
     expect(screen.getByTestId("git")).toHaveAttribute("data-readonly", "false");
     expect(screen.getByTestId("git")).toHaveTextContent("Create PR");
-    fireEvent.click(screen.getByRole("button", { name: "Diff" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Diff" }));
     expect(await screen.findByTestId("diff")).toHaveTextContent("diff agt_1");
-    fireEvent.click(screen.getByRole("button", { name: "Files" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Files" }));
     expect(await screen.findByTestId("files")).toHaveTextContent(
       "files agt_1 agt_1 slack-clone",
     );
@@ -120,9 +117,9 @@ describe("AgentChatPage", () => {
 
   it("keeps the open tab in the URL so a reload reopens it", () => {
     const first = renderAt("/ws/ws1/chat/agt_1");
-    fireEvent.click(screen.getByRole("button", { name: "Diff" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Diff" }));
     expect(screen.getByTestId("where")).toHaveTextContent("?tab=diff");
-    fireEvent.click(screen.getByRole("button", { name: "Chat" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Chat" }));
     expect(screen.getByTestId("where")).toHaveTextContent(/^$/);
     first.unmount();
 

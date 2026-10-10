@@ -5,11 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"log/slog"
 	"slices"
 	"time"
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
+	"github.com/tysonthomas9/loomcli/internal/prwatch"
 )
 
 // dispatchCrash runs at each dispatcher crash point; tests use it to crash there.
@@ -48,9 +50,15 @@ func (s *Service) Dispatch(ctx context.Context, agentID string) error {
 
 // wake dispatches for a caller that already accepted its own change. A
 // harness failure leaves the message in line and shows Attention
-// harness_unavailable; the next wake retries.
+// harness_unavailable; the next wake retries. A failed checkpoint leaves it
+// in line too, for the reconcile queue to retry.
 func (s *Service) wake(ctx context.Context, a loomstore.Agent) (loomstore.Agent, error) {
 	a, err := s.dispatch(ctx, a)
+	if isCheckpointFailed(err) {
+		slog.Warn("loomagent: checkpoint failed; the next turn waits for it", "agent", a.AgentID, "error", err)
+		s.retryLater(a.AgentID)
+		return a, nil
+	}
 	var e *Error
 	if errors.As(err, &e) && (e.Code == CodeHarnessUnavailable || e.Code == CodeHarnessError) {
 		cur, rerr := s.live(ctx, a.AgentID)
@@ -82,6 +90,9 @@ func (s *Service) dispatch(ctx context.Context, a loomstore.Agent) (loomstore.Ag
 	if err := s.deliverCompletions(ctx, a); err != nil {
 		return a, err
 	}
+	if err := s.checkpoint(ctx, a); err != nil { // the next turn waits for the last one's ref
+		return a, err
+	}
 	if !takes(a) {
 		return a, nil
 	}
@@ -98,6 +109,9 @@ func (s *Service) dispatch(ctx context.Context, a loomstore.Agent) (loomstore.Ag
 			return a, err
 		}
 		if slots, err = s.store.Slots(ctx, a.AgentID); err != nil {
+			return a, err
+		}
+		if err := s.checkpoint(ctx, a); err != nil { // the recovered turn's ref
 			return a, err
 		}
 		break // one turn's input can be handed at a time
@@ -126,15 +140,15 @@ func (s *Service) recoverHanded(ctx context.Context, a loomstore.Agent, sl looms
 	}
 	switch landed {
 	case loomharness.LandedFound:
-		if err := s.settleInput(ctx, a.AgentID, slots, deref(sl.NativeKey), s.store.MarkDelivered); err != nil {
-			return a, false, err
-		}
 		st, err := sess.Status(ctx)
 		if err != nil {
 			return a, false, harnessErr(err)
 		}
-		if !st.Running {
-			return a, true, nil // its turn ran while Loom was down
+		if !st.Running { // its turn ran while Loom was down: delivered and counted as ended, at once
+			return a, true, s.store.MarkRan(ctx, a.AgentID, deref(sl.NativeKey))
+		}
+		if err := s.settleInput(ctx, a.AgentID, slots, deref(sl.NativeKey), s.store.MarkDelivered); err != nil {
+			return a, false, err
 		}
 		to := a.StateOf()
 		to.RunningTurn = sl.NativeKey // until turn.started names it
@@ -218,6 +232,7 @@ func (s *Service) HarnessEvent(ctx context.Context, agentID string, e loomharnes
 	if err != nil || e.Session != (loomharness.NativeRef{Root: deref(a.HarnessSessionRoot), NativeID: deref(a.HarnessSessionID)}) {
 		return err
 	}
+	s.trackCall(a, e)
 	switch e.Type {
 	case loomharness.EventMessageDelivered:
 		return s.delivered(ctx, a, e.InputKey)
@@ -287,6 +302,9 @@ func (s *Service) endTurn(ctx context.Context, a loomstore.Agent, e loomharness.
 	if err := s.endTurnAsks(ctx, a, e.TurnID); err != nil {
 		return a, false, err
 	}
+	if err := s.limitTurnEnded(ctx, a, e); err != nil {
+		return a, false, err
+	}
 	a, err = s.setState(ctx, a, d.To)
 	return a, err == nil, err
 }
@@ -353,8 +371,18 @@ func (s *Service) RunDispatcher(ctx context.Context) { s.Dispatcher()(ctx) }
 // done it only ends the registration.
 func (s *Service) Dispatcher() func(context.Context) {
 	l := s.startLoop()
+	var pr *loop // the PR-watch loop (OR8), when s reads PRs
+	if s.prHost != nil {
+		pr = s.startLoop()
+	}
 	return func(ctx context.Context) {
 		defer s.stopLoop(l)
+		if pr != nil {
+			ctx, cancel := context.WithCancel(ctx)
+			done := make(chan struct{})
+			go func() { defer close(done); defer s.stopLoop(pr); s.runPRWatches(within(ctx), pr) }()
+			defer func() { cancel(); <-done }()
+		}
 		if ctx.Err() == nil {
 			s.runDispatcher(ctx, l)
 		}
@@ -410,6 +438,11 @@ func (s *Service) follow(ctx context.Context, sub *BusSubscription, l *loop) {
 			l.took()
 			s.resync(ctx, false)
 			s.reconcileDue(ctx)
+			s.sweepLimitResumes(ctx)
+			select { // the PR-watch loop sweeps if one is due
+			case s.prTick <- struct{}{}:
+			default:
+			}
 		case <-s.queueWake:
 			l.took()
 			s.reconcileDue(ctx)
@@ -443,5 +476,93 @@ func (s *Service) dispatchWake(ctx context.Context, agentID string) error {
 		return err
 	}
 	_, err = s.wake(ctx, a)
+	return err
+}
+
+// PR-watch wakes (OR8). Every prWatchInterval the dispatcher reads each PR
+// an agent watches through the host GitHub connector, and tells the agent
+// what changed since its watch last told it (prwatch.Decide) with a Send
+// from loom:pr-watch. The Send's transaction saves the watch's new cursor
+// with its receipt, and its request ID names the cursors it moves between,
+// so a crash or restart never tells the same news twice. A failed read
+// tells nothing and moves nothing. A merged PR ends its watch quietly.
+var prWatchInterval = 2 * time.Minute // checks take minutes; a faster pass mostly spends the rate limit
+
+var prWatchActor = ActorRef{Kind: "loom", ID: "pr-watch"}
+
+var prWatchSender = senderOf(prWatchActor)
+
+// runPRWatches is the PR-watch loop l: it sweeps on each tick the
+// dispatcher passes on (s.prTick) from the resync clock, so slow GitHub
+// reads never hold up the dispatcher.
+func (s *Service) runPRWatches(ctx context.Context, l *loop) {
+	sweep := func(struct{}) bool { s.sweepPRWatches(ctx); return true }
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.prTick:
+			l.took()
+			s.sweepPRWatches(ctx)
+		case req := <-l.drain:
+			if !settle(l, req, s.prTick, sweep) {
+				return
+			}
+		}
+	}
+}
+
+// sweepPRWatches runs every PR watch of the workspace when one is due.
+func (s *Service) sweepPRWatches(ctx context.Context) {
+	if s.prHost == nil || s.now().Before(s.prDue) {
+		return
+	}
+	s.prDue = s.now().Add(prWatchInterval)
+	err := s.store.DropDeletedPRWatches(ctx, s.workspaceID)
+	watches, lerr := s.store.PRWatches(ctx, s.workspaceID)
+	err = errors.Join(err, lerr)
+	for _, w := range watches {
+		err = errors.Join(err, s.prWatch(ctx, w))
+	}
+	if err != nil {
+		slog.Warn("loomagent: PR watch", "error", err)
+	}
+}
+
+// prWatch reads w's PR, then under its agent's lock tells the agent any
+// news. It waits, telling nothing, while the agent can't take a message
+// or its previous wake is not yet handed over; the next sweep then tells
+// all the news since.
+func (s *Service) prWatch(ctx context.Context, w loomstore.PRWatch) error {
+	snap, err := prwatch.Observe(ctx, s.prHost, s.workspaceID, w.Owner, w.Repo, w.Number)
+	if err != nil {
+		return err
+	}
+	defer s.lock(w.AgentID)()
+	if snap.Merged {
+		return s.store.DropPRWatch(ctx, w.PRWatchKey, w.CreatedAt)
+	}
+	wake, ok := prwatch.Decide(w, snap)
+	if !ok {
+		if wake.Change.Cursor.Comments == w.Cursor.Comments {
+			return nil
+		}
+		return s.store.SettlePRWatch(ctx, w.PRWatchKey, w.CreatedAt, w.Cursor.Comments, wake.Change.Cursor.Comments)
+	}
+	a, err := s.store.GetAgent(ctx, w.AgentID)
+	if err != nil || a.DeletedAt != nil || a.State == StateFinished || sendable(a) != nil {
+		return err // a finished single task is not reopened by a watch
+	}
+	slots, err := s.store.Slots(ctx, w.AgentID)
+	if err != nil || slices.ContainsFunc(slots, func(sl loomstore.Slot) bool {
+		return sl.Sender == prWatchSender && (sl.State == loomstore.SlotWaiting || sl.State == loomstore.SlotHanded)
+	}) {
+		return err
+	}
+	_, err = s.sendLocked(ctx, SendRequest{Envelope: Envelope{RequestID: wake.RequestID}, AgentID: w.AgentID,
+		Text: wake.Text, Source: "system", Actor: prWatchActor, prWatch: &wake.Change})
+	if errors.Is(err, loomstore.ErrPRWatchGone) { // unwatched since the read
+		return nil
+	}
 	return err
 }

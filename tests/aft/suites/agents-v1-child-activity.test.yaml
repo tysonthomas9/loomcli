@@ -1,0 +1,440 @@
+# A working child's live activity line in the Lead's tray (DF2), streamed
+# replies with their caret and motion (UI5), and the agent message hover pill
+# and spacing (UI6), on the OpenCode emulator (LOOM_HARNESS_EMU=1) with
+# 2.0d's scripted fake model.
+#
+# Emulator tier only. Each check needs a turn that streams slowly or plays
+# tool calls and reasoning over time. Only the emulator's scenario file
+# ($AFT_EMU_SCENARIOS) can script that: the fake model sends neither
+# reasoning nor delays, and real OpenCode would run the tools for real. The
+# setup refuses to run without the emulator rather than pass with nothing
+# checked.
+#
+# The fake model's queue is shared by a lead and its children. A step the
+# lead's follow-up takes is marked next: "tool" and one a child's first
+# prompt takes next: "prompt", so the two never race for it.
+suite: agents-v1-child-activity
+classification: { area: agents, feature: agent-api-children, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: |
+  set -e
+  if [ -z "${AFT_EMU_SCENARIOS:-}" ]; then
+    echo "agents-v1-child-activity runs on the emulator tier only (LOOM_HARNESS_EMU=1)" >&2
+    exit 1
+  fi
+  curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-ACT" >/dev/null || true
+  repo="$AFT_WORK_DIR/agv1-act-repo"
+  mkdir -p "$repo"
+  git -C "$repo" init -q -b main
+  echo "agents-v1 child activity ${RUN_ID:-local}" > "$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" -c user.email=e2e@x -c user.name=e2e commit -q -m init
+  printf '{"name":"e2e-agv1-act","type":"empty","repos":["%s"]}' "$repo" |
+    curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @- >/dev/null
+  # act-lead <name> <saved var>: an OpenCode lead made through the Agent API;
+  # its agent id goes to $AFT_WORK_DIR/<saved var>.
+  cat > "$AFT_WORK_DIR/act-lead" <<'SH'
+  #!/bin/sh
+  set -e
+  printf '{"preset":"lead","name":"%s","repo":"%s","base_ref":"main","overrides":{"harness":"opencode"}}' \
+    "$1" "$AFT_WORK_DIR/agv1-act-repo" |
+    curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-AGV1-ACT/v1/agents" \
+      -H "Content-Type: application/json" -H "Idempotency-Key: $1" -d @- |
+    python3 -c 'import json,sys; print(json.load(sys.stdin)["agent_id"])' > "$AFT_WORK_DIR/$2"
+  SH
+  chmod +x "$AFT_WORK_DIR/act-lead"
+  # act-scenario <agent id> <turns JSON>: the agent's next prompts play these
+  # scripted emulator turns, in order, ahead of the fake model.
+  cat > "$AFT_WORK_DIR/act-scenario" <<'SH'
+  #!/bin/sh
+  set -e
+  python3 - "$1" "$2" "$AFT_EMU_SCENARIOS" <<'PY'
+  import json, os, sys
+  agent, turns, path = sys.argv[1], json.loads(sys.argv[2]), sys.argv[3]
+  cur = json.load(open(path)) if os.path.exists(path) and os.path.getsize(path) else {}
+  cur[agent] = turns
+  json.dump(cur, open(path, "w"))
+  PY
+  SH
+  chmod +x "$AFT_WORK_DIR/act-scenario"
+  # act-kid <lead id> <child name>: the child's agent id.
+  cat > "$AFT_WORK_DIR/act-kid" <<'SH'
+  #!/bin/sh
+  set -e
+  curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-ACT/v1/agents?parent=$1" |
+    python3 -c 'import json,sys; print([a["agent_id"] for a in json.load(sys.stdin)["agents"] if a["name"] == sys.argv[1]][0])' "$2"
+  SH
+  chmod +x "$AFT_WORK_DIR/act-kid"
+  # act-send <agent id> <idempotency key> <text>: stop the agent's running
+  # turn; with text, that text is its next prompt.
+  cat > "$AFT_WORK_DIR/act-send" <<'SH'
+  #!/bin/sh
+  set -e
+  python3 -c 'import json,sys; print(json.dumps({"text": sys.argv[1], "delivery": "interrupt"}))' "$3" |
+    curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-AGV1-ACT/v1/agents/$1/messages" \
+      -H "Content-Type: application/json" -H "Idempotency-Key: $2" -d @- >/dev/null
+  SH
+  chmod +x "$AFT_WORK_DIR/act-send"
+teardown: |
+  set +e
+  agent-browser --session "$AFT_SESSION" set media light >/dev/null 2>&1
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-ACT" >/dev/null
+
+tests:
+  - name: I1 DF2 activity line - a working child's tray row shows each step in turn, a command, a file read and a thinking line, with the turn's time, and never falls back to Working… within a turn
+    intent: An operator's OpenCode lead starts one child that keeps working. Its tray row reads "Working…" until its first step, then "▸ Ran command · npm test", then "▸ Read file · src/routes.ts", then "💭 Thinking · Checking the routes table", each with the turn's elapsed time. Within a turn the row never falls back to "Working…" once a step has shown; a new turn reads "Working…" only until its first step, and its time starts again, below what the first turn reached (DF2b restarts the turn's time and step). A MutationObserver checks this for the whole run. When the child finishes it leaves the tray.
+    steps:
+      - run: |
+          set -e
+          "$AFT_WORK_DIR/act-lead" "agv1-act-df2-${RUN_ID:-local}" actDf2Lead
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          # The child's first prompt holds its turn (a tool the emulator does
+          # not run waits until interrupted), so it keeps working with no step yet.
+          python3 -c 'import json,sys
+          code = "return await tools.loom.agent_create(%s)" % json.dumps({"name": sys.argv[1], "brief": "do the task"})
+          print(json.dumps({"steps": [{"next": "prompt", "tool_calls": [{"name": "execute", "arguments": {"code": code}}]},
+            {"next": "tool", "text": "AGV1-ACT-STARTED"}, {"next": "prompt", "tool_calls": [{"name": "df1_hold"}]}]}))' "agv1-act-kid-${RUN_ID:-local}" |
+            curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" -d @- >/dev/null
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-ACT/chat/$(cat "$AFT_WORK_DIR/actDf2Lead")"
+        intent: "Create an OpenCode lead, script its agent_create call and a child that keeps working, and open the lead's chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the lead's chat is ready"
+      - fill: { label: Message, value: "start the worker" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=agent-tray]')?.textContent || '';
+              return (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-ACT-STARTED') &&
+                t.includes('1 agent · 1 running'); })()
+        budget: 90000
+        intent: "Wait until the lead's turn ends and the collapsed tray shows the child running"
+      - click: { selector: "[data-testid=agent-tray] button[aria-expanded]" }
+      - wait:
+          fn: >-
+            (() => { const row = document.querySelector('[data-testid=agent-tray] [data-tray-row] [data-status=running]');
+              return !!row && (row.textContent || '').includes('agv1-act-kid-${RUN_ID:-local}') &&
+                row.lastElementChild?.textContent === 'Working…'; })()
+        intent: "Wait until the open tray shows the child's row reading Working… before its first step"
+      - run: |
+          set -e
+          lead="$(cat "$AFT_WORK_DIR/actDf2Lead")"
+          kid="$("$AFT_WORK_DIR/act-kid" "$lead" "agv1-act-kid-${RUN_ID:-local}")"
+          echo "$kid" > "$AFT_WORK_DIR/actDf2Kid"
+          # Each turn plays its step and holds, so the row keeps showing it.
+          "$AFT_WORK_DIR/act-scenario" "$kid" '[
+            {"tools": [{"id": "call_df2_bash", "name": "bash", "input": {"command": "npm test"}, "output": "ok"}], "hold": true},
+            {"tools": [{"id": "call_df2_read", "name": "read", "input": {"filePath": "src/routes.ts"}, "output": "export {}"}], "hold": true},
+            {"reasoning": "Checking the routes table", "hold": true}]'
+          "$AFT_WORK_DIR/act-send" "$kid" "agv1-act-df2-1-${RUN_ID:-local}" "run the tests"
+        intent: "Script the child's next three turns, a command, a file read and a thinking step, each held, and send it the first"
+      - wait:
+          fn: &df2Line >-
+            (() => { const row = () => document.querySelector('[data-testid=agent-tray] [data-tray-row] [data-status=running]');
+              const line = () => row()?.lastElementChild?.textContent || '';
+              const ok = /^▸ Ran command · npm test · \d+:\d\d$/.test(line());
+              if (ok && !window.__df2) {
+                const seen = [line()];
+                const bad = [];
+                // Working… is allowed only while a new turn starts: from the
+                // test's own Stop with a message (arm) until that turn's first
+                // step (DF2b gives each turn a fresh time and no step).
+                // Anywhere else it is a fallback within a turn.
+                const w = { seen, bad, at: [Date.now()], arms: [], armed: false, gap: false, armKind: '', fallback: 0 };
+                const isStep = (l) => l.startsWith('▸ ') || l.startsWith('💭 ');
+                const kind = (l) => l.split(' · ').slice(0, -1).join(' · ');
+                const look = () => { const r = row(); if (!r) return; const l = r.lastElementChild?.textContent || '';
+                  if (l === '') bad.push('(empty)');
+                  if (l === 'Working…' && !w.armed) w.fallback++;
+                  if (w.armed && !isStep(l)) w.gap = true;
+                  if (w.armed && isStep(l) && (w.gap || kind(l) !== w.armKind)) w.armed = false;
+                  if (seen[seen.length - 1] !== l) { seen.push(l); w.at.push(Date.now()); } };
+                w.arm = () => { w.arms.push(Date.now()); w.armed = true; w.gap = false; w.armKind = kind(seen[seen.length - 1] || ''); return true; };
+                w.obs = new MutationObserver(look);
+                w.obs.observe(document.body, { subtree: true, childList: true, characterData: true });
+                window.__df2 = w;
+              }
+              return ok; })()
+        budget: 30000
+        intent: "Wait until the row reads ▸ Ran command · npm test with the turn's time, and from then on watch every change to the row"
+      - wait:
+          fn: >-
+            (() => { const w = window.__df2; if (!w) return false;
+              const ticks = new Set(w.seen.filter((l) => l.startsWith('▸ Ran command · npm test · ')).map((l) => l.split(' · ').pop()));
+              return ticks.size >= 2; })()
+        budget: 10000
+        intent: "Wait until the held step's clock has advanced, so the line shows a live turn timer, not a fixed time"
+      - wait:
+          fn: >-
+            (() => { const w = window.__df2; if (!w) return false;
+              w.secs = (l) => { const [m, s] = l.split(' · ').pop().split(':'); return Number(m) * 60 + Number(s); };
+              return w.seen.some((l) => l.startsWith('▸ Ran command · npm test · ') && w.secs(l) >= 4); })()
+        budget: 15000
+        intent: "Wait until the first turn has run at least 0:04, so a later turn's restarted timer reads lower"
+      - run: |
+          set -e
+          agent-browser --session "$AFT_SESSION" eval 'window.__df2.arm()' | grep -q true
+          "$AFT_WORK_DIR/act-send" "$(cat "$AFT_WORK_DIR/actDf2Kid")" "agv1-act-df2-2-${RUN_ID:-local}" "read the routes"
+        intent: "Mark that a new turn starts, then send the child its second turn, a file read"
+      - wait:
+          fn: >-
+            /^▸ Read file · src\/routes\.ts · \d+:\d\d$/.test(document.querySelector('[data-testid=agent-tray] [data-tray-row] [data-status=running]')?.lastElementChild?.textContent || '')
+        budget: 30000
+        intent: "Wait until the row's line changes to ▸ Read file · src/routes.ts with the turn's time"
+      - run: |
+          set -e
+          agent-browser --session "$AFT_SESSION" eval 'window.__df2.arm()' | grep -q true
+          "$AFT_WORK_DIR/act-send" "$(cat "$AFT_WORK_DIR/actDf2Kid")" "agv1-act-df2-3-${RUN_ID:-local}" "think it over"
+        intent: "Mark that a new turn starts, then send the child its third turn, a thinking step"
+      - wait:
+          fn: >-
+            /^💭 Thinking · Checking the routes table · \d+:\d\d$/.test(document.querySelector('[data-testid=agent-tray] [data-tray-row] [data-status=running]')?.lastElementChild?.textContent || '')
+        budget: 30000
+        intent: "Wait until the row's line changes to 💭 Thinking · Checking the routes table with the turn's time"
+      - wait:
+          fn: >-
+            (() => { const w = window.__df2; if (!w) return false;
+              const kinds = ['▸ Ran command', '▸ Read file', '💭 Thinking'].filter((k) => w.seen.some((l) => l.startsWith(k)));
+              return kinds.length === 3 && w.bad.length === 0 && w.fallback === 0 &&
+                document.querySelector('[data-testid=agent-tray] [data-tray-row] [data-status=running]')?.lastElementChild?.textContent !== 'Working…'; })()
+        intent: "Check the row showed all three steps, two tool kinds and a thinking line, never went blank, and read Working… only while a turn the test started had no step yet, never as a fallback within a turn"
+      - wait:
+          fn: >-
+            (() => { const w = window.__df2; if (!w) return false;
+              // A turn's first line may read at most the time since the test
+              // stopped the turn before it, plus one tick; carrying on from
+              // the first turn (which ran 0:04 or more) reads more.
+              const fresh = (k, arm) => { const i = w.seen.findIndex((l) => l.startsWith(k));
+                return i >= 0 && w.arms.length === 2 && w.secs(w.seen[i]) <= (w.at[i] - w.arms[arm]) / 1000 + 1; };
+              return fresh('▸ Read file · ', 0) && fresh('💭 Thinking · ', 1); })()
+        intent: "Check that each Stop with a message restarted the turn's timer (DF2b): the read and thinking turns' first lines read no more than the time since the test stopped the turn before, not the first turn's running total"
+      - run: |
+          set -e
+          "$AFT_WORK_DIR/act-send" "$(cat "$AFT_WORK_DIR/actDf2Kid")" "agv1-act-df2-stop-${RUN_ID:-local}" ""
+        intent: "Stop the child, which ends its task"
+      - wait:
+          fn: >-
+            (() => { const r = document.querySelector('[data-testid=completion-record]');
+              return !!r && r.textContent.includes('agv1-act-kid-${RUN_ID:-local}') && r.dataset.delivery === 'delivered' &&
+                !document.querySelector('[data-testid=agent-tray]') && window.__df2?.bad.length === 0 && window.__df2.fallback === 0; })()
+        budget: 90000
+        intent: "Wait until the finished child's result is delivered to the Lead and the child has left the tray, still with no fallback to Working… within a turn"
+      - run: |
+          set -e
+          agent-browser --session "$AFT_SESSION" eval 'JSON.stringify(window.__df2.seen.map((l) => l.replace(/ · \d+:\d\d$/, "")).filter((l, i, a) => l !== a[i - 1]))'
+        intent: "Log the lines the row showed, in order, without the clock"
+
+  - name: I6 UI5 UI6 streamed reply - a long reply streams in without shrinking or shifting the layout, with a caret only while it streams, no motion under reduced motion, and the agent message shows the same hover pill as the user message
+    intent: An operator asks an OpenCode lead a question and its long reply streams in word by word. While it streams, the text never gets shorter, a pulsing caret ends it, and the layout-shift score stays at or below 0.05; once it ends, the caret is gone. With prefers-reduced-motion, a second streamed reply runs no animation in the transcript. Hovering the agent's reply shows the same pill as the user's message, the time and a copy button; it is hidden at rest and shows on hover and on keyboard focus.
+    steps:
+      - run: |
+          set -e
+          "$AFT_WORK_DIR/act-lead" "agv1-act-ui5-${RUN_ID:-local}" actUi5Lead
+          lead="$(cat "$AFT_WORK_DIR/actUi5Lead")"
+          # 24 words, one delta each, 250ms apart: about 6s of streaming.
+          long="AGV1-ACT-STREAM-A the routes table maps each path to its handler and the tests cover every branch so the change is safe to merge once review passes AGV1-ACT-STREAM-END"
+          short="AGV1-ACT-CALM-A the reply streams without motion when the system asks for less of it AGV1-ACT-CALM-END"
+          "$AFT_WORK_DIR/act-scenario" "$lead" "$(python3 -c 'import json,sys; print(json.dumps([{"text": sys.argv[1], "delay_ms": 250}, {"text": sys.argv[2], "delay_ms": 250}]))' "$long" "$short")"
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-ACT/chat/$lead"
+        intent: "Create an OpenCode lead whose next two turns stream long replies one word every 250ms, and open its chat"
+      - wait:
+          fn: >-
+            (() => { if (document.querySelector('[data-testid=harness-label]')?.textContent !== 'opencode') return false;
+              if (!window.__ui5) {
+                const s = { lens: [], caretWhile: 0, cls: 0, samples: 0, lost: 0, fresh: 0, seen: false };
+                const add = (es) => { for (const e of es) if (!e.hadRecentInput) s.cls += e.value; };
+                s.po = new PerformanceObserver((l) => add(l.getEntries()));
+                s.po.observe({ type: 'layout-shift', buffered: false });
+                s.drain = () => add(s.po.takeRecords());
+                s.timer = setInterval(() => {
+                  const md = Array.from(document.querySelectorAll('[data-testid=chat-transcript] li[data-kind=agent] [data-testid=chat-markdown]'))
+                    .find((m) => (m.textContent || '').includes('AGV1-ACT-STREAM-A'));
+                  if (!md) { if (s.seen) { s.lost++; s.lens.push(0); } return; }
+                  s.seen = true;
+                  s.samples++;
+                  s.lens.push((md.textContent || '').length);
+                  if (md.querySelector('[data-streaming-caret]')) s.caretWhile++;
+                  if (md.querySelector('[data-fresh]')) s.fresh++;
+                }, 100);
+                window.__ui5 = s;
+              }
+              return true; })()
+        intent: "Wait until the lead's chat is ready, then sample the reply's own text length, its caret and the layout-shift score every 100ms"
+      - fill: { label: Message, value: "summarise the routes" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const c = document.querySelector('[data-testid=chat-transcript] [data-streaming-caret]');
+              return !!c && (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-ACT-STREAM-A') &&
+                c.getAnimations().length > 0; })()
+        budget: 30000
+        intent: "Wait until the reply is streaming with a pulsing caret at its end"
+      - wait:
+          fn: >-
+            (() => { const s = window.__ui5; const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              if (!s || !t.includes('AGV1-ACT-STREAM-END') || document.querySelector('[data-streaming-caret]')) return false;
+              clearInterval(s.timer);
+              s.drain();
+              const grows = s.lens.every((n, i) => i === 0 || n >= s.lens[i - 1]);
+              return s.samples >= 20 && s.lost === 0 && grows && s.caretWhile >= 10 && s.fresh > 0 && s.cls <= 0.05 &&
+                t.split('AGV1-ACT-STREAM-A').length === 2; })()
+        budget: 30000
+        intent: "Wait until the reply has ended with no caret left, and check that over at least 20 samples the reply never vanished or got shorter, the caret showed and new words faded in while it streamed, and the layout-shift score stayed at or below 0.05"
+      - run: |
+          set -e
+          agent-browser --session "$AFT_SESSION" mouse move 0 0
+        intent: "Move the mouse away from the transcript"
+      - wait:
+          fn: &ui6Rest >-
+            (() => { const rows = Array.from(document.querySelectorAll('[data-testid=chat-transcript] li'));
+              const agent = rows.find((r) => (r.textContent || '').includes('AGV1-ACT-STREAM-A'));
+              const pill = agent?.querySelector('[data-testid=message-actions]');
+              return !!pill && getComputedStyle(pill).opacity === '0'; })()
+        intent: "Wait until the agent reply's pill is hidden at rest"
+      - hover: { selector: "[data-testid=chat-transcript] li[data-kind=agent]" }
+      - wait:
+          fn: >-
+            (() => { const rows = Array.from(document.querySelectorAll('[data-testid=chat-transcript] li'));
+              const pillOf = (text) => rows.find((r) => (r.textContent || '').includes(text))?.querySelector('[data-testid=message-actions]');
+              const agent = pillOf('AGV1-ACT-STREAM-A'), user = pillOf('summarise the routes');
+              if (!agent || !user) return false;
+              const time = /^\d{1,2}:\d{2}(\s?[AP]M)?$/i;
+              const parts = (p) => [p.querySelector('span')?.textContent || '', !!p.querySelector('button[aria-label^=Copy]')];
+              const [at, ac] = parts(agent), [ut, uc] = parts(user);
+              return getComputedStyle(agent).opacity === '1' && time.test(at) && ac && time.test(ut) && uc &&
+                agent.closest('li')?.dataset.kind === 'agent' && user.closest('li')?.dataset.kind === 'user'; })()
+        intent: "Wait until hovering the agent reply shows its pill, with the time and a copy button, the same pill a user message has"
+      - run: |
+          set -e
+          agent-browser --session "$AFT_SESSION" mouse move 0 0
+        intent: "Move the mouse away again"
+      - wait:
+          fn: *ui6Rest
+        intent: "Wait until the agent reply's pill is hidden again"
+      - focus: { selector: "[data-testid=chat-transcript] li[data-kind=agent] [data-testid=message-actions] button[aria-label^=Copy]" }
+      - wait:
+          fn: >-
+            (() => { const b = document.activeElement; const pill = b?.closest('[data-testid=message-actions]');
+              return !!pill && pill.closest('li')?.dataset.kind === 'agent' && getComputedStyle(pill).opacity === '1'; })()
+        intent: "Wait until keyboard focus on the agent reply's copy button shows its pill"
+      - run: |
+          set -e
+          agent-browser --session "$AFT_SESSION" set media light reduced-motion
+        intent: "Ask for reduced motion, as the operator's system setting would"
+      - wait:
+          fn: >-
+            (() => { if (!matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
+              if (!window.__calm) {
+                const s = { anims: 0, samples: 0, caret: 0, fades: 0 };
+                s.timer = setInterval(() => {
+                  const tr = document.querySelector('[data-testid=chat-transcript]');
+                  if (!(tr?.textContent || '').includes('AGV1-ACT-CALM-A')) return;
+                  s.samples++;
+                  if (tr.querySelector('[data-streaming-caret]')) s.caret++;
+                  s.anims += tr.getAnimations({ subtree: true }).filter((a) => a.playState === 'running').length;
+                  s.fades += Array.from(tr.querySelectorAll('[data-fresh], [data-testid=chat-markdown] [style*=opacity]'))
+                    .filter((e) => parseFloat(getComputedStyle(e).opacity) < 1).length;
+                }, 100);
+                window.__calm = s;
+              }
+              return true; })()
+        intent: "Wait until the page reports reduced motion, then count running animations in the transcript every 100ms"
+      - fill: { label: Message, value: "say it calmly" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const s = window.__calm; const tr = document.querySelector('[data-testid=chat-transcript]');
+              if (!s || !(tr?.textContent || '').includes('AGV1-ACT-CALM-END') || tr.querySelector('[data-streaming-caret]')) return false;
+              clearInterval(s.timer);
+              return s.samples >= 10 && s.caret >= 5 && s.anims === 0 && s.fades === 0; })()
+        budget: 30000
+        intent: "Wait until the second reply has ended, and check that while it streamed no animation ran in the transcript and no word faded in"
+      - run: |
+          set -e
+          agent-browser --session "$AFT_SESSION" set media light
+        intent: "Turn reduced motion off again for the cases after this one"
+      - wait:
+          fn: >-
+            !matchMedia('(prefers-reduced-motion: reduce)').matches
+        intent: "Wait until the page no longer reports reduced motion"
+
+  - name: I6b UI6 spacing - two one-line agent messages in a row sit close together
+    intent: An operator's OpenCode lead starts two children that keep working. The first child is stopped, and the Lead answers its result with one short line that streams slowly; the second child is stopped while that line streams, so its result card comes before it, and the Lead answers that too. The Lead's two one-line replies sit back to back in the chat, closer than 16px (UI6's close spacing, as agent-chat.spec checks it), the same after a reload. Since ad6643955 a reply's time and copy sit below its text inside the reply, so the gap is measured between the replies, not between their first lines; the map's 8px was UI6's earlier overlay layout.
+    steps:
+      - run: |
+          set -e
+          "$AFT_WORK_DIR/act-lead" "agv1-act-gap-${RUN_ID:-local}" actGapLead
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          # The lead creates both children in one step, one execute call each;
+          # each child holds its turn until stopped.
+          python3 -c 'import json,sys
+          mk = lambda n: {"name": "execute", "arguments": {"code": "return await tools.loom.agent_create(%s)" % json.dumps({"name": n, "brief": "do the task"})}}
+          hold = {"next": "prompt", "tool_calls": [{"name": "df1_hold"}]}
+          print(json.dumps({"steps": [{"next": "prompt", "tool_calls": [mk(sys.argv[1]), mk(sys.argv[2])]},
+            {"next": "tool", "text": "AGV1-ACT-GAP-STARTED"}, hold, hold]}))' "agv1-act-gap-a-${RUN_ID:-local}" "agv1-act-gap-b-${RUN_ID:-local}" |
+            curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" -d @- >/dev/null
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-ACT/chat/$(cat "$AFT_WORK_DIR/actGapLead")"
+        intent: "Create an OpenCode lead, script its two agent_create calls and two children that keep working, and open its chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the lead's chat is ready"
+      - fill: { label: Message, value: "start two workers" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=agent-tray]')?.textContent || '';
+              return (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-ACT-GAP-STARTED') &&
+                t.includes('2 agents · 2 running'); })()
+        budget: 90000
+        intent: "Wait until the lead's turn ends with both children running"
+      - run: |
+          set -e
+          lead="$(cat "$AFT_WORK_DIR/actGapLead")"
+          "$AFT_WORK_DIR/act-kid" "$lead" "agv1-act-gap-a-${RUN_ID:-local}" > "$AFT_WORK_DIR/actGapA"
+          "$AFT_WORK_DIR/act-kid" "$lead" "agv1-act-gap-b-${RUN_ID:-local}" > "$AFT_WORK_DIR/actGapB"
+          # The lead's next turn streams its one line slowly (8 words, 800ms
+          # apart); the one after replies at once.
+          "$AFT_WORK_DIR/act-scenario" "$lead" '[{"text": "AGV1-ACT-GAP-ONE worker a is done, b still runs.", "delay_ms": 800},
+            {"text": "AGV1-ACT-GAP-TWO worker b is done too."}]'
+          "$AFT_WORK_DIR/act-send" "$(cat "$AFT_WORK_DIR/actGapA")" "agv1-act-gap-stop-a-${RUN_ID:-local}" ""
+        intent: "Script the lead's two one-line replies, the first streaming slowly, and stop the first child"
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-ACT-GAP-ONE') &&
+              !!document.querySelector('[data-testid=chat-transcript] [data-streaming-caret]')
+        budget: 60000
+        intent: "Wait until the Lead's first reply is streaming"
+      - run: |
+          set -e
+          "$AFT_WORK_DIR/act-send" "$(cat "$AFT_WORK_DIR/actGapB")" "agv1-act-gap-stop-b-${RUN_ID:-local}" ""
+        intent: "Stop the second child while the Lead's first reply still streams"
+      - wait:
+          fn: &gapShown >-
+            (() => { const rows = Array.from(document.querySelectorAll('[data-testid=chat-transcript] li[data-kind]'));
+              const i = rows.findIndex((r) => (r.textContent || '').includes('AGV1-ACT-GAP-ONE'));
+              const one = rows[i], two = rows[i + 1];
+              if (!one || !two || !(two.textContent || '').includes('AGV1-ACT-GAP-TWO')) return false;
+              if (one.dataset.kind !== 'agent' || two.dataset.kind !== 'agent' || document.querySelector('[data-streaming-caret]')) return false;
+              const cards = document.querySelectorAll('[data-testid=completion-record][data-delivery=delivered]');
+              const md = (r) => r.querySelector('[data-testid=chat-markdown]');
+              const box = (r) => md(r).parentElement.getBoundingClientRect();
+              const lineH = parseFloat(getComputedStyle(md(one).querySelector('p') || md(one)).lineHeight) || 24;
+              const pad = (r) => parseFloat(getComputedStyle(r).paddingBottom);
+              const solo = rows.find((r) => r.dataset.kind === 'agent' && (r.textContent || '').includes('AGV1-ACT-GAP-STARTED'));
+              const gap = box(two).top - box(one).bottom;
+              window.__gap = { gap, padOne: pad(one), padSolo: solo ? pad(solo) : null, textGap: md(two).getBoundingClientRect().top - md(one).getBoundingClientRect().bottom };
+              return cards.length === 2 && gap >= 0 && gap < 16 && pad(one) < pad(solo) && pad(two) === pad(solo) &&
+                md(one).getBoundingClientRect().height < lineH * 1.5 && md(two).getBoundingClientRect().height < lineH * 1.5; })()
+        budget: 90000
+        intent: "Wait until both results are delivered and the Lead's two one-line replies sit back to back, closer than 16px, with the first row's bottom padding tighter than a lone reply's"
+      - run: |
+          set -e
+          agent-browser --session "$AFT_SESSION" eval 'JSON.stringify(window.__gap)'
+        intent: "Log the measured gap between the two replies, their text gap and the row paddings"
+      - reload: true
+      - wait:
+          fn: *gapShown
+        intent: "Wait until a reload shows the two replies back to back, still close together"

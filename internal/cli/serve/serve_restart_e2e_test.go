@@ -21,6 +21,16 @@ import (
 // starts again on the same LOOM_CONFIG_DIR. Needs fleet-db (FLEET_DB_BIN or
 // PATH).
 func TestE2E_ServeRestartKeepsWorkspaceRegistrations(t *testing.T) {
+	testServeRestartKeepsWorkspace(t, syscall.SIGTERM)
+}
+
+// The same holds when serve is SIGKILLed right after the create returns: no
+// shutdown hook runs, so the create itself must have reached disk.
+func TestE2E_ServeCrashKeepsWorkspaceRegistrations(t *testing.T) {
+	testServeRestartKeepsWorkspace(t, syscall.SIGKILL)
+}
+
+func testServeRestartKeepsWorkspace(t *testing.T, sig syscall.Signal) {
 	fleetDB := os.Getenv("FLEET_DB_BIN")
 	if fleetDB == "" {
 		var err error
@@ -46,7 +56,7 @@ func TestE2E_ServeRestartKeepsWorkspaceRegistrations(t *testing.T) {
 	serve := func() *exec.Cmd {
 		cmd := exec.Command(loom, "serve", "--port", fmt.Sprint(port))
 		cmd.Dir = repo
-		cmd.Env = append(os.Environ(), "LOOM_CONFIG_DIR="+cfgDir, "FLEET_DB_BIN="+fleetDB)
+		cmd.Env = append(os.Environ(), "LOOM_CONFIG_DIR="+cfgDir, "FLEET_DB_BIN="+fleetDB, "LOOM_FLEET_DB_URL=")
 		cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
@@ -86,9 +96,15 @@ func TestE2E_ServeRestartKeepsWorkspaceRegistrations(t *testing.T) {
 		t.Fatalf("workspace not listed before the restart: %s", got)
 	}
 
-	_ = first.Process.Signal(syscall.SIGTERM)
-	if err := first.Wait(); err != nil {
+	if err := first.Process.Signal(sig); err != nil {
+		t.Fatal(err)
+	}
+	err = first.Wait()
+	if sig == syscall.SIGTERM && err != nil {
 		t.Fatalf("loom serve did not exit cleanly on SIGTERM: %v", err)
+	}
+	if ws, ok := first.ProcessState.Sys().(syscall.WaitStatus); sig == syscall.SIGKILL && !(ok && ws.Signaled() && ws.Signal() == syscall.SIGKILL) {
+		t.Fatalf("loom serve was not SIGKILLed: %v", err)
 	}
 
 	serve()

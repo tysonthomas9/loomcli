@@ -6,6 +6,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useRef,
   useState,
   type ReactNode,
@@ -106,6 +107,9 @@ export function AgentEditorGroups({
     initialGroups(tabs, initialTab),
   );
   const dragRef = useRef<DragPayload | null>(null);
+  const idBase = useId();
+  const tabId = (tab: AgentEditorTab) => `${idBase}-tab-${tab}`;
+  const panelId = (tab: AgentEditorTab) => `${idBase}-panel-${tab}`;
   const isSplit = groups.length > 1;
   const firstTab = tabs[0]!;
 
@@ -191,6 +195,27 @@ export function AgentEditorGroups({
     [moveTab],
   );
 
+  // WAI-ARIA tabs: arrows (wrapping), Home and End move focus and select.
+  const handleTabKeyDown = (
+    event: React.KeyboardEvent,
+    groupIndex: number,
+    groupTabs: AgentEditorTab[],
+    tab: AgentEditorTab,
+  ) => {
+    const i = groupTabs.indexOf(tab);
+    const n = groupTabs.length;
+    const next = {
+      ArrowRight: groupTabs[(i + 1) % n],
+      ArrowLeft: groupTabs[(i - 1 + n) % n],
+      Home: groupTabs[0],
+      End: groupTabs[n - 1],
+    }[event.key];
+    if (!next) return;
+    event.preventDefault();
+    activate(groupIndex, next);
+    document.getElementById(tabId(next))?.focus();
+  };
+
   const handleDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault();
   }, []);
@@ -213,21 +238,30 @@ export function AgentEditorGroups({
             onDragOver={handleDragOver}
             onDrop={() => handleDrop(groupIndex)}
           >
-            {group.tabs.map((tab) => (
-              <button
-                key={tab}
-                type="button"
-                draggable
-                className={styles.editorTab}
-                data-active={group.active === tab || undefined}
-                aria-current={group.active === tab ? "page" : undefined}
-                onClick={() => activate(groupIndex, tab)}
-                onDragStart={() => handleDragStart(groupIndex, tab)}
-                onDragEnd={handleDragEnd}
-              >
-                {TAB_LABELS[tab]}
-              </button>
-            ))}
+            <div role="tablist" className={styles.tabList}>
+              {group.tabs.map((tab) => (
+                <button
+                  key={tab}
+                  id={tabId(tab)}
+                  type="button"
+                  role="tab"
+                  draggable
+                  className={styles.editorTab}
+                  data-active={group.active === tab || undefined}
+                  aria-selected={group.active === tab}
+                  aria-controls={panelId(tab)}
+                  tabIndex={group.active === tab ? 0 : -1}
+                  onClick={() => activate(groupIndex, tab)}
+                  onKeyDown={(e) =>
+                    handleTabKeyDown(e, groupIndex, group.tabs, tab)
+                  }
+                  onDragStart={() => handleDragStart(groupIndex, tab)}
+                  onDragEnd={handleDragEnd}
+                >
+                  {TAB_LABELS[tab]}
+                </button>
+              ))}
+            </div>
             <span className={styles.stripSpacer} />
             {groupIndex === 0 && !isSplit && group.tabs.length >= 2 ? (
               <div className={styles.stripControls}>
@@ -248,9 +282,11 @@ export function AgentEditorGroups({
             {group.tabs.map((tab) => (
               <div
                 key={tab}
+                id={panelId(tab)}
                 className={styles.paneSlot}
                 data-hidden={group.active !== tab ? "true" : undefined}
                 role="tabpanel"
+                aria-labelledby={tabId(tab)}
                 aria-hidden={group.active !== tab}
               >
                 {renderPane(tab, group.active === tab)}

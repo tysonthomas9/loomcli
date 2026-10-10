@@ -177,6 +177,7 @@ func (s *Session) Messages(ctx context.Context, after string, limit int) (loomha
 				done.Time = time.Unix(*t.CompletedAt, 0)
 			}
 			done.Type, done.StopReason, done.Error = loomharness.EventTurnCompleted, stopReason(t.Status), turnError(t.Error)
+			done.Failure = turnFailure(t)
 			out.Events = append(out.Events, done)
 		}
 	}

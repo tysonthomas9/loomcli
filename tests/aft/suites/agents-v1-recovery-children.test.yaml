@@ -1,0 +1,429 @@
+# Children across recovery (design v2 §9.4; OR4b, OR3c) on OpenCode (or its
+# emulator with LOOM_HARNESS_EMU=1). Only the model is scripted, as in
+# agents-v1-children: the lead's model calls loom.agent_create through Code
+# Mode's execute tool and the Loom bridge makes real task children. A child's
+# model reply can wait on a fake-model gate, so the child stays mid-turn
+# while loom serve restarts (the agents-v1-resume mechanism) until the test
+# opens the gate.
+suite: agents-v1-recovery-children
+classification: { area: agents, feature: agent-api-children-recovery, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: |
+  set -e
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-RKIDS" >/dev/null || true
+  repo="$AFT_WORK_DIR/agv1-rkids-repo"
+  mkdir -p "$repo"
+  git -C "$repo" init -q -b main
+  echo "agents-v1 recovery children ${RUN_ID:-local}" > "$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" -c user.email=e2e@x -c user.name=e2e commit -q -m init
+  printf '{"name":"e2e-agv1-rkids","type":"empty","repos":["%s"]}' "$repo" |
+    curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @- >/dev/null
+  # rkids-events <agent id> <kind>: the agent's saved events of that kind.
+  cat > "$AFT_WORK_DIR/rkids-events" <<'SH'
+  #!/bin/sh
+  set -e
+  curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-RKIDS/v1/agents/$1/events?kind=$2&limit=200"
+  SH
+  chmod +x "$AFT_WORK_DIR/rkids-events"
+  # rkids-kid <lead id> <child name>: the child's agent id.
+  cat > "$AFT_WORK_DIR/rkids-kid" <<'SH'
+  #!/bin/sh
+  set -e
+  curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-RKIDS/v1/agents?parent=$1" |
+    python3 -c 'import json,sys; print([a["agent_id"] for a in json.load(sys.stdin)["agents"] if a["name"] == sys.argv[1]][0])' "$2"
+  SH
+  chmod +x "$AFT_WORK_DIR/rkids-kid"
+teardown: |
+  set +e
+  curl -s -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-RKIDS" >/dev/null
+
+tests:
+  - name: B1 serve restart mid-run - two children working when loom serve restarts both finish after it, each completion reaches the Lead once, and no child input is sent again
+    intent: An OpenCode lead starts two task children whose turns are mid model call; loom serve restarts while both work; after the restart both are still working, and once they finish the Lead's chat shows one completed result card per child, once each before and after a reload, the Lead's history saves one task_completed per child attempt, the Lead's model is handed each completion once and the Lead writes one reply per hand-over, and neither child's brief reached its model twice
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-RKIDS/v1/agents
+          headers: { Idempotency-Key: "agv1-rkids-b1-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-rkids-b1-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-rkids-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: b1LeadId
+        intent: "Create an OpenCode lead through the Agent API"
+      - run: |
+          set -e
+          # The lead creates both children in one step, one execute call each
+          # (the emulator runs one Code Mode call per execute). Each child's
+          # first reply waits on gate b1; the Lead answers each hand-over.
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          python3 -c 'import json,sys
+          mk = lambda n, b: {"name": "execute", "arguments": {"code": "return await tools.loom.agent_create(%s)" % json.dumps({"name": n, "brief": b})}}
+          kid = {"next": "prompt", "gate": "b1", "text": "AGV1-B1-KID-DONE"}
+          ack = {"next": "prompt", "text": "AGV1-B1-LEAD-ACK"}
+          print(json.dumps({"steps": [{"next": "prompt", "tool_calls": [mk(sys.argv[1], "AGV1-B1-BRIEF-A"), mk(sys.argv[2], "AGV1-B1-BRIEF-B")]},
+            {"next": "tool", "text": "AGV1-B1-STARTED"}, kid, kid, ack, ack]}))' "agv1-b1-a-${RUN_ID:-local}" "agv1-b1-b-${RUN_ID:-local}" |
+            curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" -d @- >/dev/null
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-RKIDS/chat/$(cat "$AFT_WORK_DIR/b1LeadId")"
+        intent: "Script the lead's two agent_create calls, the children's gated replies and the Lead's replies, and open the lead's chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the lead's chat is ready"
+      - fill: { label: Message, value: "start two workers" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              const c = Array.from(document.querySelectorAll('[data-testid=started-marker] a')).map((e) => (e.textContent || '').trim()).map((x) => x.endsWith('agv1-b1-a-${RUN_ID:-local}') ? 'agv1-b1-a-${RUN_ID:-local}' : x.endsWith('agv1-b1-b-${RUN_ID:-local}') ? 'agv1-b1-b-${RUN_ID:-local}' : x);
+              return t.includes('AGV1-B1-STARTED') && c.length === 2 &&
+                c.filter((x) => x === 'agv1-b1-a-${RUN_ID:-local}').length === 1 && c.filter((x) => x === 'agv1-b1-b-${RUN_ID:-local}').length === 1 &&
+                !document.querySelector('[data-testid=completion-record]'); })()
+        budget: 90000
+        intent: "Wait until the lead has started both children and neither has a result yet"
+      - run: |
+          set -e
+          lead="$(cat "$AFT_WORK_DIR/b1LeadId")" api="$AFT_BASE_URL/api/workspaces/E2E-AGV1-RKIDS/v1/agents"
+          "$AFT_WORK_DIR/rkids-kid" "$lead" "agv1-b1-a-${RUN_ID:-local}" > "$AFT_WORK_DIR/b1A"
+          "$AFT_WORK_DIR/rkids-kid" "$lead" "agv1-b1-b-${RUN_ID:-local}" > "$AFT_WORK_DIR/b1B"
+          # Both children's replies wait on the gate: each is mid model call.
+          for i in $(seq 1 120); do
+            [ "$(curl -sf "$AFT_FAKE_MODEL_URL/__held" | python3 -c 'import json,sys; print(json.load(sys.stdin)["held"])')" = 2 ] && break
+            sleep 0.5
+          done
+          [ "$i" -lt 120 ]
+          for k in "$(cat "$AFT_WORK_DIR/b1A")" "$(cat "$AFT_WORK_DIR/b1B")"; do
+            curl -sf "$api/$k" | python3 -c 'import json,sys; a=json.load(sys.stdin)
+          assert a["state"] == "active", "child %s is %s before the restart" % (a["agent_id"], a["state"])'
+          done
+          ws="$(dirname "$AFT_LOOM_CONFIG_DIR")"
+          old="$(cat "$ws/.serve.pid")"
+          touch "$ws/.restart-serve"
+          kill "$old"
+          new="$old"
+          for i in $(seq 1 120); do
+            new="$(cat "$ws/.serve.pid")"
+            [ "$new" != "$old" ] && curl -sf "$AFT_API_URL/health" >/dev/null && break
+            sleep 0.5
+          done
+          [ "$new" != "$old" ] && ! kill -0 "$old" 2>/dev/null && curl -sf "$AFT_API_URL/health" >/dev/null
+          api="$AFT_API_URL/api/workspaces/E2E-AGV1-RKIDS/v1/agents"
+          for k in "$(cat "$AFT_WORK_DIR/b1A")" "$(cat "$AFT_WORK_DIR/b1B")"; do
+            curl -sf "$api/$k" | python3 -c 'import json,sys; a=json.load(sys.stdin)
+          assert a["state"] == "active", "child %s is %s after the restart; want still active" % (a["agent_id"], a["state"])'
+          done
+          "$AFT_WORK_DIR/rkids-events" "$lead" task_completed | python3 -c 'import json,sys
+          es = [e for e in json.load(sys.stdin)["events"] if e["kind"] == "task_completed"]
+          assert not es, "the lead has %d task_completed records before its children finished" % len(es)'
+          # The emulator's model client gives up after 30 s: both calls must
+          # still be held, and young enough that their replies arrive in time.
+          curl -sf "$AFT_FAKE_MODEL_URL/__held" | python3 -c 'import json,sys; h=json.load(sys.stdin)
+          assert h["held"] == 2 and h["oldest_ms"] < 25000, "held calls at the gate: %r; want 2, under 25 s old" % h'
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__open" -H "Content-Type: application/json" -d '{"gate":"b1"}' | grep -q '"released":2'
+        intent: "With both children mid model call, restart loom serve; check the new serve still sees both working and the Lead has no result yet, then let both children's replies go"
+      - wait:
+          fn: >-
+            (() => { const r = Array.from(document.querySelectorAll('[data-testid=completion-record]'));
+              const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              const has = (n) => r.filter((e) => (e.textContent || '').includes(n)).length === 1;
+              return r.length === 2 && has('agv1-b1-a-${RUN_ID:-local}') && has('agv1-b1-b-${RUN_ID:-local}') &&
+                r.every((e) => e.dataset.attempt === '0' && e.dataset.outcome === 'completed' && e.dataset.delivery === 'delivered') &&
+                t.includes('AGV1-B1-LEAD-ACK') && !document.querySelector('[data-kind=working]') &&
+                !document.body.textContent.includes('task_completed:'); })()
+        budget: 90000
+        intent: "Wait until each child's result card shows once, completed and read by the Lead, the Lead has replied and no raw task_completed text shows"
+      - reload: true
+      - wait:
+          fn: >-
+            (() => { const r = Array.from(document.querySelectorAll('[data-testid=completion-record]'));
+              const has = (n) => r.filter((e) => (e.textContent || '').includes(n)).length === 1;
+              const c = Array.from(document.querySelectorAll('[data-testid=started-marker] a')).map((e) => (e.textContent || '').trim()).map((x) => x.endsWith('agv1-b1-a-${RUN_ID:-local}') ? 'agv1-b1-a-${RUN_ID:-local}' : x.endsWith('agv1-b1-b-${RUN_ID:-local}') ? 'agv1-b1-b-${RUN_ID:-local}' : x);
+              return document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode' && r.length === 2 &&
+                has('agv1-b1-a-${RUN_ID:-local}') && has('agv1-b1-b-${RUN_ID:-local}') &&
+                r.every((e) => e.dataset.attempt === '0' && e.dataset.outcome === 'completed' && e.dataset.delivery === 'delivered') &&
+                c.length === 2 && c.filter((x) => x === 'agv1-b1-a-${RUN_ID:-local}').length === 1 && c.filter((x) => x === 'agv1-b1-b-${RUN_ID:-local}').length === 1 &&
+                !document.querySelector('section[aria-label="Agent chat"] [role=alert]') &&
+                !document.body.textContent.includes('task_completed:'); })()
+        intent: "Wait until a reload replays each child's Started chip and result card once, with no error"
+      - run: |
+          set -e
+          lead="$(cat "$AFT_WORK_DIR/b1LeadId")" api="$AFT_BASE_URL/api/workspaces/E2E-AGV1-RKIDS/v1/agents"
+          a="$(cat "$AFT_WORK_DIR/b1A")" b="$(cat "$AFT_WORK_DIR/b1B")"
+          # Let the Lead finish its hand-over turns before reading what it saw.
+          for i in $(seq 1 120); do
+            curl -sf "$api/$lead" | python3 -c 'import json,sys; a=json.load(sys.stdin)
+          sys.exit(0 if a["state"] == "idle" and not a.get("running_turn_id") and not a.get("waiting_messages") else 1)' && break
+            sleep 0.5
+          done
+          [ "$i" -lt 120 ]
+          "$AFT_WORK_DIR/rkids-events" "$lead" task_completed > "$AFT_WORK_DIR/b1-records.json"
+          "$AFT_WORK_DIR/rkids-events" "$lead" message.delivered > "$AFT_WORK_DIR/b1-delivered.json"
+          curl -sf "$AFT_FAKE_MODEL_URL/__requests" > "$AFT_WORK_DIR/b1-requests.json"
+          agent-browser --session "$AFT_SESSION" eval "(document.querySelector('[data-testid=chat-transcript]')?.textContent || '').split('AGV1-B1-LEAD-ACK').length - 1" > "$AFT_WORK_DIR/b1-acks.txt"
+          python3 - "$a" "$b" "$AFT_WORK_DIR" <<'PY'
+          import json, sys
+          a, b, d = sys.argv[1:4]
+          recs = [e for e in json.load(open(d + "/b1-records.json"))["events"] if e["kind"] == "task_completed"]
+          for kid in (a, b):
+              mine = [e["payload"] for e in recs if e["payload"].get("child") == kid]
+              assert len(mine) == 1, "the lead saved %d task_completed records for %s; want 1" % (len(mine), kid)
+              assert mine[0]["attempt"] == 0 and mine[0]["outcome"] == "completed", mine[0]
+              assert "AGV1-B1-KID-DONE" in (mine[0].get("summary") or ""), mine[0]
+          assert len(recs) == 2, "the lead saved %d task_completed records; want 2" % len(recs)
+          dl = [e for e in json.load(open(d + "/b1-delivered.json"))["events"] if e["kind"] == "message.delivered"]
+          # A delivered input names the records it carries (OR4c may batch
+          # both children's into one); each record is delivered once in all.
+          carried = lambda e: [(c.get("child"), c.get("attempt")) for c in ((e.get("payload") or {}).get("completions") or [])]
+          for kid in (a, b):
+              n = sum(carried(e).count((kid, 0)) for e in dl)
+              assert n == 1, "%s's record was delivered to the lead %d times; want 1" % (kid, n)
+          title = lambda r: any("You are a title generator" in json.dumps(m.get("content")) for m in r.get("messages", []) if m.get("role") == "system")
+          reqs = [r.get("messages", []) for r in json.load(open(d + "/b1-requests.json"))["requests"] if not title(r)]
+          last = lambda m: json.dumps(m[-1].get("content")) if m and m[-1].get("role") == "user" else ""
+          # No child input is sent again: each brief opened one model request.
+          for brief in ("AGV1-B1-BRIEF-A", "AGV1-B1-BRIEF-B"):
+              n = sum(1 for m in reqs if brief in last(m))
+              assert n == 1, "%s reached a child's model %d times; want 1" % (brief, n)
+          # Each completion was handed to the Lead's model once, and the Lead
+          # wrote one reply per hand-over.
+          lead = [m for m in reqs if any("start two workers" in json.dumps(x.get("content")) for x in m)]
+          hand = [m for m in lead if "task_completed:" in last(m)]
+          for kid in (a, b):
+              n = sum(1 for m in hand if "task_completed:%s:0" % kid in last(m))
+              assert n == 1, "%s's completion was handed to the Lead %d times; want 1" % (kid, n)
+          acks = int(open(d + "/b1-acks.txt").read().strip().strip('"'))
+          assert acks == len(hand), "the Lead wrote %d replies for %d hand-overs" % (acks, len(hand))
+          PY
+        intent: "Check the Lead saved one completed task_completed per child attempt, each delivered once; each child's brief reached its model once; each completion was handed to the Lead's model once; and the Lead wrote one reply per hand-over"
+
+  - name: B2 child deleted before delivery - a child that finishes while the Lead is busy and is then deleted still reaches the Lead once
+    intent: An OpenCode lead's turn is busy when its child finishes; the operator deletes the finished child before the Lead reads its result; when the Lead's turn ends, it is handed that child's completion exactly once, the result card stays once before and after a reload, and nothing shows an error
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-RKIDS/v1/agents
+          headers: { Idempotency-Key: "agv1-rkids-b2-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-rkids-b2-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-rkids-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: b2LeadId
+        intent: "Create an OpenCode lead through the Agent API"
+      - run: |
+          set -e
+          # The lead's follow-up holds its turn (a tool the emulator does not
+          # run waits until interrupted); the child finishes at once.
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          python3 -c 'import json,sys
+          code = "return await tools.loom.agent_create(%s)" % json.dumps({"name": sys.argv[1], "brief": "AGV1-B2-BRIEF"})
+          print(json.dumps({"steps": [{"next": "prompt", "tool_calls": [{"name": "execute", "arguments": {"code": code}}]},
+            {"next": "tool", "tool_calls": [{"name": "df1_hold"}]}, {"next": "prompt", "text": "AGV1-B2-KID-DONE"},
+            {"next": "prompt", "text": "AGV1-B2-LEAD-READ"}]}))' "agv1-b2-kid-${RUN_ID:-local}" |
+            curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" -d @- >/dev/null
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-RKIDS/chat/$(cat "$AFT_WORK_DIR/b2LeadId")"
+        intent: "Script the lead's agent_create call, a lead turn that keeps running, the child's reply and the Lead's reply to the hand-over, and open the lead's chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the lead's chat is ready"
+      - fill: { label: Message, value: "start a worker" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (() => { const r = document.querySelector('[data-testid=completion-record]');
+              return document.querySelectorAll('[data-testid=completion-record]').length === 1 &&
+                (r.textContent || '').includes('agv1-b2-kid-${RUN_ID:-local}') && r.dataset.outcome === 'completed' &&
+                r.dataset.delivery === 'waiting' && !!document.querySelector('[data-kind=working]'); })()
+        budget: 90000
+        intent: "Wait until the child's result card says it waits for the Lead while the Lead's turn runs"
+      - run: |
+          set -e
+          lead="$(cat "$AFT_WORK_DIR/b2LeadId")" api="$AFT_BASE_URL/api/workspaces/E2E-AGV1-RKIDS/v1/agents"
+          kid="$("$AFT_WORK_DIR/rkids-kid" "$lead" "agv1-b2-kid-${RUN_ID:-local}")"
+          echo "$kid" > "$AFT_WORK_DIR/b2Kid"
+          code="$(curl -s -o "$AFT_WORK_DIR/b2-delete.json" -w '%{http_code}' -X DELETE "$api/$kid")"
+          [ "$code" = 204 ] || [ "$code" = 200 ] || { cat "$AFT_WORK_DIR/b2-delete.json"; exit 1; }
+          for i in $(seq 1 20); do
+            curl -sf "$api/$kid" | python3 -c 'import json,sys; a=json.load(sys.stdin)
+          sys.exit(0 if a["state"] == "deleted" and a.get("deleted_at") else 1)' && break
+            sleep 0.25
+          done
+          [ "$i" -lt 20 ]
+          curl -sf "$api/$lead" | python3 -c 'import json,sys; a=json.load(sys.stdin)
+          assert a["state"] == "active", "the lead is %s; want its turn still running" % a["state"]'
+          curl -sf -X POST "$api/$lead/messages" -H "Content-Type: application/json" \
+            -H "Idempotency-Key: agv1-b2-stop-lead-${RUN_ID:-local}" -d '{"text":"","delivery":"interrupt"}' >/dev/null
+        intent: "Delete the finished child while the Lead's turn still runs, check it reads deleted, then stop the Lead's turn so the Lead takes the waiting result next"
+      - wait:
+          fn: >-
+            (() => { const r = Array.from(document.querySelectorAll('[data-testid=completion-record]'));
+              const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              return r.length === 1 && r[0].dataset.delivery === 'delivered' && r[0].dataset.outcome === 'completed' &&
+                t.split('AGV1-B2-LEAD-READ').length === 2 && !document.querySelector('[data-kind=working]') &&
+                !document.body.textContent.includes('task_completed:'); })()
+        budget: 90000
+        intent: "Wait until the deleted child's one result card is read by the Lead and the Lead replies once"
+      - reload: true
+      - wait:
+          fn: >-
+            (() => { const r = Array.from(document.querySelectorAll('[data-testid=completion-record]'));
+              const t = document.querySelector('[data-testid=chat-transcript]')?.textContent || '';
+              return r.length === 1 && r[0].dataset.delivery === 'delivered' && t.split('AGV1-B2-LEAD-READ').length === 2 &&
+                !document.querySelector('section[aria-label="Agent chat"] [role=alert]') &&
+                !document.body.textContent.includes('task_completed:'); })()
+        intent: "Wait until a reload shows the one result card and the Lead's one reply, with no error"
+      - run: |
+          set -e
+          lead="$(cat "$AFT_WORK_DIR/b2LeadId")" kid="$(cat "$AFT_WORK_DIR/b2Kid")"
+          api="$AFT_BASE_URL/api/workspaces/E2E-AGV1-RKIDS/v1/agents"
+          "$AFT_WORK_DIR/rkids-events" "$lead" task_completed > "$AFT_WORK_DIR/b2-records.json"
+          curl -sf "$api/$lead" > "$AFT_WORK_DIR/b2-lead.json"
+          curl -sf "$AFT_FAKE_MODEL_URL/__requests" > "$AFT_WORK_DIR/b2-requests.json"
+          python3 - "$kid" "$AFT_WORK_DIR" <<'PY'
+          import json, sys
+          kid, d = sys.argv[1:3]
+          recs = [e["payload"] for e in json.load(open(d + "/b2-records.json"))["events"] if e["kind"] == "task_completed"]
+          assert len(recs) == 1 and recs[0]["child"] == kid, "records = %r; want one for %s" % (recs, kid)
+          assert recs[0]["attempt"] == 0 and recs[0]["outcome"] == "completed", recs[0]
+          # The record was saved when the child finished, before its Delete:
+          # it keeps the head and is not marked child_deleted.
+          assert recs[0].get("head") and not recs[0].get("child_deleted"), recs[0]
+          lead = json.load(open(d + "/b2-lead.json"))
+          assert not lead.get("attention_reason"), "the lead shows Attention %r" % lead.get("attention_reason")
+          reqs = [r.get("messages", []) for r in json.load(open(d + "/b2-requests.json"))["requests"]]
+          last = lambda m: json.dumps(m[-1].get("content")) if m and m[-1].get("role") == "user" else ""
+          n = sum(1 for m in reqs if "task_completed:%s:0" % kid in last(m))
+          assert n == 1, "the deleted child's completion was handed to the Lead %d times; want 1" % n
+          PY
+        intent: "Check the Lead saved one completed record for the deleted child and was handed it once, and shows no Attention"
+
+  - name: B2 parent deleted - a Lead whose child works cannot be deleted; once deleted, its child's next attempt finishes cleanly with no record, error or Attention
+    intent: While an OpenCode lead's child works, deleting the lead is refused with children_live and the child keeps working; after the child's attempt ends and the Lead reads it, the lead is deleted and its child stays; the child's next attempt then finishes cleanly, completed with no Attention, and its completion is handed to no model
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-RKIDS/v1/agents
+          headers: { Idempotency-Key: "agv1-rkids-b2p-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-rkids-b2p-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-rkids-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: b2pLeadId
+        intent: "Create an OpenCode lead through the Agent API"
+      - run: |
+          set -e
+          # The child holds its first turn (a tool the emulator does not run
+          # waits until interrupted), so it keeps working.
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+          python3 -c 'import json,sys
+          code = "return await tools.loom.agent_create(%s)" % json.dumps({"name": sys.argv[1], "brief": "AGV1-B2P-BRIEF"})
+          print(json.dumps({"steps": [{"next": "prompt", "tool_calls": [{"name": "execute", "arguments": {"code": code}}]},
+            {"next": "tool", "text": "AGV1-B2P-STARTED"}, {"next": "prompt", "tool_calls": [{"name": "df1_hold"}]},
+            {"next": "prompt", "text": "AGV1-B2P-LEAD-READ"}]}))' "agv1-b2p-kid-${RUN_ID:-local}" |
+            curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" -d @- >/dev/null
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-RKIDS/chat/$(cat "$AFT_WORK_DIR/b2pLeadId")"
+        intent: "Script the lead's agent_create call, a child that keeps working and the Lead's reply to its result, and open the lead's chat"
+      - wait:
+          fn: >-
+            document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'
+        intent: "Wait until the lead's chat is ready"
+      - fill: { label: Message, value: "start a worker" }
+      - press: Enter
+      - wait:
+          fn: >-
+            (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-B2P-STARTED') &&
+            (document.querySelector('[data-testid=started-marker]')?.textContent || '').includes('agv1-b2p-kid-${RUN_ID:-local}')
+        budget: 90000
+        intent: "Wait until the lead has started its child"
+      - run: |
+          set -e
+          lead="$(cat "$AFT_WORK_DIR/b2pLeadId")" api="$AFT_BASE_URL/api/workspaces/E2E-AGV1-RKIDS/v1/agents"
+          kid="$("$AFT_WORK_DIR/rkids-kid" "$lead" "agv1-b2p-kid-${RUN_ID:-local}")"
+          echo "$kid" > "$AFT_WORK_DIR/b2pKid"
+          # The child is active and its model has taken the held step: one
+          # request ends with its brief and only the Lead's reply is queued.
+          for i in $(seq 1 120); do
+            curl -sf "$api/$kid" | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin)["state"] == "active" else 1)' &&
+              curl -sf "$AFT_FAKE_MODEL_URL/__requests" | python3 -c 'import json,sys; d=json.load(sys.stdin)
+          title = lambda r: any("You are a title generator" in json.dumps(m.get("content")) for m in r.get("messages", []) if m.get("role") == "system")
+          n = sum(1 for r in d["requests"] if not title(r) and r.get("messages") and r["messages"][-1].get("role") == "user" and "AGV1-B2P-BRIEF" in json.dumps(r["messages"][-1].get("content")))
+          sys.exit(0 if n == 1 and d["queued"] == 1 else 1)' && break
+            sleep 0.5
+          done
+          [ "$i" -lt 120 ]
+          code="$(curl -s -o "$AFT_WORK_DIR/b2p-refused.json" -w '%{http_code}' -X DELETE "$api/$lead")"
+          [ "$code" = 409 ] && grep -q children_live "$AFT_WORK_DIR/b2p-refused.json" || { echo "delete: $code $(cat "$AFT_WORK_DIR/b2p-refused.json")"; exit 1; }
+          curl -sf "$api/$lead" | python3 -c 'import json,sys; a=json.load(sys.stdin)
+          assert a["state"] != "deleted" and not a.get("deleted_at"), a'
+          curl -sf "$api/$kid" | python3 -c 'import json,sys; a=json.load(sys.stdin)
+          assert a["state"] == "active", "the child is %s after the refused Delete; want still working" % a["state"]'
+          curl -sf -X POST "$api/$kid/messages" -H "Content-Type: application/json" \
+            -H "Idempotency-Key: agv1-b2p-stop-kid-${RUN_ID:-local}" -d '{"text":"","delivery":"interrupt"}' >/dev/null
+        intent: "While the child works, Delete the lead: it is refused with children_live and both stay; then stop the child, which ends its attempt"
+      - wait:
+          fn: >-
+            (() => { const r = Array.from(document.querySelectorAll('[data-testid=completion-record]'));
+              return r.length === 1 && r[0].dataset.delivery === 'delivered' &&
+                (document.querySelector('[data-testid=chat-transcript]')?.textContent || '').includes('AGV1-B2P-LEAD-READ') &&
+                !document.querySelector('[data-kind=working]'); })()
+        budget: 90000
+        intent: "Wait until the Lead has read the child's result and replied"
+      - run: |
+          set -e
+          lead="$(cat "$AFT_WORK_DIR/b2pLeadId")" kid="$(cat "$AFT_WORK_DIR/b2pKid")" api="$AFT_BASE_URL/api/workspaces/E2E-AGV1-RKIDS/v1/agents"
+          for i in $(seq 1 120); do
+            curl -sf "$api/$lead" | python3 -c 'import json,sys; a=json.load(sys.stdin)
+          sys.exit(0 if a["state"] == "idle" and not a.get("running_turn_id") and not a.get("waiting_messages") else 1)' && break
+            sleep 0.5
+          done
+          [ "$i" -lt 120 ]
+          code="$(curl -s -o "$AFT_WORK_DIR/b2p-delete.json" -w '%{http_code}' -X DELETE "$api/$lead")"
+          [ "$code" = 204 ] || [ "$code" = 200 ] || { echo "delete: $code $(cat "$AFT_WORK_DIR/b2p-delete.json")"; exit 1; }
+          curl -sf "$api/$lead" | python3 -c 'import json,sys; a=json.load(sys.stdin)
+          assert a["state"] == "deleted", "the lead is %s; want deleted" % a["state"]'
+          curl -sf "$api/$kid" | python3 -c 'import json,sys; a=json.load(sys.stdin)
+          assert a["state"] != "deleted", "the child was deleted with its lead"'
+          curl -sf -X POST "$AFT_FAKE_MODEL_URL/__script" -H "Content-Type: application/json" \
+            -d '{"steps":[{"next":"prompt","text":"AGV1-B2P-KID-AGAIN"}]}' >/dev/null
+          curl -sf "$AFT_FAKE_MODEL_URL/__requests" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["requests"]))' > "$AFT_WORK_DIR/b2p-before"
+          curl -sf -X POST "$api/$kid/messages" -H "Content-Type: application/json" \
+            -H "Idempotency-Key: agv1-b2p-again-${RUN_ID:-local}" -d '{"text":"AGV1-B2P-ONCE-MORE"}' >/dev/null
+          for i in $(seq 1 120); do
+            curl -sf "$api/$kid" > "$AFT_WORK_DIR/b2p-kid.json"
+            python3 -c 'import json,sys; a=json.load(open(sys.argv[1])); sys.exit(0 if a["state"] == "finished" and a.get("attempt") == 1 else 1)' "$AFT_WORK_DIR/b2p-kid.json" && break
+            sleep 0.5
+          done
+          [ "$i" -lt 120 ]
+          # Settle on the run's own store (read only): the attempt's completion
+          # marker is processed (dropped, as its parent is deleted), and the
+          # deleted Lead holds no task_completed record. Then
+          # wait out one resync interval (5 s) so a late hand-over would show.
+          db="$AFT_LOOM_CONFIG_DIR/agents.db"
+          q() { sqlite3 -readonly "$db" "$1"; }
+          for i in $(seq 1 120); do
+            [ "$(q "SELECT count(*) FROM agent_completion_markers WHERE child_agent_id = '$kid'")" = 0 ] && break
+            sleep 0.5
+          done
+          [ "$i" -lt 120 ] || { echo "the child's completion marker was never processed"; exit 1; }
+          sleep 6
+          [ "$(q "SELECT count(*) FROM agent_completion_markers WHERE child_agent_id = '$kid' OR parent_agent_id = '$lead'")" = 0 ] ||
+            { echo "a completion marker is still owed"; exit 1; }
+          [ "$(q "SELECT count(*) FROM agent_events WHERE agent_id = '$lead' AND kind = 'task_completed'")" = 0 ] ||
+            { echo "the deleted Lead has task_completed records"; exit 1; }
+          curl -sf "$api/$kid" > "$AFT_WORK_DIR/b2p-kid.json"
+          curl -sf "$AFT_FAKE_MODEL_URL/__requests" > "$AFT_WORK_DIR/b2p-requests.json"
+          python3 - "$kid" "$AFT_WORK_DIR" <<'PY'
+          import json, sys
+          kid, d = sys.argv[1:3]
+          a = json.load(open(d + "/b2p-kid.json"))
+          assert a["state"] == "finished" and a.get("outcome") == "completed", "child: state %s outcome %s" % (a["state"], a.get("outcome"))
+          assert not a.get("attention_reason"), "the child shows Attention %r" % a.get("attention_reason")
+          all_reqs = json.load(open(d + "/b2p-requests.json"))["requests"]
+          title = lambda r: any("You are a title generator" in json.dumps(m.get("content")) for m in r.get("messages", []) if m.get("role") == "system")
+          new = [r for r in all_reqs[int(open(d + "/b2p-before").read()):] if not title(r)]
+          # The child's next attempt made the only new model request; the
+          # deleted Lead was handed nothing.
+          assert len(new) == 1 and "AGV1-B2P-ONCE-MORE" in json.dumps(new[0]["messages"][-1].get("content")), \
+              "model requests after the Lead's Delete: %r; want only the child's next attempt" % [json.dumps(r["messages"][-1])[:200] for r in new]
+          assert "task_completed:" not in json.dumps(all_reqs[int(open(d + "/b2p-before").read()):]), "a completion was handed to a model after the Lead's Delete"
+          PY
+        intent: "Once the Lead is idle, Delete it: it reads deleted and its child stays; the child's next attempt finishes completed with no Attention, no completion marker is left, the deleted Lead saves no record, and the completion reaches no model"

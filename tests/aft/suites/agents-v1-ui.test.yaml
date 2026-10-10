@@ -78,7 +78,7 @@ tests:
       - wait:
           fn: >-
             (() => { const tabs = Array.from(document.querySelectorAll('[data-testid=agent-editor-groups] button[draggable]')).map((b) => (b.textContent || '').trim());
-              const on = document.querySelector('[data-testid=agent-editor-groups] button[aria-current=page]')?.textContent;
+              const on = document.querySelector('[data-testid=agent-editor-groups] [role=tab][aria-selected=true]')?.textContent;
               return tabs.join('|') === 'Chat|Info|Git|Diff|Files' && on === 'Chat' &&
                 document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'; })()
         intent: "Wait until the lead opens on Chat | Info | Git | Diff | Files with Chat selected and no Terminal"
@@ -122,7 +122,7 @@ tests:
               const root = p?.querySelector('[data-root-key^="agent:' + id + ':"]');
               if (root && root.getAttribute('aria-expanded') === 'false') root.click();
               return location.search === '?tab=files' &&
-                document.querySelector('[data-testid=agent-editor-groups] button[aria-current=page]')?.textContent === 'Files' &&
+                document.querySelector('[data-testid=agent-editor-groups] [role=tab][aria-selected=true]')?.textContent === 'Files' &&
                 !!root && !!p.querySelector('[aria-label="notes-ui.txt"]'); })()
         intent: "Wait until Files shows the lead's checkout"
       - reload: true
@@ -133,7 +133,7 @@ tests:
       - wait:
           fn: >-
             location.search !== '?tab=files' &&
-            document.querySelector('[data-testid=agent-editor-groups] button[aria-current=page]')?.textContent === 'Chat' &&
+            document.querySelector('[data-testid=agent-editor-groups] [role=tab][aria-selected=true]')?.textContent === 'Chat' &&
             !!document.querySelector('[data-testid=chat-transcript]')
         intent: "Wait until Chat is back with its transcript"
 

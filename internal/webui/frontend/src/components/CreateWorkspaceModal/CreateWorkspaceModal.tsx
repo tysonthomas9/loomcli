@@ -8,7 +8,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { AetherModal, aetherModalStyles } from "@/components/AetherModal";
 import { createWorkspace } from "@/hooks/api";
 import type { CreateWorkspaceRequest, WorkspaceData } from "@/api/workspace";
-import { useRegisterEscapeLayer, LAYER_MODAL, useJobPolling } from "@/hooks";
+import { useJobPolling } from "@/hooks";
 import { useFocusTrap, useFocusReturn } from "@/hooks/ui";
 import styles from "./CreateWorkspaceModal.module.css";
 
@@ -106,7 +106,6 @@ export function CreateWorkspaceModal({
     }
   }, [isOpen]);
 
-  useRegisterEscapeLayer(LAYER_MODAL, onClose, isOpen && !isPolling);
   useFocusTrap(dialogRef, isOpen, { initialFocus: nameRef });
   useFocusReturn(isOpen);
 
@@ -224,6 +223,7 @@ export function CreateWorkspaceModal({
       ariaLabel="New Workspace"
       onClose={onClose}
       disableOverlayDismiss={isPolling}
+      closeOnEscape={!isPolling}
       dialogRef={dialogRef}
       overlayTestId="create-workspace-overlay"
       closeTestId="create-workspace-close"

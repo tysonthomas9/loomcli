@@ -261,7 +261,7 @@ func startAgentAPI(ctx context.Context, cfg webui.ServerConfig) *agentwire.API {
 	}
 	api, err := agentwire.Start(ctx, agentwire.Config{Dir: bootstrap.LoomDir(),
 		OpenCodeBin: bin, Skills: cfg.Store, APIBase: agentAPIBase(cfg.BindAddress, cfg.Port),
-		GitHubRead: webuiapp.AgentGitHubRead(cfg)})
+		GitHubRead: webuiapp.AgentGitHubRead(cfg), PRWatchHost: webuiapp.HostGitHub(cfg)})
 	if err != nil {
 		slog.Warn("Agent API not started", "error", err)
 		return nil
@@ -658,6 +658,9 @@ func buildServerConfig(monitorHandlers webui.MonitorHandlers, fs fleetState, sto
 	}
 	applyFleetConfig(&cfg, fs)
 	applyWorkspaceConfig(&cfg)
+	if storeHandle != nil {
+		cfg.WorkspaceCreateFn = workspacemgr.FlushAfterCreate(cfg.WorkspaceCreateFn, storeHandle.Flush)
+	}
 	applyCORSConfig(&cfg)
 	return cfg
 }

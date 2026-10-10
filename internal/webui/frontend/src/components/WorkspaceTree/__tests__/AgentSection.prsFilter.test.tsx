@@ -62,7 +62,9 @@ vi.mock("@dnd-kit/sortable", () => ({
     isDragging: false,
   }),
   verticalListSortingStrategy: {},
+  sortableKeyboardCoordinates: vi.fn(),
   arrayMove: vi.fn(),
+  sortableKeyboardCoordinates: vi.fn(),
 }));
 
 vi.mock("@/components/AgentCard", () => ({

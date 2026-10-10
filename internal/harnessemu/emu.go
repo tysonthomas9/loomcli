@@ -109,6 +109,8 @@ type session struct {
 	Played   int              `json:"played"`            // scripted turns used
 	Running  *run             `json:"running,omitempty"` // the running turn
 	Asks     map[string]any   `json:"asks,omitempty"`    // pending per_ and frm_ asks by id, as listed
+
+	Instructions map[string]string `json:"instructions,omitempty"` // instruction entries by name (instructions.go)
 }
 
 // agent is the session's metadata agent_id, or "".
@@ -224,6 +226,11 @@ func (s *Server) save() {
 		_ = os.Rename(s.path+".tmp", s.path)
 	}
 }
+
+// FailSessionCreate is the suffix of a test-owned flag file beside the
+// scenario file: while it exists, creating a session answers 503, so a
+// Create's start fails as a retryable harness error (S3 C2).
+const FailSessionCreate = ".fail-session-create"
 
 // next is the session's next scripted turn, or an echo of text.
 func (s *Server) next(ss *session, text string) Turn {
@@ -663,6 +670,7 @@ func (s *Server) h(fn func(w http.ResponseWriter, r *http.Request, ss *session, 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	s.sessionRoutes(mux)
+	s.instructionRoutes(mux)
 	mux.HandleFunc("GET /api/info", func(w http.ResponseWriter, _ *http.Request) {
 		reply(w, 200, map[string]any{"pid": os.Getpid(), "version": Version})
 	})
@@ -703,6 +711,11 @@ func (s *Server) Handler() http.Handler {
 		reply(w, 200, map[string]any{"data": out})
 	})
 	mux.HandleFunc("POST /api/session", func(w http.ResponseWriter, r *http.Request) {
+		if _, err := os.Stat(s.scenarios + FailSessionCreate); s.scenarios != "" && err == nil {
+			reply(w, http.StatusServiceUnavailable, map[string]any{"name": "UnknownError",
+				"data": map[string]any{"message": "emulator: session create refused by " + FailSessionCreate}})
+			return
+		}
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		s.mu.Lock()

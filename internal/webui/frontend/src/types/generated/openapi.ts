@@ -2533,6 +2533,30 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/workspaces/{ws}/v1/settings/limit-resume": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get whether this workspace auto-resumes agents after a usage limit
+     * @description Off by default. When on, a persistent agent whose turn ends on a usage limit (failure class usage_limit, any harness) is sent "Continue where you left off." from loom:limit-resume after 15m, then 30m, 1h, 1h, 1h and 2h for each further limit in a row; after six no more is sent. Any other turn end or message ends the run.
+     */
+    get: operations["getLimitResumeV1"];
+    /**
+     * Turn usage-limit auto-resume on or off for this workspace
+     * @description Turning it off also drops any resume not yet sent, when it comes due.
+     */
+    put: operations["setLimitResumeV1"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/workspaces/{ws}/v1/presets": {
     parameters: {
       query?: never;
@@ -2790,6 +2814,10 @@ export interface components {
       /** @description Set on responses */
       harness?: string;
       models: string[];
+    };
+    /** @description Whether the workspace auto-resumes agents after a usage limit. */
+    AgentV1LimitResume: {
+      enabled: boolean;
     };
     /** @description One option a model takes. current_value is the value used when none is set. */
     AgentV1OptionDescriptor: {
@@ -9462,6 +9490,58 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AgentV1CustomModels"];
+        };
+      };
+      default: components["responses"]["AgentV1Error"];
+    };
+  };
+  getLimitResumeV1: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The setting */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentV1LimitResume"];
+        };
+      };
+      default: components["responses"]["AgentV1Error"];
+    };
+  };
+  setLimitResumeV1: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Workspace identifier */
+        ws: components["parameters"]["WorkspaceId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AgentV1LimitResume"];
+      };
+    };
+    responses: {
+      /** @description The saved setting */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AgentV1LimitResume"];
         };
       };
       default: components["responses"]["AgentV1Error"];

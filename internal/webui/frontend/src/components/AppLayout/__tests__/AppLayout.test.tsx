@@ -6,9 +6,15 @@
  * Unit tests for AppLayout component.
  */
 
-import { render, screen } from "@testing-library/react";
-import { describe, it, expect } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
 import "@testing-library/jest-dom";
+
+import {
+  KeyboardShortcutProvider,
+  LAYER_CONFIRM_DIALOG,
+  useRegisterEscapeLayer,
+} from "@/hooks";
 
 import { AppLayout } from "../AppLayout";
 
@@ -667,6 +673,91 @@ describe("AppLayout", () => {
       expect(
         screen.getByRole("button", { name: "Action" }),
       ).toBeInTheDocument();
+    });
+  });
+
+  describe("phone drawer (MOB2)", () => {
+    const opener = (
+      <button type="button" aria-controls="agents-drawer">
+        Agents
+      </button>
+    );
+
+    it("has no backdrop or name while closed", () => {
+      render(
+        <AppLayout navRail={opener} sidebar={<div>tree</div>}>
+          <p>content</p>
+        </AppLayout>,
+      );
+      expect(
+        screen.queryByRole("button", { name: "Close agents" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("complementary", { name: "Agents" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("closes on the backdrop and on Escape, and refocuses its opener", () => {
+      const onSidebarClose = vi.fn();
+      render(
+        <KeyboardShortcutProvider>
+          <AppLayout
+            navRail={opener}
+            sidebar={<div>tree</div>}
+            sidebarOpen
+            onSidebarClose={onSidebarClose}
+          >
+            <p>content</p>
+          </AppLayout>
+        </KeyboardShortcutProvider>,
+      );
+      expect(
+        screen.getByRole("complementary", { name: "Agents" }),
+      ).toHaveTextContent("tree");
+      fireEvent.click(screen.getByRole("button", { name: "Close agents" }));
+      expect(onSidebarClose).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole("button", { name: "Agents" })).toHaveFocus();
+      screen.getByRole("button", { name: "Close agents" }).focus();
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(onSidebarClose).toHaveBeenCalledTimes(2);
+      expect(screen.getByRole("button", { name: "Agents" })).toHaveFocus();
+    });
+  });
+
+  describe("phone drawer Escape (MOB2)", () => {
+    function Dialog(): JSX.Element {
+      useRegisterEscapeLayer(LAYER_CONFIRM_DIALOG, () => {}, true);
+      return <div role="dialog" aria-label="Confirm" />;
+    }
+
+    it("leaves Escape to a dialog above it", () => {
+      const onSidebarClose = vi.fn();
+      const { rerender } = render(
+        <KeyboardShortcutProvider>
+          <AppLayout
+            sidebar={<div>tree</div>}
+            sidebarOpen
+            onSidebarClose={onSidebarClose}
+          >
+            <Dialog />
+          </AppLayout>
+        </KeyboardShortcutProvider>,
+      );
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(onSidebarClose).not.toHaveBeenCalled();
+      rerender(
+        <KeyboardShortcutProvider>
+          <AppLayout
+            sidebar={<div>tree</div>}
+            sidebarOpen
+            onSidebarClose={onSidebarClose}
+          >
+            <p>content</p>
+          </AppLayout>
+        </KeyboardShortcutProvider>,
+      );
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(onSidebarClose).toHaveBeenCalledTimes(1);
     });
   });
 });

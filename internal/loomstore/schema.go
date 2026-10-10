@@ -236,4 +236,104 @@ CREATE TABLE IF NOT EXISTS agent_update_requests (
   PRIMARY KEY (agent_id, request_id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS agent_update_requests_switching ON agent_update_requests(agent_id) WHERE status = 'switching';
-`}
+`, `
+-- OR10: an agent's watch on one PR of its repo. viewer is the host GitHub
+-- login the watch last read as; the cursors are what the agent was last
+-- told about (head SHA, check runs, comments), last_told its text, and
+-- wake_count the wakes since check or conflict news.
+CREATE TABLE IF NOT EXISTS pr_watches (
+  agent_id        TEXT NOT NULL,
+  workspace_id    TEXT NOT NULL,
+  owner           TEXT NOT NULL,
+  repo            TEXT NOT NULL,
+  number          INTEGER NOT NULL,
+  viewer          TEXT NOT NULL,
+  head_sha        TEXT NOT NULL,
+  checks_cursor   TEXT NOT NULL,
+  comments_cursor TEXT NOT NULL,
+  wake_count      INTEGER NOT NULL DEFAULT 0,
+  last_told       TEXT NOT NULL DEFAULT '',
+  created_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL,
+  PRIMARY KEY (agent_id, owner, repo, number)
+);
+CREATE INDEX IF NOT EXISTS pr_watches_workspace ON pr_watches(workspace_id);
+`, historyRepair, `
+-- OR7: usage-limit auto-resume. A workspace's opt-in (off by default), and
+-- each agent's one resume owed: its latest turn ended on a usage limit, the
+-- attempt-th in a row, so a resume is due at due_at. A Send consumes it in
+-- its own transaction, and any other turn end drops it.
+CREATE TABLE IF NOT EXISTS agent_workspace_settings (
+  workspace_id TEXT PRIMARY KEY,
+  limit_resume INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS agent_limit_resumes (
+  agent_id TEXT PRIMARY KEY REFERENCES agents(agent_id),
+  turn_id  TEXT NOT NULL,
+  attempt  INTEGER NOT NULL,
+  session  TEXT NOT NULL,          -- the native session whose turn hit the limit
+  due_at   TEXT NOT NULL
+);
+`, agentTurns}
+
+// historyRepair (OR11) is the one-time scan of histories saved before a state
+// change and its events were one write: it is run again with no effect. An
+// agent's current state with no saved transition to it gets one
+// history.repaired event: its current state and the state its history last
+// shows (creating when none), never a transition. What can't be rebuilt is
+// recorded in agent_history_unrepaired instead: a saved transition whose from
+// is not the state saved before it (a lost transition between them), and a
+// child attempt that ended with no task_completed on its parent and none owed
+// (its outcome, head and summary are gone). Deleted agents and purged
+// histories are empty on purpose: they are never repaired or reported, and a
+// purged or deleted child's attempts are not owed a record.
+const historyRepair = `
+CREATE TABLE IF NOT EXISTS agent_history_unrepaired (
+  agent_id   TEXT NOT NULL,
+  gap        TEXT NOT NULL,   -- state: detail is the seq after the lost transition; task_completed: <child>:<attempt>
+  detail     TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (agent_id, gap, detail)
+);
+INSERT OR IGNORE INTO agent_history_unrepaired (agent_id, gap, detail, created_at)
+SELECT agent_id, 'state', seq, strftime('%Y-%m-%dT%H:%M:%f', 'now') || '000000Z'
+FROM (SELECT e.agent_id, e.seq, e.kind, json_extract(e.redacted_payload, '$.from') AS from_state,
+    LAG(CASE e.kind WHEN 'history.repaired' THEN json_extract(e.redacted_payload, '$.state')
+      ELSE json_extract(e.redacted_payload, '$.to') END, 1, 'creating') OVER (PARTITION BY e.agent_id ORDER BY e.seq) AS prev
+  FROM agent_events e JOIN agents a ON a.agent_id = e.agent_id
+  WHERE a.deleted_at IS NULL AND a.history_purged_at IS NULL AND e.kind IN ('agent.state_changed', 'history.repaired'))
+WHERE kind = 'agent.state_changed' AND from_state IS NOT prev;
+INSERT OR IGNORE INTO agent_events (agent_id, seq, event_id, kind, redacted_payload, created_at)
+SELECT agent_id, (SELECT COALESCE(MAX(seq), 0) + 1 FROM agent_events e WHERE e.agent_id = a.agent_id),
+  'history.repaired:' || agent_id || ':' || revision, 'history.repaired',
+  json_object('agentId', agent_id, 'type', 'history.repaired', 'state', state, 'reason', state_reason,
+    'outcome', outcome, 'attempt', attempt, 'after', seen),
+  strftime('%Y-%m-%dT%H:%M:%f', 'now') || '000000Z'
+FROM (SELECT a.*, COALESCE((SELECT CASE e.kind WHEN 'history.repaired' THEN json_extract(e.redacted_payload, '$.state')
+    ELSE json_extract(e.redacted_payload, '$.to') END FROM agent_events e
+    WHERE e.agent_id = a.agent_id AND e.kind IN ('agent.state_changed', 'history.repaired')
+    ORDER BY e.seq DESC LIMIT 1), 'creating') AS seen
+  FROM agents a WHERE a.deleted_at IS NULL AND a.history_purged_at IS NULL) a
+WHERE state != seen;
+INSERT OR IGNORE INTO agent_history_unrepaired (agent_id, gap, detail, created_at)
+WITH RECURSIVE c AS (SELECT c.* FROM agents c JOIN agents p ON p.agent_id = c.parent_agent_id
+    WHERE c.mode = 'single_task' AND c.deleted_at IS NULL AND c.history_purged_at IS NULL
+      AND p.deleted_at IS NULL AND p.history_purged_at IS NULL),
+  n(k) AS (SELECT 0 UNION ALL SELECT k + 1 FROM n WHERE k + 1 < (SELECT MAX(attempt) FROM c))
+SELECT c.parent_agent_id, 'task_completed', c.agent_id || ':' || n.k, strftime('%Y-%m-%dT%H:%M:%f', 'now') || '000000Z'
+FROM c JOIN n ON n.k < c.attempt
+WHERE NOT EXISTS (SELECT 1 FROM agent_events e WHERE e.agent_id = c.parent_agent_id
+    AND e.event_id = 'task_completed:' || c.agent_id || ':' || n.k)
+  AND NOT EXISTS (SELECT 1 FROM agent_completion_markers m WHERE m.child_agent_id = c.agent_id AND m.attempt = n.k);
+`
+
+// agentTurns (OR6a) counts the turns Loom has ended per agent.
+const agentTurns = `
+-- OR6a: how many of an agent's turns Loom has ended (a running turn cleared
+-- by a state change, or a recovered input whose turn ran while Loom was
+-- down). The last one's checkpoint ref is refs/loom/checkpoints/<agent>/turn/<ended>.
+CREATE TABLE IF NOT EXISTS agent_turns (
+  agent_id TEXT PRIMARY KEY REFERENCES agents(agent_id),
+  ended    INTEGER NOT NULL
+);
+`

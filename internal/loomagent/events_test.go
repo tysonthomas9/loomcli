@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -381,5 +383,48 @@ func TestUsageRowCarriesStepTokens(t *testing.T) {
 	want := []tokens{{10, 20, 30, 40, 0.25}, {1, 2, 0, 0, 0}}
 	if !slices.Equal(got, want) {
 		t.Fatalf("usage rows %+v, want %+v", got, want)
+	}
+}
+
+// TestFailureFieldsSurviveBackfill (OR9): a failed turn's failure class and
+// retryable are saved on its agent.turn_completed row, from the live feed
+// and from a backfill when the feed missed the turn end.
+func TestFailureFieldsSurviveBackfill(t *testing.T) {
+	e := newCreateEnv(t)
+	fh := e.h.Harness.(*fake.Harness)
+	s := e.service(ServiceConfig{})
+	stop := runFeed(t, s, "opencode")
+	defer stop()
+	a, _ := newLead(t, e, s, "alpha")
+	limit := &loomharness.Failure{Class: loomharness.FailureUsageLimit, Retryable: true}
+	fh.Script(a.AgentID,
+		fake.Turn{Steps: []fake.Step{{Fail: "usage limit", Failure: limit}}},
+		fake.Turn{Steps: []fake.Step{{Fail: "bad key", Failure: &loomharness.Failure{Class: loomharness.FailureAuth}, Gap: true}}},
+		fake.Turn{Steps: []fake.Step{{Fail: "no class"}}})
+	type failure struct {
+		Error   string               `json:"error"`
+		Failure *loomharness.Failure `json:"failure"`
+	}
+	ended := func() []failure {
+		var out []failure
+		for _, r := range kinds(rows(t, s, a.AgentID, 0), EventTurnCompleted) {
+			var f failure
+			if err := json.Unmarshal(r.Payload, &f); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, f)
+		}
+		return out
+	}
+	for i, msg := range []string{"one", "two", "three"} {
+		mustSendMsg(t, s, sendReq(a.AgentID, "u"+msg, msg, user))
+		drained(t, s, "turn "+msg+" ended", func() bool { return len(ended()) == i+1 && s.get(t, a.AgentID).State == StateIdle })
+	}
+	want := []failure{{"usage limit", limit}, {"bad key", &loomharness.Failure{Class: loomharness.FailureAuth}}, {"no class", nil}}
+	if got := ended(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("turn_completed rows %+v, want %+v", got, want)
+	}
+	if r := kinds(rows(t, s, a.AgentID, 0), EventTurnCompleted)[1]; !strings.Contains(string(r.Payload), `"failure":{"class":"auth","retryable":false}`) {
+		t.Fatalf("a non-retryable failure must say so: %s", r.Payload)
 	}
 }

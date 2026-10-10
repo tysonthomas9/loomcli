@@ -61,6 +61,16 @@ type SlotSend struct {
 	// Result builds the Send's result JSON, stored as its receipt. replaced
 	// reports that this Send replaced the sender's waiting text.
 	Result func(replaced bool) (string, error)
+	// LimitResume marks this Send a usage-limit resume (OR7). In the Send's
+	// transaction a resume marks the agent's resume owed sent, keeping its
+	// attempt count, so its receipt and the consumed eligibility commit
+	// together; any other Send drops it, ending the episode. A retry changes
+	// neither.
+	LimitResume bool
+	// PRWatch is the PR watch a PR-watch wake reports (OR8): in the Send's
+	// transaction it saves the wake's cursor, or removes the watch, so a
+	// crash never tells the same news twice. A retry changes neither.
+	PRWatch *PRWatchWake
 }
 
 // ErrSlotBusy means the sender's slot holds a message this Send would lose:
@@ -128,6 +138,12 @@ func sendTx(ctx context.Context, tx *sql.Tx, in SlotSend) (r Receipt, saved []Ev
 		_, err = tx.ExecContext(ctx, `INSERT INTO agent_send_receipts (agent_id, request_id, sender, result_json, created_at,
 			body, native_key, notices) VALUES (?,?,?,?,?,?,?,'{}')`, r.AgentID, r.RequestID, r.Sender, r.ResultJSON, r.CreatedAt, in.Body, nativeKey)
 		if err != nil {
+			return err
+		}
+		if err = sendLimitResume(ctx, tx, in); err != nil {
+			return err
+		}
+		if err = sendPRWatch(ctx, tx, in.PRWatch); err != nil {
 			return err
 		}
 		saved, err = sendEvents(ctx, tx, in, rev)
@@ -363,13 +379,22 @@ func unreceipted(ctx context.Context, tx *sql.Tx, agentID string, notices []Noti
 	return fresh, nil
 }
 
-// SaveReceipt stores r as the receipt of a Send that changes no slot (an
-// interrupt with no message). The caller holds the agent lock and has
-// checked that r.RequestID has no receipt yet.
-func (s *Store) SaveReceipt(ctx context.Context, r Receipt) (Receipt, error) {
+// SaveStopReceipt stores r as the receipt of a Send that changes no slot (an
+// interrupt with no message) and, in the same transaction, mark as the
+// agent's usage-limit resume owed (OR7): a Stop ends the episode. The
+// caller holds the agent lock and has checked that r.RequestID has no
+// receipt yet.
+func (s *Store) SaveStopReceipt(ctx context.Context, r Receipt, mark LimitResume) (Receipt, error) {
 	r.CreatedAt = Stamp(time.Now())
-	_, err := s.db.ExecContext(ctx, `INSERT INTO agent_send_receipts (agent_id, request_id, sender, result_json, created_at, notices)
+	err := s.tx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `INSERT INTO agent_send_receipts (agent_id, request_id, sender, result_json, created_at, notices)
 		VALUES (?,?,?,?,?,'{}')`, r.AgentID, r.RequestID, r.Sender, r.ResultJSON, r.CreatedAt)
+		if err == nil {
+			err = putLimitResume(ctx, tx, mark)
+		}
+		commitStateCrash()
+		return err
+	})
 	return r, err
 }
 
@@ -593,6 +618,24 @@ func (s *Store) MarkDelivered(ctx context.Context, agentID, sender, requestID st
 		return ErrNotFound
 	}
 	return nil
+}
+
+// MarkRan marks the input agentID handed with native key key delivered and
+// counts its turn, which ran while Loom was down, in agent_turns, in one
+// transaction (OR6a). With nothing handed under key it changes nothing, so a
+// repeat counts the turn once.
+func (s *Store) MarkRan(ctx context.Context, agentID, key string) error {
+	return s.tx(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE agent_slots SET state = ?, first = 0, updated_at = ?
+			WHERE agent_id = ? AND native_key = ? AND state = ?`, SlotDelivered, Stamp(time.Now()), agentID, key, SlotHanded)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return nil
+		}
+		return countTurn(ctx, tx, agentID)
+	})
 }
 
 // Withdraw results.

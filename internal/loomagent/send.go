@@ -36,6 +36,9 @@ type SendRequest struct {
 	Delivery string
 	// Actor is the sender, set by the entry point. Empty means the local user.
 	Actor ActorRef `json:"-"`
+	// prWatch is the PR watch a PR-watch wake reports (OR8), saved in the
+	// Send's transaction.
+	prWatch *loomstore.PRWatchWake
 }
 
 // SendResult is what Send returns, and what its receipt stores.
@@ -86,7 +89,15 @@ func (s *Service) Send(ctx context.Context, req SendRequest) (SendResult, error)
 		}
 	}
 	defer s.lockReady(ctx, req.AgentID)()
-	if a, err = s.live(ctx, req.AgentID); err != nil {
+	return s.sendLocked(ctx, req)
+}
+
+// sendLocked is Send's body under req.AgentID's lock, which the caller
+// holds; req is checked and its Actor set. The usage-limit sweep (OR7)
+// sends through it, as it holds the lock while it re-checks eligibility.
+func (s *Service) sendLocked(ctx context.Context, req SendRequest) (SendResult, error) {
+	a, err := s.live(ctx, req.AgentID)
+	if err != nil {
 		return SendResult{}, err
 	}
 	if err := sendable(a); err != nil {
@@ -172,7 +183,8 @@ func decideSend(in sendInput) (sendDecision, error) {
 		d.Events[i].Time = in.Now
 	}
 	d.Slot = loomstore.SlotSend{AgentID: a.AgentID, Sender: sender, RequestID: req.RequestID, Body: req.Text,
-		Source: req.Source, Reopen: reopen, First: in.Interrupted != nil && *in.Interrupted}
+		Source: req.Source, Reopen: reopen, First: in.Interrupted != nil && *in.Interrupted, LimitResume: sender == limitResumeSender,
+		PRWatch: req.prWatch}
 	return d, nil
 }
 
@@ -223,6 +235,7 @@ func (s *Service) interruptTurn(ctx context.Context, a *loomstore.Agent, req Sen
 	if r, ok, err := s.receipt(ctx, req); ok || err != nil {
 		return r, true, err
 	}
+	mark := limitMark(*a, deref(a.RunningTurnID)) // a Stop ends a usage-limit episode, even one its turn's end starts later (OR7)
 	running := a.RunningTurnID != nil
 	if running && req.Text != "" {
 		slots, err := s.store.Slots(ctx, a.AgentID)
@@ -260,7 +273,8 @@ func (s *Service) interruptTurn(ctx context.Context, a *loomstore.Agent, req Sen
 	if err != nil {
 		return SendResult{}, true, err
 	}
-	_, err = s.store.SaveReceipt(ctx, loomstore.Receipt{AgentID: a.AgentID, RequestID: req.RequestID, Sender: sender, ResultJSON: string(b)})
+	_, err = s.store.SaveStopReceipt(ctx, loomstore.Receipt{AgentID: a.AgentID, RequestID: req.RequestID, Sender: sender,
+		ResultJSON: string(b)}, mark)
 	return res, true, err
 }
 

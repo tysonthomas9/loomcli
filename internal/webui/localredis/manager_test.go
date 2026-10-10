@@ -371,3 +371,51 @@ func containsKey(t *testing.T, data []byte, key string) bool {
 	}
 	return false
 }
+
+func TestDumpContext_StopsWithCallerContext(t *testing.T) {
+	snapPath := filepath.Join(t.TempDir(), "snapshot.json")
+	m, err := NewManager(snapPath, false, nil)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	defer m.Close()
+	if err := m.Client().HSet(context.Background(), "terminal:meta:ws1:s1", "label", "x").Err(); err != nil {
+		t.Fatalf("HSet: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := m.DumpContext(ctx); err == nil {
+		t.Fatal("DumpContext with a cancelled context succeeded")
+	}
+	if _, err := os.Stat(snapPath); !os.IsNotExist(err) {
+		t.Fatalf("snapshot written despite cancelled context: %v", err)
+	}
+	if err := m.DumpContext(context.Background()); err != nil {
+		t.Fatalf("DumpContext: %v", err)
+	}
+	if _, err := os.Stat(snapPath); err != nil {
+		t.Fatalf("snapshot not written: %v", err)
+	}
+}
+
+func TestDumpContext_GivesUpWaitingForAnotherDump(t *testing.T) {
+	m, err := NewManager(filepath.Join(t.TempDir(), "snapshot.json"), false, nil)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	defer m.Close()
+	m.dumpSem <- struct{}{} // another sweep is running
+	defer func() { <-m.dumpSem }()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- m.DumpContext(ctx) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("DumpContext succeeded while another dump held the lock")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("DumpContext ignored its deadline while waiting for another dump")
+	}
+}

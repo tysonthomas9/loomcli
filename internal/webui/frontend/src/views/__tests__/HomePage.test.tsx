@@ -365,7 +365,8 @@ describe("HomePage", () => {
       { name: "local-planner", status: "idle" },
     ] as LoomAgentStatus[];
     // Two idle Leads and a finished Lead count; a working Lead, its working
-    // child, a finished (hidden) child and an archived Lead do not.
+    // child, a finished (hidden) child, an archived Lead and a finished child
+    // of an archived (unlisted) Lead (ORPH1) do not.
     mockRoster.current = new Map(
       [
         api("l1"),
@@ -376,6 +377,12 @@ describe("HomePage", () => {
         api("k1", { parent_agent_id: "l5", state: "active", preset: "task" }),
         api("k2", { parent_agent_id: "l1", state: "finished", preset: "task" }),
         api("gone", { state: "archived" }),
+        api("echo", {
+          parent_agent_id: "unlisted",
+          state: "finished",
+          preset: "task",
+          role_kind: "worker",
+        }),
       ].map((a) => [a.agent_id, a]),
     );
 

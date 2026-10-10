@@ -552,7 +552,7 @@ tests:
       - wait:
           fn: >-
             (() => { const tabs = Array.from(document.querySelectorAll('[data-testid=agent-editor-groups] button[draggable]')).map((b) => (b.textContent || '').trim());
-              const on = document.querySelector('[data-testid=agent-editor-groups] button[aria-current=page]')?.textContent;
+              const on = document.querySelector('[data-testid=agent-editor-groups] [role=tab][aria-selected=true]')?.textContent;
               return tabs.join('|') === 'Chat|Info|Git|Diff|Files' && on === 'Chat' &&
                 document.querySelector('[data-testid=harness-label]')?.textContent === 'opencode'; })()
         intent: "Wait until the lead opens on Chat | Info | Git | Diff | Files with Chat selected and no Terminal"
@@ -577,16 +577,16 @@ tests:
       - wait:
           fn: >-
             (() => { const tabs = Array.from(document.querySelectorAll('[data-testid=agent-editor-groups] button[draggable]')).map((b) => (b.textContent || '').trim());
-              const on = document.querySelector('[data-testid=agent-editor-groups] button[aria-current=page]')?.textContent;
+              const on = document.querySelector('[data-testid=agent-editor-groups] [role=tab][aria-selected=true]')?.textContent;
               return location.pathname.startsWith('/ws/E2E-AGV1-KIDS/chat/agt_') && tabs.join('|') === 'Chat|Info|Git|Diff|Files' && on === 'Chat' &&
                 (document.querySelector('[aria-label="Agent chat"] header')?.textContent || '').includes('agv1-kid3-${RUN_ID:-local}'); })()
         intent: "Wait until the Started marker opens the child on the same tabs with Chat selected"
-      - click: { role: button, name: "Git", exact: true }
+      - click: { role: tab, name: "Git", exact: true }
       - wait:
           fn: >-
             (document.querySelector('[role=tabpanel]:not([data-hidden])')?.textContent || '').includes('loom/agent/' + location.pathname.split('/').pop())
         intent: "Wait until Git shows the child's own branch"
-      - click: { role: button, name: "Diff", exact: true }
+      - click: { role: tab, name: "Diff", exact: true }
       - wait:
           fn: >-
             location.search === '?tab=diff' && (document.querySelector('[role=tabpanel]:not([data-hidden])')?.textContent || '').includes('channels.js')
@@ -594,6 +594,6 @@ tests:
       - reload: true
       - wait:
           fn: >-
-            document.querySelector('[data-testid=agent-editor-groups] button[aria-current=page]')?.textContent === 'Diff' &&
+            document.querySelector('[data-testid=agent-editor-groups] [role=tab][aria-selected=true]')?.textContent === 'Diff' &&
             (document.querySelector('[role=tabpanel]:not([data-hidden])')?.textContent || '').includes('channels.js')
         intent: "Wait until a reload reopens Diff with the child's file"
