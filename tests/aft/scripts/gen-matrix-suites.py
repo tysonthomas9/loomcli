@@ -98,9 +98,12 @@ def setup(case, no_native=False):
     return run(f"setup {case}{' no-native' if no_native else ''}", "Fixture: one repo with GitHub native stacks" + (" UNAVAILABLE" if no_native else "") + ", one Loom workspace and its lead (real tier: a clone of the run's sandbox repo)") + \
         run(f"lead-start {case}", "Real tier: the workspace's real codex lead is started from its agent page and its controlled runtime comes up")
 
-def case(name, intent, steps, needs=None):
+def case(name, intent, steps, needs=None, labels=()):
     if needs is None:
         needs = DEPENDENT_WAITS_FOR == "run" and any(re.search(r'loomgit-matrix\.sh\\" chain \S+ [^"]*:', l) for l in steps)
+    for label, why in labels:
+        name += f" [needs {label}]"
+        intent += f" Expected to fail until {label}: {why}"
     if needs:
         name += NEEDS
         intent += " Needs the dependents-run change in #943; it fails on 8267795e0 until that lands."
@@ -145,9 +148,10 @@ def settings_cases():
     st = setup(c) + settings(c, "stack", "on", "off")
     st += build(c, [("a", "-", ""), ("b", "a", ""), ("c", "b", "")], {
         "a": lead_create_pr(c, "a", "main"), "b": lead_create_pr(c, "b", "a"), "c": lead_create_pr(c, "c", "b")})
-    st += lead(c, "merge", "a", "refused", "tries Approve and merge on A and is refused") + run(f"hold-open {c} 4 a b c", "Nothing merges")
+    st += lead(c, "merge", "a", "refused", "tries Approve and merge on A and is refused with 'Lead may merge is off'; nothing is queued and nothing merges") + run(f"hold-open {c} 4 a b c", "Nothing merges")
     st += human_merge(c, "a") + run(f"merged {c} a", "A merges") + run(f"rebuilt {c} b main", "B is rebuilt on main") + run(f"rebuilt {c} c b", "C stays on B") + run(f"ui {c} b open", "Task B shows its PR open")
-    out += case("S1 Stacked, lead may approve on, lead may merge off", "The lead's approvals open a stacked A-B-C; the lead cannot merge; a human Approve and merge on A merges it and B, C are rebuilt", st)
+    out += case("S1 Stacked, lead may approve on, lead may merge off", "The lead's approvals open a stacked A-B-C; the lead's merge is refused outright (D38); a human Approve and merge on A merges it and B, C are rebuilt", st,
+                labels=[("P3.16", "today the lead's merge is refused with a different message (D38's 'Lead may merge is off').")])
 
     c = "s2"
     st = setup(c) + settings(c, "stack", "off", "off")
@@ -244,11 +248,10 @@ def variants(real=False):
     c = "n3"
     st = setup(c) + settings(c, "stack", "on", "off")
     st += build(c, [("a", "-", ""), ("b", "a", "")], {"a": lead_create_pr(c, "a", "main"), "b": lead_create_pr(c, "b", "a")})
-    st += run(f"lead-request-merge {c} b", "The lead asks a human to merge the stack through B; the request is pending") + \
-        run(f"hold-open {c} 6 a b", "Nothing merges before a human confirms") + \
-        run(f"confirm-merge-request {c}", "A human confirms the lead's request (API: the UI has no confirm control)") + \
-        run(f"merged {c} a b", "A and B merge") + run(f"ui {c} b merged", "Task B shows its PR merged")
-    out += case("N3 The lead's merge request needs a human", "With Lead may merge off the lead can only request a merge; it runs after a human confirms", st)
+    st += lead(c, "request-merge", "b", "refused", "asks to merge its stack through B with Lead may merge off; Loom refuses with 'Lead may merge is off', queues no request and merges nothing (D38: no human Confirm step)") + \
+        run(f"hold-open {c} 6 a b", "A and B stay open") + run(f"ui {c} b open", "Task B shows its PR open")
+    out += case("N3 The lead's merge request is refused when Lead may merge is off", "D38: with Lead may merge off, Loom refuses the lead's merge request outright; nothing waits for a human to confirm", st,
+                labels=[("P3.16", "today Loom queues the request for a human to confirm.")])
 
     c = "r1"
     st = setup(c) + settings(c, "stack", "off", "off")

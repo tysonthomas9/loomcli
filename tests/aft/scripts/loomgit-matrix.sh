@@ -543,7 +543,8 @@ lead-do)
   # lead-do <case> <action> <slot|-> <expect>
   #   approve       ok|refused  Approve and create PR through the verdict API as the lead
   #   cli-approve   refused     the lead runs `loom approve` (must not bypass the policy; needs P2.25)
-  #   merge         refused     Approve and merge through the API as the lead
+  #   merge         refused     Approve and merge through the API as the lead (D38)
+  #   request-merge refused     the lead asks to merge its stack through <slot> (D38: no queue, no human Confirm)
   #   set-approve   refused     the lead turns Lead may approve off
   #   set-merge     refused     the lead turns Lead may merge to when green
   #   set-mode      ok          the lead switches delivery mode to PR per task
@@ -558,6 +559,11 @@ lead-do)
       body="{\"head_sha\":\"$sha\",\"verdict\":\"approve\",\"actor\":{\"kind\":\"lead\",\"id\":\"lead\"}}" ;;
     merge) url="$api/changes/$change/merge-approval"; method=POST
       body="{\"lead\":\"lead\",\"head_sha\":\"$pr_head\",\"actor\":{\"kind\":\"lead\",\"id\":\"lead\"}}" ;;
+    request-merge) url="$api/agents/lead/git/merge-requests"; method=POST
+      loom stack list --json > "$work/stacks.json"
+      stack="$(json "$work/stacks.json" 'm=[e["id"] for e in v if e.get("source")=="published" and any(l.get("change")==sys.argv[2] for l in e.get("layers") or [])]; print(m[0] if m else "")' "$change")"
+      [[ -n "$stack" ]] || fail "no published stack contains $slot's change $change: $(cat "$work/stacks.json")"
+      body="{\"stack_id\":\"$stack\",\"target\":\"$change\",\"actor\":{\"kind\":\"lead\",\"id\":\"lead\"}}" ;;
     set-approve) url="$api/git/settings"; method=PUT; body='{"actor":{"kind":"lead","id":"lead"},"lead_may_approve_publish":false}' ;;
     set-merge) url="$api/git/settings"; method=PUT; body='{"actor":{"kind":"lead","id":"lead"},"lead_may_merge":"when_green"}' ;;
     set-mode) url="$api/git/settings"; method=PUT; body='{"actor":{"kind":"lead","id":"lead"},"delivery_mode":"trunk"}' ;;
@@ -571,7 +577,8 @@ lead-do)
     # The verdict API's 409 body carries only Loom's error code, not the reason.
     approve) refusal='review_required' ;;
     cli-approve) refusal='lead approval policy is off' ;;
-    merge) refusal='only a human can approve a merge' ;;
+    # D38: with Lead may merge off the lead's merge is refused outright (P3.16).
+    merge | request-merge) refusal='Lead may merge is off' ;;
     set-approve | set-merge) refusal='only a human can change workspace policy' ;;
     *) refusal='' ;;
   esac
@@ -613,11 +620,16 @@ lead-do)
       done
       curl -fsS "$api/issues/$(task_id "$slot")" > "$work/issue-$slot.json"
       json "$work/issue-$slot.json" 'assert v["data"]["status"]=="review", v' ;;
-    merge:refused)
-      [[ "$forge" == fake ]] && { [[ "$code" == 409 ]] || fail "lead Approve and merge: HTTP $code, want 409"; }
-      sleep $((10 * scale))
-      got="$(approval_state "$slot" || true)"
-      [[ "${got%%|*}" != waiting && "${got%%|*}" != merging && "${got%%|*}" != merged ]] || fail "the lead's merge approval was accepted: $got" ;;
+    merge:refused | request-merge:refused)
+      for _ in $(seq 1 $((10 * scale))); do
+        got="$(approval_state "$slot" || true)"
+        [[ "${got%%|*}" != waiting && "${got%%|*}" != merging && "${got%%|*}" != merged ]] || fail "the lead's merge was accepted: $got"
+        curl -fsS "$api/agents/lead/git/merge-requests" > "$work/merge-requests.json"
+        json "$work/merge-requests.json" 'assert not [x for x in (v or []) if x.get("target")==sys.argv[2]], "a lead merge request was queued: %r" % v' "$change" || fail "the lead's merge request was queued: $(cat "$work/merge-requests.json")"
+        pulls || fail "the forge's PR list is unreachable"
+        [[ "$(pull_field "$slot" merged)" != True ]] || fail "PR of $slot merged after the lead's refused merge"
+        sleep 1
+      done ;;
     set-approve:refused | set-merge:refused)
       [[ "$forge" == fake ]] && { [[ "$code" == 403 ]] || fail "lead $action: HTTP $code, want 403"; }
       sleep $((5 * scale))
@@ -679,38 +691,7 @@ rerun)
   say "task $1 rerun started"
   ;;
 
-lead-request-merge)
-  # lead-request-merge <case> <slot>: the lead asks to merge the published stack
-  # through <slot>'s PR. It is recorded as pending and nothing merges.
-  slot="$1"
-  change="$(cat "$work/change-$slot.id" 2> /dev/null || { revisions "$slot"; json "$work/rev-$slot.json" 'print(v["change_id"])'; })"
-  loom stack list --json > "$work/stacks.json"
-  stack="$(json "$work/stacks.json" 'm=[e["id"] for e in v if e.get("source")=="published" and any(l.get("change")==sys.argv[2] for l in e.get("layers") or [])]; print(m[0] if m else "")' "$change")"
-  [[ -n "$stack" ]] || fail "no published stack contains $slot's change $change: $(cat "$work/stacks.json")"
-  url="$api/agents/lead/git/merge-requests"
-  body="{\"stack_id\":\"$stack\",\"target\":\"$change\",\"actor\":{\"kind\":\"lead\",\"id\":\"lead\"}}"
-  if [[ "$forge" == fake ]]; then
-    code="$(curl -sS --max-time 60 -o "$work/merge-request.out" -w '%{http_code}' -X POST "$url" -H 'Content-Type: application/json' -d "$body")"
-    [[ "$code" == 200 ]] || fail "lead merge request: HTTP $code $(cat "$work/merge-request.out")"
-  else
-    lead_say "Loom test harness: as the lead, ask a human to merge your stack by running exactly this one command and report the HTTP status it prints: curl -sS -w '%{http_code}' -X POST '$url' -H 'Content-Type: application/json' -d '$body'"
-  fi
-  pending() { curl -fsS "$url" > "$work/merge-requests.json"; json "$work/merge-requests.json" 'r=[x for x in v if x.get("target")==sys.argv[2]]; assert r and r[-1]["status"]=="pending" and r[-1]["requested_kind"]=="lead", v' "$change"; }
-  wait_until $((60 * scale)) "the lead's merge request for $slot is pending: $(cat "$work/merge-requests.json" 2> /dev/null | head -c 500)" pending
-  json "$work/merge-requests.json" 'print([x for x in v if x.get("target")==sys.argv[2]][-1]["id"])' "$change" > "$work/merge-request.id"
-  [[ "$forge" == github ]] && browser screenshot "$work/lead-request-merge.png" > /dev/null
-  say "lead merge request $(cat "$work/merge-request.id") pending for $slot"
-  ;;
 
-confirm-merge-request)
-  # confirm-merge-request <case>: a human confirms the lead's pending request.
-  # The UI has no confirm control (gitConfirmMergeRequest is unused by any
-  # component), so the human uses the same API the CLI's confirm-merge uses.
-  id="$(cat "$work/merge-request.id")"
-  code="$(curl -sS --max-time 90 -o "$work/merge-confirm.out" -w '%{http_code}' -X POST "$api/agents/lead/git/merge-requests/$id/confirm" -H 'Content-Type: application/json' -d '{"actor":{"kind":"human"}}')"
-  [[ "$code" == 200 ]] || fail "human confirm of the lead's merge request: HTTP $code $(cat "$work/merge-confirm.out")"
-  say "human confirmed merge request $id: $(head -c 300 "$work/merge-confirm.out")"
-  ;;
 
 human-approve-api)
   # Only for set-up steps no case is about; every checked human action is a UI click.

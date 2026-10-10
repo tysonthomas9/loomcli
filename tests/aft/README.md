@@ -252,7 +252,7 @@ lead permissions) and `loomgit-matrix-variants` (L1 mid-session epic assignment
 to a running lead, N1 the lead's `loom approve` with Lead may approve off, refused with Loom's own
 text (expected red until P2.25),
 N2 Approve and merge on a red PR and its recovery, N3 the lead's merge request
-needing a human, N4 no native stacks → a clear error and no fallback (fake tier
+refused outright while Lead may merge is off (D38, expected red until P3.16), N4 no native stacks → a clear error and no fallback (fake tier
 only, expected red until D41), R1 Reject → rerun → approve, D1–D3 dependents
 that run before their blocker's review, X1 a non-clean rebuild asks to approve
 again, X2 cancelling merge after) run on the fake forge with every

@@ -6,8 +6,8 @@ baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 teardown: >-
   for c in s1 s2 s3 s4 s5 s6 s7 s8 s9 s10; do bash "$AFT_TESTS_DIR/scripts/loomgit-matrix.sh" teardown "$c" || true; done
 tests:
-  - name: "S1 Stacked, lead may approve on, lead may merge off [needs #943 dependents run]"
-    intent: "The lead's approvals open a stacked A-B-C; the lead cannot merge; a human Approve and merge on A merges it and B, C are rebuilt Needs the dependents-run change in #943; it fails on 8267795e0 until that lands."
+  - name: "S1 Stacked, lead may approve on, lead may merge off [needs P3.16] [needs #943 dependents run]"
+    intent: "The lead's approvals open a stacked A-B-C; the lead's merge is refused outright (D38); a human Approve and merge on A merges it and B, C are rebuilt Expected to fail until P3.16: today the lead's merge is refused with a different message (D38's 'Lead may merge is off'). Needs the dependents-run change in #943; it fails on 8267795e0 until that lands."
     steps:
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" setup s1"
         intent: "Fixture: one repo with GitHub native stacks, one Loom workspace and its lead (real tier: a clone of the run's sandbox repo)"
@@ -54,7 +54,7 @@ tests:
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" pr s1 c b"
         intent: "PR of c opens on the forge based on b, and the task shows it"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" lead-do s1 merge a refused"
-        intent: "The lead (a real codex lead, told mid-session in its terminal, on the real tier) tries Approve and merge on A and is refused"
+        intent: "The lead (a real codex lead, told mid-session in its terminal, on the real tier) tries Approve and merge on A and is refused with 'Lead may merge is off'; nothing is queued and nothing merges"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" hold-open s1 4 a b c"
         intent: "Nothing merges"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" open-task s1 a"
