@@ -138,10 +138,22 @@ export function AppLayout({
 
 /**
  * Escape closes the drawer through the app's Escape layers, so a dialog
- * above it closes first. Mounted only while open: the registry needs the
+ * above it closes first, and never while a modal is open. Mounted only while open: the registry needs the
  * KeyboardShortcutProvider, which App provides.
  */
 function DrawerEscape({ onClose }: { onClose: () => void }): null {
-  useRegisterEscapeLayer(LAYER_TERMINAL_PANEL, onClose, true);
+  // Some modals (AetherModal) handle no Escape of their own; the drawer
+  // under an open one stays open. Closed panels sit under aria-hidden.
+  useRegisterEscapeLayer(
+    LAYER_TERMINAL_PANEL,
+    () => {
+      const modals = document.querySelectorAll('[aria-modal="true"]');
+      const modalOpen = Array.from(modals).some(
+        (m) => !m.closest('[aria-hidden="true"]'),
+      );
+      if (!modalOpen) onClose();
+    },
+    true,
+  );
   return null;
 }

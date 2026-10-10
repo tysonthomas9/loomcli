@@ -284,16 +284,19 @@ export function WorkspaceTree({
               onAddWorkspace={onAddWorkspaceClick}
             />
           ) : null}
-          <button
-            type="button"
-            className={`${styles.toggleButton} ${styles.collapseButton}`}
-            onClick={handleToggle}
-            aria-expanded={true}
-            title="Collapse sidebar"
-            aria-label="Collapse workspace tree"
-          >
-            <ChevronLeftIcon />
-          </button>
+          {/* Nothing to collapse in the phone drawer. */}
+          {!inDrawer && (
+            <button
+              type="button"
+              className={`${styles.toggleButton} ${styles.collapseButton}`}
+              onClick={handleToggle}
+              aria-expanded={true}
+              title="Collapse sidebar"
+              aria-label="Collapse workspace tree"
+            >
+              <ChevronLeftIcon />
+            </button>
+          )}
         </div>
       )}
 
