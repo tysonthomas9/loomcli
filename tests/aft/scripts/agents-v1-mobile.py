@@ -83,9 +83,10 @@ SWITCHER = r"""(() => {
     const cs = getComputedStyle(h), r = h.getBoundingClientRect();
     return cs.visibility !== 'hidden' && Number(cs.opacity) > 0.5 && r.width > 0 && r.height > 0;
   });
-  // A hint sits on its own side of the switcher, beside it at most (on the
-  // smallest phones it sits just outside a one-item window), and on nothing
-  // it points past: no shown part of an item, no other rail button's icon.
+  // A hint sits on its own side of the switcher's frame (the scroller is
+  // centred in it; on the smallest phones the hint sits up to 12 px outside a
+  // one-item frame), and on nothing it points past: no shown part of an
+  // item, no other rail button's icon.
   const marks = [
     ...Array.from(s.querySelectorAll('button')).map((b) => { const r = b.getBoundingClientRect();
       return { label: b.getAttribute('aria-label'), left: Math.max(r.left, w.left), right: Math.min(r.right, w.right), r }; }),
@@ -93,8 +94,9 @@ SWITCHER = r"""(() => {
       return { label: i.closest('button').getAttribute('aria-label') + ' icon', left: r.left, right: r.right, r }; }),
   ].filter((m) => m.right - m.left > 0.5);
   const misplaced = shown.flatMap((h) => { const r = h.getBoundingClientRect(), side = h.dataset.moreHint;
-    const mid = (r.left + r.right) / 2, ownSide = side === 'left' ? mid < (w.left + w.right) / 2 : mid > (w.left + w.right) / 2;
-    const near = r.left >= w.left - 16 && r.right <= w.right + 16;
+    const f = h.parentElement.getBoundingClientRect(), mid = (r.left + r.right) / 2;
+    const ownSide = side === 'left' ? mid < (f.left + f.right) / 2 : mid > (f.left + f.right) / 2;
+    const near = r.left >= f.left - 12.5 && r.right <= f.right + 12.5;
     return [...(ownSide && near ? [] : [side + ' hint off its side of the switcher']),
       ...marks.filter((m) => r.left < m.right - 0.5 && r.right > m.left + 0.5 && r.top < m.r.bottom && r.bottom > m.r.top)
         .map((m) => side + ' hint over ' + m.label)]; });
