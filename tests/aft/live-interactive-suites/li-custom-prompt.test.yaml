@@ -146,9 +146,7 @@ tests:
             document.body.textContent.includes('live-cust-${RUN_ID:-local}')
         intent: "Wait until the live custom agent appears after submit"
       - open: /ws/E2E-WS-LIVE/agents/live-cust-${RUN_ID:-local}
-      - wait:
-          fn: >-
-            !!document.querySelector('[data-testid=terminal-wrapper] .wterm')
+      - run: '"$AFT_TESTS_DIR/scripts/terminal.sh" mounted'
         intent: "Wait until the live agent terminal mounts its grid"
       # Readiness must be a signal ONLY the controlled runtime can produce. "Any
       # non-whitespace in the terminal" is not: `loom lead` prints its own
@@ -157,17 +155,7 @@ tests:
       # app-server never came up. "Launching controlled ... lead session" is printed
       # only AFTER waitForCodexAppServer succeeds (leadcontrol/codex_runtime.go:163,
       # harness_runtime.go:115) — reaching it proves the runtime actually started.
-      - wait:
-          fn: >-
-            (() => {
-              const wrapper = document.querySelector('[data-testid=terminal-wrapper]');
-              if (!wrapper) return false;
-              const rows = Array.from(wrapper.querySelectorAll('.term-row')).map((el) => el.textContent || '').join('\n');
-              if (rows.includes('Error running agent') || rows.includes('backend is not installed')) {
-                throw new Error('lead runtime failed to start: ' + rows.slice(-400));
-              }
-              return /Launching controlled .*lead session/.test(rows);
-            })()
+      - run: '"$AFT_TESTS_DIR/scripts/terminal.sh" wait "Launching controlled .*lead session" 110 "Error running agent|backend is not installed"'
         intent: "Wait until the controlled lead runtime reports it started, which only happens after the backend app-server is ready"
       - run: |
           set -e

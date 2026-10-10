@@ -601,17 +601,9 @@ tests:
       - wait:
           fn: *agentsPageReady
         intent: "Wait until the lead detail page is ready"
-      - wait:
-          fn: >-
-            !!document.querySelector('[data-testid=terminal-wrapper][data-terminal-renderer=xterm] .xterm')
+      - run: '"$AFT_TESTS_DIR/scripts/terminal.sh" mounted'
         intent: "Wait until the lead terminal mounts the xterm grid"
-      - wait:
-          fn: >-
-            (() => {
-              const wrapper = document.querySelector('[data-testid=terminal-wrapper]');
-              const rows = wrapper?.querySelector('.xterm-rows')?.textContent || '';
-              return rows.includes('Starting LEAD mode');
-            })()
+      - run: '"$AFT_TESTS_DIR/scripts/terminal.sh" wait "Starting LEAD mode"'
         intent: "Wait until the lead runtime startup banner reaches the browser terminal"
       - run: |
           set -e
