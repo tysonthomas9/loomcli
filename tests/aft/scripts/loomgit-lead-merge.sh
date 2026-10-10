@@ -254,7 +254,7 @@ case "$case_name" in
     browser screenshot "$case_dir/lead-may-merge-off-settings.png" >/dev/null
     browser open "$AFT_BASE_URL/ws/$workspace/prs" >/dev/null
     browser wait 3000 >/dev/null
-    test "$(browser eval "document.querySelectorAll('[data-testid=merge-queue-entry]').length")" = 0
+    test "$(browser eval "document.querySelectorAll('[data-testid=stack-card][data-merging]').length")" = 0
     browser screenshot "$case_dir/lead-may-merge-off-prs.png" >/dev/null
 
     # A task agent cannot use loom merge at all.
@@ -278,12 +278,10 @@ case "$case_name" in
     merge_queue "$case_dir/queue-again.json"
     json "$case_dir/queue-again.json" 'assert len(v)==1 and v[0]["target"]==sys.argv[2], v' "$target"
     browser open "$AFT_BASE_URL/ws/$workspace/prs" >/dev/null
-    browser wait '[data-testid="merge-queue-entry"]' >/dev/null
-    browser get text '[data-testid="merge-queue"]' > "$case_dir/queue-ui.txt"
+    browser wait '[data-testid="stack-card"][data-merging]' >/dev/null
+    browser get text '[data-testid="stack-card-note"]' > "$case_dir/queue-ui.txt"
     cat "$case_dir/queue-ui.txt"
-    grep -q "Merge up to $target" "$case_dir/queue-ui.txt"
-    grep -q "#$two" "$case_dir/queue-ui.txt"
-    grep -q 'Queued by the lead' "$case_dir/queue-ui.txt"
+    grep -q "Merging up to #$two (queued by the lead)" "$case_dir/queue-ui.txt"
     browser screenshot "$case_dir/lead-merge-queued-prs.png" >/dev/null
     hold_unmerged 4 "0 0" "queued merge, layer one pending"
     test "$(merge_puts "$one")" = 0

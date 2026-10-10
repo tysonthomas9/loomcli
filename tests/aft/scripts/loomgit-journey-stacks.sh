@@ -239,7 +239,7 @@ merge-ui)
   json "$work/merge-queue-$slot.json" 'assert v==[], v'
   browser open "$AFT_BASE_URL/ws/$workspace/prs" >/dev/null
   browser wait 3000 >/dev/null
-  test "$(browser eval "document.querySelectorAll('[data-testid=merge-queue-entry]').length")" = 0
+  test "$(browser eval "document.querySelectorAll('[data-testid=stack-card][data-merging]').length")" = 0
   browser screenshot "$work/merge-ui-$slot.png" >/dev/null
   ;;
 mode-before)

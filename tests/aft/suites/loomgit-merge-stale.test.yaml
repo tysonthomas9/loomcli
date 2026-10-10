@@ -17,7 +17,7 @@ tests:
       - open: /ws/E2E-WS-MERGE-STALE/prs
         intent: Open the Pull Requests page after the merge
       - wait:
-          fn: "!document.querySelector('[data-testid=merge-queue-entry]')"
+          fn: "!document.querySelector('[data-testid=stack-card][data-merging]')"
         intent: The finished merge has left the merge queue
       - run: agent-browser --session "$AFT_SESSION" screenshot "$AFT_WORK_DIR/merge-stale/merge-stale-prs.png"
         intent: Record the Pull Requests page after the merge

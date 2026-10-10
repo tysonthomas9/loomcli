@@ -6,14 +6,14 @@ teardown: >-
   bash "$AFT_TESTS_DIR/scripts/loomgit-merge-up-to.sh" teardown loom || true
 tests:
   - name: native four-layer stack merges up to layer three with Merge up to here
-    intent: Real TaskRuns and approvals publish a native stack; a human's Merge up to here on layer three's PR merges its prefix and leaves layer four on trunk
+    intent: Real TaskRuns and approvals publish a native stack; a human presses Merge up to here on layer three in the PR page stack view; its prefix merges, the rows update live and survive a reload, and layer four stays open
     steps:
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-merge-up-to.sh" setup native
         intent: Create a disposable repository and workspace through the product API
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-merge-up-to.sh" run native
         intent: Drive the native stack from real agent tasks through merge and landing
   - name: Loom four-layer stack merges up to layer three with Merge up to here
-    intent: Real TaskRuns and approvals publish a Loom stack; a human's Merge up to here on layer three's PR merges its prefix and leaves layer four on trunk
+    intent: Real TaskRuns and approvals publish a Loom stack; a human presses Merge up to here on layer three in the PR page stack view; its prefix merges, the rows update live and survive a reload, and layer four stays open
     steps:
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-merge-up-to.sh" setup loom
         intent: Create a disposable repository and workspace through the product API
