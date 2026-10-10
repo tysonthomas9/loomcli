@@ -92,8 +92,10 @@ tests:
                 names.join('|') === ['a', 'c'].map((x) => 'agv1-sbe1-' + x + '-${RUN_ID:-local}').join('|'); })()
         intent: "Wait until the reloaded chat shows the Lead archived with Unarchive, while the sidebar still leaves it out"
       - run: |
-          agent-browser --session "$AFT_SESSION" eval "window.__sbUnarchiveAt = performance.now(); true" >/dev/null
-        intent: "Note when Unarchive is pressed, to bound how soon the row returns"
+          agent-browser --session "$AFT_SESSION" eval "(() => { window.__sbUnarchiveAt = undefined;
+            document.addEventListener('click', (e) => { if (e.target.closest?.('[data-testid=agent-unarchive]')) window.__sbUnarchiveAt = performance.now(); }, { capture: true });
+            return true; })()" >/dev/null
+        intent: "Have the page note the moment Unarchive is clicked, to bound how soon the row returns"
       - click: { testid: agent-unarchive }
       - wait:
           fn: >-

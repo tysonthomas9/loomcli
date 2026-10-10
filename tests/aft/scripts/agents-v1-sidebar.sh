@@ -11,8 +11,8 @@
 #   child-id <workspace> <lead id> <child name>   Print the child's agent id.
 #   stop <workspace> <lead id> <child name>       Interrupt the working child,
 #       which ends its task, and wait until the API no longer has it at work.
-#   menu <agent id>          Open the sidebar row's context menu, as a right
-#       click on the row does.
+#   menu <agent id>          Right-click the sidebar row with the real mouse and
+#       wait until its context menu shows.
 #   hover <agent id> <name>  Hover the sidebar row; wait until neither the row
 #       nor its name is underlined and its "Archive <name>" action is visible.
 #   hover-archive <agent id> <name>   Hover the row and press its Archive action.
@@ -60,10 +60,16 @@ stop)
     done
     ;;
 menu)
-    ab eval "(() => { const a = document.querySelector(\"$(row "$1")\");
-      if (!a) throw Error('sidebar row $1 missing'); const r = a.getBoundingClientRect();
-      a.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.x + 4, clientY: r.y + 4 }));
-      return true; })()" >/dev/null
+    # A real right-button press and release on the row, then the menu shows.
+    xy="$(ab eval "(() => { const a = document.querySelector(\"$(row "$1")\");
+      if (!a) throw Error('sidebar row $1 missing'); a.scrollIntoView({ block: 'center' });
+      const r = a.getBoundingClientRect(); return Math.round(r.x + 12) + ' ' + Math.round(r.y + r.height / 2); })()" | tr -d '"')"
+    # shellcheck disable=SC2086
+    ab mouse move $xy
+    ab mouse down right
+    ab mouse up right
+    ab wait --fn "(() => { const m = document.querySelector('[data-testid=agent-context-menu]');
+      return !!m && m.getBoundingClientRect().height > 0 && !!m.querySelector('[data-testid=agent-context-menu-archive]'); })()" >/dev/null
     ;;
 hover)
     ab hover "$(row "$1")"
