@@ -83,8 +83,9 @@ SWITCHER = r"""(() => {
     const cs = getComputedStyle(h), r = h.getBoundingClientRect();
     return cs.visibility !== 'hidden' && Number(cs.opacity) > 0.5 && r.width > 0 && r.height > 0;
   });
-  // A hint sits at its own edge of the switcher and on nothing it points
-  // past: no shown part of an item, no other rail button's icon.
+  // A hint sits on its own side of the switcher, beside it at most (on the
+  // smallest phones it sits just outside a one-item window), and on nothing
+  // it points past: no shown part of an item, no other rail button's icon.
   const marks = [
     ...Array.from(s.querySelectorAll('button')).map((b) => { const r = b.getBoundingClientRect();
       return { label: b.getAttribute('aria-label'), left: Math.max(r.left, w.left), right: Math.min(r.right, w.right), r }; }),
@@ -92,8 +93,9 @@ SWITCHER = r"""(() => {
       return { label: i.closest('button').getAttribute('aria-label') + ' icon', left: r.left, right: r.right, r }; }),
   ].filter((m) => m.right - m.left > 0.5);
   const misplaced = shown.flatMap((h) => { const r = h.getBoundingClientRect(), side = h.dataset.moreHint;
-    const atEdge = side === 'left' ? Math.abs(r.left - w.left) <= 8 : Math.abs(r.right - w.right) <= 8;
-    return [...(atEdge ? [] : [side + ' hint away from its edge']),
+    const mid = (r.left + r.right) / 2, ownSide = side === 'left' ? mid < (w.left + w.right) / 2 : mid > (w.left + w.right) / 2;
+    const near = r.left >= w.left - 16 && r.right <= w.right + 16;
+    return [...(ownSide && near ? [] : [side + ' hint off its side of the switcher']),
       ...marks.filter((m) => r.left < m.right - 0.5 && r.right > m.left + 0.5 && r.top < m.r.bottom && r.bottom > m.r.top)
         .map((m) => side + ' hint over ' + m.label)]; });
   const a = s.querySelector('button[data-active]')?.getBoundingClientRect();
@@ -129,6 +131,12 @@ def settled_switcher(label):
 def layout(width, height):
     browser("set", "viewport", str(width), str(height))
     wait_for(f"innerWidth === {width} && innerHeight === {height}", f"{width}x{height} viewport")
+    # Reopen the chat at this size, so the switcher starts as a fresh load does.
+    browser("reload")
+    wait_for("!!document.querySelector('section[aria-label=\"Agent chat\"] header h2')?.textContent && "
+             "!!document.querySelector('textarea[aria-label=Message]') && "
+             "document.querySelectorAll('nav[aria-label=\"Primary\"] [aria-label=\"Workspace selector\"] button[aria-label^=\"Switch to \"]').length >= 4",
+             f"the chat reopened at {width}px")
     o = evaluate(OVERFLOW)
     check(not o["out"] and o["scrollWidth"] <= o["vw"], f"{width}px: elements past the right edge", o)
     v = evaluate(LAYOUT)
