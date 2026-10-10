@@ -284,7 +284,7 @@ func finishPublication(ctx context.Context, store Store, runner *gitexec.Runner,
 		return err
 	}
 	parts := strings.Split(publication.Slug, "/")
-	prs, err := forge.ListStackPRs(ctx, parts[0], parts[1], publication.Branch)
+	prs, err := unmergedHeadPRs(ctx, forge, parts[0], parts[1], publication)
 	if err != nil {
 		return err
 	}
@@ -324,6 +324,22 @@ func finishPublication(ctx context.Context, store Store, runner *gitexec.Runner,
 	}
 	publication.Phase = "done"
 	return store.AdvancePublication(ctx, publication)
+}
+
+// unmergedHeadPRs lists the publication branch's PRs and refuses when its head
+// already merged: a new PR would duplicate it. Landing reconcile records the
+// merge, and the retry then drops the layer from the stack.
+func unmergedHeadPRs(ctx context.Context, forge Forge, owner, repo string, publication journal.Publication) ([]stackpublish.PR, error) {
+	prs, err := forge.ListStackPRs(ctx, owner, repo, publication.Branch)
+	if err != nil {
+		return nil, err
+	}
+	for _, pr := range prs {
+		if pr.Head == publication.Branch && pr.Merged && pr.HeadSHA == publication.Head {
+			return nil, loomgit.NewError(loomgit.Stale, fmt.Sprintf("change %s already merged in PR #%d; waiting for Loom to record the landing", publication.Change, pr.Number), nil)
+		}
+	}
+	return prs, nil
 }
 
 func mergeBody(existing, required, change string) string {

@@ -606,3 +606,24 @@ func TestPublishedStacksListsEachRepoStack(t *testing.T) {
 		t.Fatalf("below D = %v, %v", below, err)
 	}
 }
+
+func TestApproveMergeLeadRefusalFollowsLeadMayMerge(t *testing.T) {
+	item, forge, heads := mergeApprovalFixture(t, "loom")
+	ctx := context.Background()
+	lead := MergeActor{Kind: "lead", ID: "L"}
+	_, err := approveMerge(ctx, item.store, forge, "W", "L", "A", heads[0], lead)
+	var coded *loomgit.Error
+	if !errors.As(err, &coded) || coded.Kind != loomgit.MergeNotAuthorized || coded.Message != leadMayMergeOffRefusal {
+		t.Fatalf("lead approve with Lead may merge off = %v", err)
+	}
+	if err := item.store.SetLeadMayMerge(ctx, "W", "when_green", "Tyson"); err != nil {
+		t.Fatal(err)
+	}
+	_, err = approveMerge(ctx, item.store, forge, "W", "L", "A", heads[0], lead)
+	if !errors.As(err, &coded) || coded.Kind != loomgit.MergeNotAuthorized || coded.Message != "only a human can approve a merge" {
+		t.Fatalf("lead approve with Lead may merge on = %v", err)
+	}
+	if _, found, err := item.store.MergeApproval(ctx, "W", "A"); err != nil || found {
+		t.Fatalf("refused approval recorded: found=%v err=%v", found, err)
+	}
+}

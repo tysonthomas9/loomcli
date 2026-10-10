@@ -220,12 +220,14 @@ func createStackBackendSchema(db *sql.DB) error {
 	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS stack_backends (
 		workspace TEXT NOT NULL, stack_id TEXT NOT NULL, backend TEXT NOT NULL,
 		status TEXT NOT NULL DEFAULT '', paths TEXT NOT NULL DEFAULT '[]',
+		conflict_changes TEXT NOT NULL DEFAULT '[]',
 		PRIMARY KEY(workspace, stack_id)
 	)`)
 	if err != nil {
 		return err
 	}
-	for _, column := range []string{"status TEXT NOT NULL DEFAULT ''", "paths TEXT NOT NULL DEFAULT '[]'"} {
+	for _, column := range []string{"status TEXT NOT NULL DEFAULT ''", "paths TEXT NOT NULL DEFAULT '[]'",
+		"conflict_changes TEXT NOT NULL DEFAULT '[]'"} {
 		_, err = db.Exec(`ALTER TABLE stack_backends ADD COLUMN ` + column)
 		if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 			return err
@@ -260,25 +262,41 @@ func (s *SQLite) StackBackend(ctx context.Context, workspace, stackID string) (s
 type StackState struct {
 	Backend, Status string
 	Paths           []string
+	// ConflictChanges names the changes whose rebuild conflicted when Status
+	// is restack_conflict; the layers above them depend on them.
+	ConflictChanges []string
 }
 
 func (s *SQLite) StackState(ctx context.Context, workspace, stackID string) (StackState, error) {
 	var state StackState
-	var paths string
-	err := s.db.QueryRowContext(ctx, `SELECT backend,status,paths FROM stack_backends
-		WHERE workspace=? AND stack_id=?`, workspace, stackID).Scan(&state.Backend, &state.Status, &paths)
+	var paths, changes string
+	err := s.db.QueryRowContext(ctx, `SELECT backend,status,paths,conflict_changes FROM stack_backends
+		WHERE workspace=? AND stack_id=?`, workspace, stackID).Scan(&state.Backend, &state.Status, &paths, &changes)
 	if err != nil {
 		return StackState{}, err
 	}
-	err = json.Unmarshal([]byte(paths), &state.Paths)
+	if err = json.Unmarshal([]byte(paths), &state.Paths); err != nil {
+		return StackState{}, err
+	}
+	err = json.Unmarshal([]byte(changes), &state.ConflictChanges)
 	return state, err
 }
 
-func (s *SQLite) RecordStackAttention(ctx context.Context, offer RestackOffer, stackID, status string, paths []string) error {
+// RecordStackAttention records that the stack's restack needs attention.
+// changes names the changes whose rebuild conflicted.
+func (s *SQLite) RecordStackAttention(ctx context.Context, offer RestackOffer, stackID, status string,
+	paths, changes []string) error {
 	if stackID == "" || (status != "restack_conflict" && status != "swap_held") || len(paths) == 0 {
 		return errors.New("stack, attention status and paths are required")
 	}
 	encodedPaths, err := json.Marshal(paths)
+	if err != nil {
+		return err
+	}
+	if changes == nil {
+		changes = []string{}
+	}
+	encodedChanges, err := json.Marshal(changes)
 	if err != nil {
 		return err
 	}
@@ -296,8 +314,8 @@ func (s *SQLite) RecordStackAttention(ctx context.Context, offer RestackOffer, s
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	result, err := tx.ExecContext(ctx, `UPDATE stack_backends SET status=?,paths=? WHERE workspace=? AND stack_id=?`,
-		status, string(encodedPaths), offer.Workspace, stackID)
+	result, err := tx.ExecContext(ctx, `UPDATE stack_backends SET status=?,paths=?,conflict_changes=?
+		WHERE workspace=? AND stack_id=?`, status, string(encodedPaths), string(encodedChanges), offer.Workspace, stackID)
 	if err != nil {
 		return err
 	}
@@ -313,7 +331,7 @@ func (s *SQLite) RecordStackAttention(ctx context.Context, offer RestackOffer, s
 }
 
 func (s *SQLite) ClearStackAttention(ctx context.Context, workspace, stackID string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE stack_backends SET status='',paths='[]'
+	_, err := s.db.ExecContext(ctx, `UPDATE stack_backends SET status='',paths='[]',conflict_changes='[]'
 		WHERE workspace=? AND stack_id=?`, workspace, stackID)
 	return err
 }
@@ -334,7 +352,7 @@ func (s *SQLite) RecordRestackReviewRequired(ctx context.Context, offer RestackO
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	result, err := tx.ExecContext(ctx, `UPDATE stack_backends SET status='review_required',paths='[]'
+	result, err := tx.ExecContext(ctx, `UPDATE stack_backends SET status='review_required',paths='[]',conflict_changes='[]'
 		WHERE workspace=? AND stack_id=?`, offer.Workspace, stackID)
 	if err != nil {
 		return err
