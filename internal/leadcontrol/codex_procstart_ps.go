@@ -20,3 +20,16 @@ func processStartTime(pid int) (string, error) {
 	}
 	return start, nil
 }
+
+// childPIDs lists pid's direct children.
+func childPIDs(pid int) []int {
+	// #nosec G204 -- fixed pgrep invocation with a numeric pid.
+	out, _ := exec.Command("pgrep", "-P", strconv.Itoa(pid)).Output()
+	var children []int
+	for _, f := range strings.Fields(string(out)) {
+		if child, err := strconv.Atoi(f); err == nil {
+			children = append(children, child)
+		}
+	}
+	return children
+}

@@ -28,3 +28,29 @@ func processStartTime(pid int) (string, error) {
 	}
 	return fields[19], nil
 }
+
+// childPIDs lists pid's direct children from /proc.
+func childPIDs(pid int) []int {
+	dirs, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil
+	}
+	parent := strconv.Itoa(pid)
+	var children []int
+	for _, d := range dirs {
+		child, err := strconv.Atoi(d.Name())
+		if err != nil {
+			continue
+		}
+		// #nosec G304 -- a /proc path built from a pid.
+		stat, err := os.ReadFile("/proc/" + d.Name() + "/stat")
+		end := strings.LastIndexByte(string(stat), ')')
+		if err != nil || end < 0 {
+			continue
+		}
+		if fields := strings.Fields(string(stat)[end+1:]); len(fields) > 1 && fields[1] == parent {
+			children = append(children, child)
+		}
+	}
+	return children
+}

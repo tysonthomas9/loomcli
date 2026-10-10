@@ -5,6 +5,7 @@ package leadcontrol
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -41,33 +42,50 @@ func cancelOnHangup(ctx context.Context) (context.Context, context.CancelFunc) {
 }
 
 // codexAppServerRecord is what a lead runtime writes next to its app-server
-// so a later `loom serve` can tell a leftover it owns from anything else. A
+// so a later `loom serve` can tell a leftover it owns from anything else. Each
 // process is identified by pid plus start time, so a reused pid never matches.
+// Processes holds the npm launcher (whose pid is the group id) and the native
+// app-server it spawned, so either one left running is found.
 type codexAppServerRecord struct {
-	PID        int    `json:"pid"`
-	Start      string `json:"start"`
-	OwnerPID   int    `json:"owner_pid"`
-	OwnerStart string `json:"owner_start"`
+	PGID      int               `json:"pgid"`
+	Processes []recordedProcess `json:"processes"`
+	Owner     recordedProcess   `json:"owner"`
+}
+
+type recordedProcess struct {
+	PID   int    `json:"pid"`
+	Start string `json:"start"`
 }
 
 const codexAppServerRecordName = "app-server.json"
 
-// recordCodexAppServer notes the app-server (its own process group) and this
-// lead runtime as its owner under the lead's runtime home.
+// recordCodexAppServer notes the app-server's process group (the launcher,
+// started with Setpgid, and its current children) and this lead runtime as
+// its owner under the lead's runtime home.
 func recordCodexAppServer(runtimeHome string, pid int) error {
-	start, err := processStartTime(pid)
+	owner, err := identify(os.Getpid())
 	if err != nil {
 		return err
 	}
-	ownerStart, err := processStartTime(os.Getpid())
-	if err != nil {
-		return err
+	rec := codexAppServerRecord{PGID: pid, Owner: owner}
+	for _, p := range append([]int{pid}, childPIDs(pid)...) {
+		if proc, err := identify(p); err == nil {
+			rec.Processes = append(rec.Processes, proc)
+		}
 	}
-	data, err := json.Marshal(codexAppServerRecord{PID: pid, Start: start, OwnerPID: os.Getpid(), OwnerStart: ownerStart})
+	if len(rec.Processes) == 0 {
+		return errors.New("codex app-server is not running")
+	}
+	data, err := json.Marshal(rec)
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(filepath.Join(runtimeHome, codexAppServerRecordName), data, 0o600)
+}
+
+func identify(pid int) (recordedProcess, error) {
+	start, err := processStartTime(pid)
+	return recordedProcess{PID: pid, Start: start}, err
 }
 
 // forgetCodexAppServer drops the record once the runtime has stopped its
@@ -94,27 +112,41 @@ func reapOrphanedCodexAppServers(leadsBaseDir string) []int {
 		// #nosec G304 -- file is a record Loom wrote under its own codex-leads cache.
 		data, err := os.ReadFile(file)
 		var rec codexAppServerRecord
-		if err != nil || json.Unmarshal(data, &rec) != nil || rec.PID <= 1 {
+		if err != nil || json.Unmarshal(data, &rec) != nil || rec.PGID <= 1 {
 			continue
 		}
-		if sameProcess(rec.OwnerPID, rec.OwnerStart) {
+		if sameProcess(rec.Owner) {
 			continue // its lead runtime is alive and still owns it
 		}
-		if sameProcess(rec.PID, rec.Start) {
-			stopRecordedAppServer(rec.PID)
-			reaped = append(reaped, rec.PID)
+		if recordedGroupAlive(rec) {
+			stopRecordedAppServer(rec.PGID)
+			reaped = append(reaped, rec.PGID)
 		}
 		_ = os.Remove(file)
 	}
 	return reaped
 }
 
-func sameProcess(pid int, start string) bool {
-	if pid <= 0 || start == "" {
+// recordedGroupAlive reports whether a recorded process (same pid and start
+// time) is still running in the recorded process group. A group id is never
+// reused while a member is alive, so the group is still the one Loom made.
+func recordedGroupAlive(rec codexAppServerRecord) bool {
+	for _, p := range rec.Processes {
+		if sameProcess(p) {
+			if pgid, err := syscall.Getpgid(p.PID); err == nil && pgid == rec.PGID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func sameProcess(p recordedProcess) bool {
+	if p.PID <= 0 || p.Start == "" {
 		return false
 	}
-	got, err := processStartTime(pid)
-	return err == nil && got == start
+	got, err := processStartTime(p.PID)
+	return err == nil && got == p.Start
 }
 
 // stopRecordedAppServer stops a recorded app-server's process group (it was

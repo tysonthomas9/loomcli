@@ -60,15 +60,23 @@ func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error 
 	}
 	defer func() { _ = logFile.Close() }()
 	defer cancelApp()
-	defer forgetCodexAppServer(runtimeHome)
+	// The crash-cleanup record goes only once the app-server is known to be
+	// stopped; if it would not die, a later `loom serve` still reaps it.
+	stopApp := func() error {
+		return stopAndForgetCodexAppServer(runtimeHome, func() error { return stopCodexAppServer(appCmd, appErr, cancelApp) })
+	}
 
 	runtime := persistStartingCodexRuntime(ctx, cfg, endpoint, runtimeHome, sqliteHome, appCmd.Process.Pid)
 
 	if err := waitForCodexAppServer(ctx, endpoint, appErr, appServerLogPath); err != nil {
-		_ = stopCodexAppServer(appCmd, appErr, cancelApp)
+		_ = stopApp()
 		runtime.Status = RuntimeStatusFailed
 		_ = UpdateCodexRuntimeMetadata(context.Background(), cfg.Store, cfg.Workspace, cfg.SessionID, runtime)
 		return err
+	}
+	// Ready: the launcher has spawned the native app-server, so record it too.
+	if err := recordCodexAppServer(runtimeHome, appCmd.Process.Pid); err != nil {
+		cfg.Logger.Warn("failed to record codex app-server for crash cleanup", "err", err)
 	}
 
 	discoverCtx, cancelDiscover := context.WithCancel(ctx)
@@ -82,7 +90,7 @@ func RunCodexLeadRuntime(ctx context.Context, cfg CodexLeadRuntimeConfig) error 
 
 	cancelDiscover()
 	cancelDrain()
-	if err := stopCodexAppServer(appCmd, appErr, cancelApp); err != nil {
+	if err := stopApp(); err != nil {
 		cfg.Logger.Debug("codex app-server shutdown failed", "err", err)
 	}
 	runtime.Status = RuntimeStatusDisconnected
@@ -432,6 +440,16 @@ func unixFloatTime(value float64) time.Time {
 	return time.Unix(seconds, nanos).UTC()
 }
 
+func stopAndForgetCodexAppServer(runtimeHome string, stop func() error) error {
+	err := stop()
+	if !errors.Is(err, errCodexAppServerStillRunning) {
+		forgetCodexAppServer(runtimeHome)
+	}
+	return err
+}
+
+var errCodexAppServerStillRunning = errors.New("codex app-server did not exit after kill")
+
 func stopCodexAppServer(cmd *exec.Cmd, appErr <-chan error, cancel context.CancelFunc) error {
 	if cmd == nil || cmd.Process == nil {
 		return nil
@@ -451,7 +469,7 @@ func stopCodexAppServer(cmd *exec.Cmd, appErr <-chan error, cancel context.Cance
 		case err := <-appErr:
 			return err
 		case <-time.After(2 * time.Second):
-			return errors.New("codex app-server did not exit after kill")
+			return errCodexAppServerStillRunning
 		}
 	}
 }
