@@ -65,6 +65,28 @@ describe("applyActivity", () => {
     expect(m.has("c")).toBe(false);
   });
 
+  it("restarts the turn timer when a Stop with a message starts a new turn (DF2b)", () => {
+    const started = (turn: string, at: string): AgentEvent => ({
+      ...ev("c", "turn.started", {}, at),
+      event_id: `turn.started:${turn}`,
+      turn_id: turn,
+    });
+    expect(ROSTER_KINDS).toContain("turn.started");
+    let m = applyActivity(new Map(), [
+      state("c", "idle", "active", "T0"),
+      started("t1", "T0"),
+      tool,
+    ]);
+    expect(m.get("c")).toMatchObject({ turnAt: "T0", step: tool });
+    m = applyActivity(m, [started("t1", "T0")]);
+    expect(m.get("c")).toMatchObject({ turnAt: "T0", step: tool });
+    // The interrupted turn ends while the message waits, so the agent stays
+    // active (no state change) and its next turn starts at once.
+    m = applyActivity(m, [started("t2", "T5")]);
+    expect(m.get("c")?.turnAt).toBe("T5");
+    expect(m.get("c")?.step).toBeUndefined();
+  });
+
   it("ignores messages and other events without changing the map", () => {
     const m = applyActivity(new Map(), [tool]);
     const same = applyActivity(m, [
