@@ -195,15 +195,19 @@ test("a chat whose agent is deleted elsewhere says This agent was deleted (DEL3)
 }) => {
   await openLive(page, "idle");
   await expect(page.getByPlaceholder("Ask anything...")).toBeEnabled();
+  // The chat's own stream (deltas=true), not only the sidebar roster's.
   await page.waitForFunction(
     (id) =>
       (
         window as unknown as { __sse?: { url: string; readyState: number }[] }
-      ).__sse?.some(
-        (s) =>
+      ).__sse?.some((s) => {
+        const q = new URL(s.url).searchParams;
+        return (
           s.readyState === 1 &&
-          new URL(s.url).searchParams.get("agents")?.split(",").includes(id),
-      ),
+          q.get("deltas") === "true" &&
+          !!q.get("agents")?.split(",").includes(id)
+        );
+      }),
     LIVE,
   );
   // Another tab DELETEs the agent: history is purged first, so its
