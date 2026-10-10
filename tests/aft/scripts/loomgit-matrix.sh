@@ -131,6 +131,8 @@ nonempty() { [[ -n "$("$@")" ]]; }
 wait_until() { # wait_until <seconds> <label> <command...>
   local seconds="$1" label="$2" deadline
   shift 2
+  # AFT kills a run step at 120 s with no message; fail first, with the reason.
+  ((seconds > 100)) && seconds=100
   deadline=$((SECONDS + seconds))
   while ((SECONDS < deadline)); do
     if "$@" > /dev/null 2>&1; then return 0; fi
@@ -649,7 +651,10 @@ lead-do)
       wait_until $((60 * scale)) "a policy verdict by the lead on $slot revision $number" verdict_by_lead "$slot" "$number" ;;
     approve:refused | cli-approve:refused)
       [[ "$forge" == fake && "$action" == approve ]] && { [[ "$code" == 409 ]] && grep -q review_required "$work/lead-$action.out" || fail "lead approval with Lead may approve off: HTTP $code"; }
-      for _ in $(seq 1 $((15 * scale))); do
+      # A 30 s window on both tiers: the lead's call has already returned (its
+      # refusal is in the transcript), and AFT's run step has 120 s in all.
+      end=$((SECONDS + 30))
+      while ((SECONDS < end)); do
         rev_numbered "$slot" "$number"
         json "$work/rev-$slot-$number.json" 'assert v and not v.get("verdict"), "the lead got a verdict recorded: %r" % v' || fail "$action by the lead was not refused: $(cat "$work/rev-$slot-$number.json")"
         sleep 2
@@ -657,7 +662,8 @@ lead-do)
       curl -fsS "$api/issues/$(task_id "$slot")" > "$work/issue-$slot.json"
       json "$work/issue-$slot.json" 'assert v["data"]["status"]=="review", v' ;;
     merge:refused | request-merge:refused)
-      for _ in $(seq 1 $((10 * scale))); do
+      end=$((SECONDS + 30)) # as above: a fixed window that fits AFT's 120 s step
+      while ((SECONDS < end)); do
         got="$(approval_state "$slot" || true)"
         [[ "${got%%|*}" != waiting && "${got%%|*}" != merging && "${got%%|*}" != merged ]] || fail "the lead's merge was accepted: $got"
         curl -fsS "$api/agents/lead/git/merge-requests" > "$work/merge-requests.json"
