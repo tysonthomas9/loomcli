@@ -93,8 +93,12 @@ func Observe(ctx context.Context, host Host, ws, owner, repo string, number int)
 	}
 	// Every read resolves the host credential afresh: a viewer change
 	// meanwhile may mix two users' reads, so the observation fails whole.
-	if after, err := host.Viewer(ctx, ws, owner, repo); err != nil || after != viewer {
-		return Snapshot{}, fmt.Errorf("the host GitHub viewer changed during the PR watch read (%s, then %s): %w", viewer, after, err)
+	after, err := host.Viewer(ctx, ws, owner, repo)
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("PR watch needs the host GitHub viewer: %w", err)
+	}
+	if after != viewer {
+		return Snapshot{}, fmt.Errorf("the host GitHub viewer changed during the PR watch read (%s, then %s)", viewer, after)
 	}
 	comments, _ := json.Marshal(cursor) // map keys marshal sorted
 	s.Cursor = loomstore.PRWatchCursor{Head: s.Head, Checks: checks, Comments: string(comments)}
@@ -114,18 +118,28 @@ func readChecks(ctx context.Context, host Host, ws, owner, repo string, s *Snaps
 		s.Checks = append(s.Checks, run)
 		checks = append(checks, fmt.Sprint(id(run), ":", run["status"], ":", run["conclusion"]))
 	}
+	for page := 1; ; page++ { // every page of the head's commit statuses
+		if page > maxPages {
+			return "", fmt.Errorf("PR watch commit_status has more than %d pages", maxPages)
+		}
+		body, err := host.Read(ctx, ws, owner, repo, "commit_status", map[string]any{"ref": s.Head, "page": page, "perPage": 100})
+		if err != nil {
+			return "", err
+		}
+		status, _ := body["item"].(map[string]any)
+		if page == 1 {
+			s.Status, _ = status["state"].(string)
+		}
+		statuses, _ := status["statuses"].([]any)
+		for _, st := range statuses {
+			c, _ := st.(map[string]any)
+			checks = append(checks, fmt.Sprint("status:", c["context"], ":", c["state"]))
+		}
+		if next, _ := body["next"].(string); next == "" {
+			break
+		}
+	}
 	sort.Strings(checks)
-	body, err := host.Read(ctx, ws, owner, repo, "commit_status", map[string]any{"ref": s.Head})
-	if err != nil {
-		return "", err
-	}
-	status, _ := body["item"].(map[string]any)
-	s.Status, _ = status["state"].(string)
-	statuses, _ := status["statuses"].([]any)
-	for _, st := range statuses {
-		c, _ := st.(map[string]any)
-		checks = append(checks, fmt.Sprint("status:", c["context"], ":", c["state"]))
-	}
 	sum := sha256.Sum256([]byte(fmt.Sprint(checks)))
 	return hex.EncodeToString(sum[:16]), nil
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/tysonthomas9/loomcli/internal/connector/providers"
@@ -20,7 +21,7 @@ type fakeHost struct {
 	viewer string
 	pr     map[string]any
 	pages  map[string][][]any
-	status map[string]any // commit_status's item
+	status []map[string]any // commit_status's item, by page
 	fail   map[string]error
 	calls  []string
 	onRead func(op string)
@@ -50,7 +51,14 @@ func (f *fakeHost) Read(_ context.Context, ws, owner, repo, op string, args map[
 		return map[string]any{"op": op, "item": f.pr}, nil
 	}
 	if op == "commit_status" {
-		return map[string]any{"op": op, "item": f.status}, nil
+		body := map[string]any{"op": op, "item": map[string]any{}}
+		if page >= 1 && page <= len(f.status) {
+			body["item"] = f.status[page-1]
+		}
+		if page < len(f.status) {
+			body["next"] = strconv.Itoa(page + 1)
+		}
+		return body, nil
 	}
 	pages := f.pages[op]
 	body := map[string]any{"op": op, "items": []any{}}
@@ -303,19 +311,38 @@ func TestPRWatchDeletedAgentNotListed(t *testing.T) {
 	}
 }
 
-// The checks cursor covers commit statuses too: a status-only CI result
-// moves it.
+// The checks cursor covers every page of commit statuses: a status-only CI
+// result on a later page moves it, and a reordered answer does not.
 func TestPRWatchCommitStatusInChecksCursor(t *testing.T) {
-	h := newHost()
-	h.status = map[string]any{"state": "pending", "statuses": []any{map[string]any{"context": "ci", "state": "pending"}}}
-	before, err := Observe(context.Background(), h, "ws", "octocat", "hello", 8)
-	if err != nil {
-		t.Fatal(err)
+	st := func(state string, contexts ...string) map[string]any {
+		var list []any
+		for _, c := range contexts {
+			list = append(list, map[string]any{"context": c, "state": state})
+		}
+		return map[string]any{"state": state, "statuses": list}
 	}
-	h.status = map[string]any{"state": "success", "statuses": []any{map[string]any{"context": "ci", "state": "success"}}}
-	after, err := Observe(context.Background(), h, "ws", "octocat", "hello", 8)
-	if err != nil || after.Cursor.Checks == before.Cursor.Checks || after.Status != "success" {
-		t.Fatalf("checks cursor %q -> %q (status %q), %v; want it to move with the commit status", before.Cursor.Checks, after.Cursor.Checks, after.Status, err)
+	observe := func(h *fakeHost) Snapshot {
+		t.Helper()
+		s, err := Observe(context.Background(), h, "ws", "octocat", "hello", 8)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	h := newHost()
+	h.status = []map[string]any{st("pending", "a", "b"), st("pending", "c")}
+	before := observe(h)
+	h.status = []map[string]any{st("pending", "b", "a"), st("pending", "c")}
+	if again := observe(h); again.Cursor.Checks != before.Cursor.Checks {
+		t.Fatalf("a reordered status answer moved the checks cursor %q -> %q", before.Cursor.Checks, again.Cursor.Checks)
+	}
+	h.status = []map[string]any{st("pending", "a", "b"), st("success", "c")}
+	if after := observe(h); after.Cursor.Checks == before.Cursor.Checks {
+		t.Fatalf("a status change on page 2 left the checks cursor at %q", before.Cursor.Checks)
+	}
+	h.status[0]["state"] = "success"
+	if after := observe(h); after.Status != "success" {
+		t.Fatalf("combined status = %q; want success", after.Status)
 	}
 }
 
@@ -328,7 +355,7 @@ func TestPRWatchViewerChangesMidObservation(t *testing.T) {
 			h.viewer = "bob"
 		}
 	}
-	if snap, err := Observe(context.Background(), h, "ws", "octocat", "hello", 8); err == nil {
-		t.Fatalf("Observe = %+v; want a viewer-changed failure", snap)
+	if snap, err := Observe(context.Background(), h, "ws", "octocat", "hello", 8); err == nil || strings.Contains(err.Error(), "%!") {
+		t.Fatalf("Observe = %+v, %v; want a clean viewer-changed failure", snap, err)
 	}
 }

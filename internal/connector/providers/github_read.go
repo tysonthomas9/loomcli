@@ -53,7 +53,7 @@ var GitHubReadOps = map[string]readOp{
 	"issue_search":       {path: "/search/issues", list: "items", keys: issueKeys, page: true},
 	"issue_comments":     {path: "/issues/{number}/comments", keys: "id body created_at updated_at html_url " + userKeys, page: true},
 	"check_runs":         {path: "/commits/{ref}/check-runs", list: "check_runs", keys: "id name status conclusion started_at completed_at html_url details_url app slug output title summary", page: true},
-	"commit_status":      {path: "/commits/{ref}/status", keys: "state sha total_count statuses context description target_url created_at updated_at"},
+	"commit_status":      {path: "/commits/{ref}/status", keys: "state sha total_count statuses context description target_url created_at updated_at", page: true},
 	"run_list":           {path: "/actions/runs", query: map[string]string{"branch": "branch", "status": "status", "head": "head_sha"}, list: "workflow_runs", keys: runKeys, page: true},
 	"run_view":           {path: "/actions/runs/{run}", keys: runKeys},
 	"run_jobs":           {path: "/actions/runs/{run}/jobs", list: "jobs", keys: "id run_id name status conclusion started_at completed_at html_url steps number", page: true},
