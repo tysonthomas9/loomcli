@@ -203,7 +203,7 @@ func TestHarnessSwitchSameHarnessIsNoop(t *testing.T) {
 		t.Fatalf("no-op changed state: session %s owned %d", *a.HarnessSessionID, len(e.owned(t)))
 	}
 	_, err = e.s.Update(ctx, UpdateRequest{AgentID: "a1", Harness: "fb"})
-	wantCode(t, err, CodeSpecVersionMismatch) // Expect.SpecVersion is required
+	wantCode(t, err, CodePresetInvalid) // Expect.SpecVersion is required: a bad request, not a mismatch (API1)
 }
 
 func TestHarnessSwitchMidTurnStopsAndDeliversSlotOnce(t *testing.T) {

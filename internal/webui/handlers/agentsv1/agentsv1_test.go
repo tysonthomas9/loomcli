@@ -292,6 +292,8 @@ func TestAgentWireFormatSnakeCase(t *testing.T) {
 	}
 	status, out := call(t, srv, "PATCH", "ws/v1/agents/a1", "u2", `{"name":"again","expect":{"spec_version":1}}`)
 	want(t, "patch with stale expect.spec_version", status, out, 409, "spec_version_mismatch")
+	status, out = call(t, srv, "PATCH", "ws/v1/agents/a1", "u3", `{"harness":"codex"}`)
+	want(t, "harness switch without expect.spec_version", status, out, 400, "preset_invalid")
 	_, out = call(t, srv, "POST", "ws/v1/agents/b1/messages", "s1", `{"text":"hi"}`)
 	check("send", out)
 	literal(t, "send", out, []string{"message_id", "state", "replaced"}, []string{"messageId", "MessageID"})
