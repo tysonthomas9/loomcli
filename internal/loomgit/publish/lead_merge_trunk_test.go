@@ -218,3 +218,55 @@ func TestWhenGreenTrunkRespectsAHumanCancel(t *testing.T) {
 		t.Fatalf("lead merge after a human cancel = %+v, merged = %d", got, forge.merged)
 	}
 }
+
+// A green PR to trunk whose base was changed away from the trunk Loom
+// published it to never merges: neither the lead pass nor a queued merge.
+func TestWhenGreenTrunkNeverMergesARetargetedPR(t *testing.T) {
+	item, forge := trunkLeadFixture(t, "A")
+	forge.prs[0].Base = "other-branch"
+	setLeadMayMerge(t, item, "when_green")
+	reconcileLeadTrunk(t, item, forge)
+	if forge.merged != 0 {
+		t.Fatalf("merged a PR retargeted to %s", forge.prs[0].Base)
+	}
+	requireNoApproval(t, item, "A")
+}
+
+func queueLeadMerge(t *testing.T, item fixture, head, status string) {
+	t.Helper()
+	queued := journal.MergeApproval{Workspace: "W", Change: "A", Head: head, ActorKind: "lead",
+		ActorID: leadMergeActor("tyson"), Status: status, CreatedAt: 1}
+	if _, err := item.store.RecordMergeApproval(context.Background(), queued); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWhenGreenTrunkHoldsAQueuedMergeOfARetargetedPR(t *testing.T) {
+	item, forge := trunkLeadFixture(t, "A")
+	setLeadMayMerge(t, item, "when_green")
+	queueLeadMerge(t, item, forge.prs[0].HeadSHA, MergeApprovalBlocked)
+	forge.prs[0].Base = "other-branch"
+	reconcileLeadTrunk(t, item, forge)
+	got := approval(t, item, "A")
+	if forge.merged != 0 || got.Status != MergeApprovalBlocked || got.Attempt != 0 || got.Reason != "the PR's base was changed away from develop; change it back to merge" {
+		t.Fatalf("queued merge of a retargeted PR = %+v, merged = %d", got, forge.merged)
+	}
+	forge.prs[0].Base = "develop"
+	reconcileLeadTrunk(t, item, forge)
+	if forge.merged != 1 {
+		t.Fatalf("merge after the base was changed back: merged = %d, %+v", forge.merged, approval(t, item, "A"))
+	}
+}
+
+// A merge resumed after a crash (already moved to merging, not yet sent)
+// re-reads the PR base before it dispatches.
+func TestWhenGreenTrunkResumedDispatchChecksTheBase(t *testing.T) {
+	item, forge := trunkLeadFixture(t, "A")
+	setLeadMayMerge(t, item, "when_green")
+	queueLeadMerge(t, item, forge.prs[0].HeadSHA, MergeApprovalMerging)
+	forge.prs[0].Base = "other-branch"
+	reconcileLeadTrunk(t, item, forge)
+	if got := approval(t, item, "A"); forge.merged != 0 || got.Status != MergeApprovalBlocked {
+		t.Fatalf("resumed dispatch of a retargeted PR = %+v, merged = %d", got, forge.merged)
+	}
+}

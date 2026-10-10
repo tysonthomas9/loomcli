@@ -190,7 +190,7 @@ func trunkLeadMergeReady(ctx context.Context, store *journal.SQLite, forge leadM
 		return false, nil
 	}
 	pr, err := forge.PullByNumber(ctx, owner, repo, publication.PRNumber)
-	if err != nil || pr.Merged || pr.State != "open" || pr.HeadSHA != publication.Head {
+	if err != nil || pr.Merged || pr.State != "open" || pr.HeadSHA != publication.Head || retargeted(publication, pr) {
 		return false, err
 	}
 	statuses, err := forge.PRStatuses(ctx, owner, repo, publication.Branch)
@@ -199,6 +199,17 @@ func trunkLeadMergeReady(ctx context.Context, store *journal.SQLite, forge leadM
 	}
 	status, found := statuses[publication.Branch]
 	return found && status.Number == pr.Number && greenStatus(status), nil
+}
+
+// retargeted reports a PR to trunk whose base was changed away from the trunk
+// Loom published it to: merging it would land the change somewhere else.
+func retargeted(publication journal.Publication, pr stackpublish.PR) bool {
+	return publication.StackID == "" && pr.Base != publication.Trunk
+}
+
+// retargetedReason is why a merge of a retargeted PR to trunk is held.
+func retargetedReason(publication journal.Publication) string {
+	return "the PR's base was changed away from " + publication.Trunk + "; change it back to merge"
 }
 
 // trunkLeadMergeHold says why Loom itself holds a lead merge of publication's

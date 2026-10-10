@@ -249,6 +249,9 @@ func mergeReadiness(ctx context.Context, store *journal.SQLite, forge mergeAppro
 	if pr.State != "open" {
 		return MergeApprovalCancelled, "the PR was closed", nil
 	}
+	if retargeted(publication, pr) {
+		return MergeApprovalBlocked, retargetedReason(publication), nil
+	}
 	if pr.HeadSHA != approval.Head || publication.DriftSHA != "" {
 		return MergeApprovalStale, "someone else pushed to the PR after it was approved", nil
 	}
@@ -472,6 +475,9 @@ func followTrunkMerge(ctx context.Context, store *journal.SQLite, forge mergeApp
 	}
 	if approval.ProviderRequestID != "" {
 		return pollTrunkMerge(ctx, store, forge, approval, owner, repo, pr.Number)
+	}
+	if retargeted(publication, pr) {
+		return setMergeApproval(ctx, store, approval, MergeApprovalBlocked, retargetedReason(publication))
 	}
 	if approval.DispatchAttempts >= 2 {
 		approval.Attention = true
