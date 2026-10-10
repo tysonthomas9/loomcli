@@ -10,6 +10,7 @@ import type {
   CustomModels,
   Delivery,
   EventPage,
+  HarnessInfo,
   ModelCatalog,
   Preset,
   RespondBody,
@@ -171,6 +172,10 @@ export const listPresets = (ws: string) =>
 
 export const getPreset = (ws: string, name: string) =>
   get<Preset>(v1(ws, `/presets/${encodeURIComponent(name)}`));
+
+/** The harness's health: why it is unavailable, or that it is newer than tested. */
+export const getHarness = (ws: string, harness: string) =>
+  get<HarnessInfo>(v1(ws, `/harnesses/${encodeURIComponent(harness)}`));
 
 /** The harness's connected providers and models, with each model's options. */
 export const listHarnessModels = (ws: string, harness: string) =>

@@ -25,7 +25,8 @@ import {
   useRosterActivity,
   useRosterAgent,
 } from "@/hooks";
-import type { WaitingMessage } from "@/api/agentsv1";
+import { getHarness } from "@/api/agentsv1";
+import type { HarnessInfo, WaitingMessage } from "@/api/agentsv1";
 import type { ChatItem } from "@/hooks";
 import { AgentBadge } from "./AgentBadge";
 import { AgentTray, chatPath, HarnessIcon } from "./AgentTray";
@@ -99,6 +100,11 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
     notFound,
     deleted,
   } = useAgentChat(workspaceId, agentId);
+  const health = useHarnessHealth(
+    workspaceId,
+    agent?.harness,
+    agent?.attention_reason,
+  );
   const compact = useNarrow(COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX);
   const own = ownSender(useAuth().user?.id);
   const [draft, setDraft] = useState("");
@@ -330,6 +336,20 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
               data-testid="agent-attention-banner"
             >
               Needs attention: {attentionText(agent.attention_reason)}
+              {agent.attention_reason === "harness_unavailable" &&
+                health?.ok === false &&
+                health.warning &&
+                ` ${health.warning.replace(/^[a-z_]+: /, "")}.`}
+            </div>
+          )}
+
+          {health?.ok && health.warning && (
+            <div
+              className={page.attention}
+              role="note"
+              data-testid="harness-version-warning"
+            >
+              {health.warning}.
             </div>
           )}
 
@@ -428,6 +448,31 @@ const ATTENTION: Record<string, string> = {
   delete_incomplete: "deleting the agent did not finish.",
 };
 const attentionText = (reason: string) => ATTENTION[reason] ?? reason;
+
+/**
+ * The harness's health (why it is unavailable, or that it is newer than
+ * tested), reread when the agent's Attention changes.
+ */
+function useHarnessHealth(
+  ws: string,
+  harness: string | undefined,
+  attention: string | null | undefined,
+): HarnessInfo["health"] | null {
+  const key = `${ws}/${harness ?? ""}`;
+  const [got, setGot] = useState<{ key: string; h: HarnessInfo["health"] }>();
+  useEffect(() => {
+    if (!harness) return;
+    let live = true;
+    getHarness(ws, harness).then(
+      (r) => live && setGot({ key, h: r.health }),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [ws, harness, key, attention]);
+  return got?.key === key ? got.h : null;
+}
 
 /**
  * The row's spacing kind. Every work row (work, work-toggle, work-live and

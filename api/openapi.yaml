@@ -4531,8 +4531,8 @@ paths:
         5 minutes, without sending a prompt). With repo, the probe runs in that clone and also reads its project and
         local settings; it starts on the first request for the repo, refreshes on a request 5 minutes after the last
         attempt, and until the repo's first good probe the harness-level result is returned. A harness without a probe
-        returns capabilities_supported false; probed_at is absent until the first good probe. Never carries an
-        email, key or token.
+        returns capabilities_supported false; probed_at is absent until the first good probe. health says why the
+        harness is unavailable or warns that it is newer than tested. Never carries an email, key or token.
       security: [{BearerAuth: []}, {AgentBridgeToken: []}]
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
@@ -4927,7 +4927,7 @@ components:
         value: {description: "A string, or a boolean for a boolean option"}
     AgentV1HarnessInfo:
       type: object
-      required: [harness, capabilities_supported, slash_commands]
+      required: [harness, capabilities_supported, slash_commands, health]
       properties:
         harness: {type: string}
         capabilities_supported: {type: boolean, description: false when the harness has no capability probe}
@@ -4935,6 +4935,18 @@ components:
         account_label: {type: string, description: "e.g. Claude Max Subscription; absent when unknown"}
         slash_commands: {type: array, items: {$ref: "#/components/schemas/AgentV1SlashCommand"}}
         probed_at: {type: string, format: date-time, description: When the last good probe ran; absent before one}
+        health: {$ref: "#/components/schemas/AgentV1HarnessHealth"}
+    AgentV1HarnessHealth:
+      type: object
+      description: The installed version's check and the harness's status, read on each request.
+      required: [ok]
+      properties:
+        ok: {type: boolean, description: false when the harness is unavailable}
+        warning:
+          type: string
+          description: >-
+            Why the harness is unavailable (e.g. "harness_too_old: opencode 2.0.1 is below the minimum 2.0.19; upgrade
+            opencode"), or, with ok, that it is newer than the last tested version; absent when there is nothing to say
     AgentV1SlashCommand:
       type: object
       required: [name]

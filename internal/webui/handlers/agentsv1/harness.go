@@ -11,7 +11,8 @@ import (
 // background capability probe, for the repo clone's project settings when
 // repo is given. capabilities_supported is false for a harness without a
 // probe; probed_at is absent before the first good probe. It carries the
-// account's kind and label only, never an email, key or token.
+// account's kind and label only, never an email, key or token. Health says
+// why the harness is unavailable or warns that it is newer than tested.
 type HarnessInfo struct {
 	Harness               string         `json:"harness"`
 	CapabilitiesSupported bool           `json:"capabilities_supported"`
@@ -19,6 +20,13 @@ type HarnessInfo struct {
 	AccountLabel          string         `json:"account_label,omitempty"`
 	SlashCommands         []SlashCommand `json:"slash_commands"`
 	ProbedAt              *time.Time     `json:"probed_at,omitempty"`
+	Health                HarnessHealth  `json:"health"`
+}
+
+// HarnessHealth is the harness's version check and status.
+type HarnessHealth struct {
+	OK      bool   `json:"ok"`
+	Warning string `json:"warning,omitempty"`
 }
 
 // SlashCommand is one command the harness offers.
@@ -34,7 +42,12 @@ func (h *Handler) getHarness(_ http.ResponseWriter, r *http.Request, s *loomagen
 	if err != nil {
 		return 0, nil, err
 	}
-	out := HarnessInfo{Harness: harness, CapabilitiesSupported: supported, SlashCommands: []SlashCommand{}}
+	health, err := s.Health(r.Context(), harness)
+	if err != nil {
+		return 0, nil, err
+	}
+	out := HarnessInfo{Harness: harness, CapabilitiesSupported: supported, SlashCommands: []SlashCommand{},
+		Health: HarnessHealth{OK: health.OK, Warning: health.Warning}}
 	if caps != nil {
 		out.AccountKind, out.AccountLabel, out.ProbedAt = caps.AccountKind, caps.AccountLabel, &caps.ProbedAt
 		for _, c := range caps.SlashCommands {

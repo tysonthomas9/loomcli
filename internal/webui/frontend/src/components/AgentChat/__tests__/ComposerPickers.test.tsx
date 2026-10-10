@@ -32,6 +32,7 @@ vi.mock("@/api/agentsv1", () => ({
   getAgent: api.getAgent,
   updateAgent: api.updateAgent,
   listHarnessModels: api.listHarnessModels,
+  getHarness: () => Promise.resolve({ health: { ok: true } }),
   getCustomModels: api.getCustomModels,
   setCustomModels: api.setCustomModels,
   sendMessage: vi.fn(),

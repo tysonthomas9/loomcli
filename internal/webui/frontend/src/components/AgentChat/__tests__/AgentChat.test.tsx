@@ -24,6 +24,7 @@ const api = vi.hoisted(() => ({
   respondToAsk: vi.fn(),
   archiveAgent: vi.fn(),
   unarchiveAgent: vi.fn(),
+  getHarness: vi.fn(),
   streams: [] as { opts: AgentStreamOptions; events: AgentEvent[] }[],
   ids: 0,
   user: null as { id: string } | null,
@@ -41,6 +42,7 @@ vi.mock("@/api/agentsv1", () => ({
   archiveAgent: api.archiveAgent,
   unarchiveAgent: api.unarchiveAgent,
   updateAgent: () => Promise.resolve({}),
+  getHarness: api.getHarness,
   listHarnessModels: (_ws: string, harness: string) =>
     Promise.resolve({ harness, providers: [] }),
   newRequestId: () => `req-${++api.ids}`,
@@ -125,6 +127,7 @@ const fixture = () => [
 
 beforeEach(() => {
   vi.clearAllMocks();
+  api.getHarness.mockResolvedValue({ health: { ok: true } });
   api.streams = [];
   api.user = null;
   seq = 0;
@@ -999,6 +1002,69 @@ describe("AgentChat lifecycle (1.8b)", () => {
       expect(screen.queryByTestId("agent-attention-banner")).toBeNull(),
     );
   });
+
+  it.each([
+    [
+      "opencode",
+      "opencode 2.0.1 is below the minimum 2.0.19; upgrade opencode",
+    ],
+    ["codex", "codex 0.150.0 is below the minimum 0.157.1; upgrade codex"],
+    ["claude", "claude 2.1.0 is below the minimum 2.1.285; upgrade claude"],
+  ])(
+    "names why %s is unavailable: its version, the minimum and the upgrade",
+    async (harness, reason) => {
+      api.getHarness.mockResolvedValue({
+        harness,
+        health: { ok: false, warning: `harness_too_old: ${reason}` },
+      });
+      await mount(agent({ harness, attention_reason: "harness_unavailable" }));
+      await waitFor(() =>
+        expect(screen.getByTestId("agent-attention-banner")).toHaveTextContent(
+          `Needs attention: the harness is unavailable. ${reason}`,
+        ),
+      );
+      expect(api.getHarness).toHaveBeenCalledWith("w1", harness);
+      expect(screen.queryByTestId("harness-version-warning")).toBeNull();
+    },
+  );
+
+  it("rereads the harness when Attention is raised, to name the reason", async () => {
+    await mount(agent());
+    const reason =
+      "opencode 2.0.1 is below the minimum 2.0.19; upgrade opencode";
+    api.getHarness.mockResolvedValue({
+      health: { ok: false, warning: `harness_too_old: ${reason}` },
+    });
+    api.getAgent.mockResolvedValue(
+      agent({ attention_reason: "harness_unavailable" }),
+    );
+    deliver(ev("agent.state_changed"));
+    await waitFor(() =>
+      expect(screen.getByTestId("agent-attention-banner")).toHaveTextContent(
+        `the harness is unavailable. ${reason}`,
+      ),
+    );
+  });
+
+  it.each([
+    ["opencode", "opencode 2.0.20 is newer than the last tested 2.0.19"],
+    ["codex", "codex 0.158.0 is newer than the last tested 0.157.1"],
+    ["claude", "claude 2.1.286 is newer than the last tested 2.1.285"],
+  ])(
+    "warns, without Attention, that %s is newer than tested",
+    async (harness, warning) => {
+      api.getHarness.mockResolvedValue({
+        harness,
+        health: { ok: true, warning },
+      });
+      await mount(agent({ harness }));
+      expect(
+        await screen.findByTestId("harness-version-warning"),
+      ).toHaveTextContent(warning);
+      expect(screen.queryByTestId("agent-attention-banner")).toBeNull();
+      expect(screen.getByLabelText("Message")).toBeEnabled();
+    },
+  );
 
   it("labels create_retrying in plain words", async () => {
     await mount(agent({ attention_reason: "create_retrying" }));

@@ -258,3 +258,9 @@ export interface ModelCatalog {
   harness: string;
   providers: ModelProvider[];
 }
+
+/** GET /v1/harnesses/{harness}: health says why the harness is unavailable, or warns (ok) that it is newer than tested. */
+export interface HarnessInfo {
+  harness: string;
+  health: { ok: boolean; warning?: string };
+}

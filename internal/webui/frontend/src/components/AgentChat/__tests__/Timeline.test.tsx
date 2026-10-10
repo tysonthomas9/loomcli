@@ -29,6 +29,7 @@ vi.mock("@/api/agentsv1", () => ({
   withdrawMessage: api.withdrawMessage,
   respondToAsk: api.respondToAsk,
   updateAgent: () => Promise.resolve({}),
+  getHarness: () => Promise.resolve({ health: { ok: true } }),
   listHarnessModels: (_ws: string, harness: string) =>
     Promise.resolve({ harness, providers: [] }),
   newRequestId: () => `req-${++api.ids}`,

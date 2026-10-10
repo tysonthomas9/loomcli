@@ -298,3 +298,13 @@ func (s *Service) Capabilities(ctx context.Context, harness, repo string) (caps 
 	}
 	return nil, true, nil
 }
+
+// Health is harness's version check and status: why it is unavailable, or a
+// warning that it is newer than tested.
+func (s *Service) Health(ctx context.Context, harness string) (loomharness.Health, error) {
+	h, ok := s.harnesses[harness]
+	if !ok {
+		return loomharness.Health{}, s.unavailable(harness)
+	}
+	return h.Health(ctx)
+}

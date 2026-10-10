@@ -2478,7 +2478,7 @@ export interface paths {
     };
     /**
      * Get a harness's last background capability probe
-     * @description The account kind and label and the slash commands from the harness's own periodic probe (Claude: every 5 minutes, without sending a prompt). With repo, the probe runs in that clone and also reads its project and local settings; it starts on the first request for the repo, refreshes on a request 5 minutes after the last attempt, and until the repo's first good probe the harness-level result is returned. A harness without a probe returns capabilities_supported false; probed_at is absent until the first good probe. Never carries an email, key or token.
+     * @description The account kind and label and the slash commands from the harness's own periodic probe (Claude: every 5 minutes, without sending a prompt). With repo, the probe runs in that clone and also reads its project and local settings; it starts on the first request for the repo, refreshes on a request 5 minutes after the last attempt, and until the repo's first good probe the harness-level result is returned. A harness without a probe returns capabilities_supported false; probed_at is absent until the first good probe. health says why the harness is unavailable or warns that it is newer than tested. Never carries an email, key or token.
      */
     get: operations["getHarnessV1"];
     put?: never;
@@ -2775,6 +2775,14 @@ export interface components {
        * @description When the last good probe ran; absent before one
        */
       probed_at?: string;
+      health: components["schemas"]["AgentV1HarnessHealth"];
+    };
+    /** @description The installed version's check and the harness's status, read on each request. */
+    AgentV1HarnessHealth: {
+      /** @description false when the harness is unavailable */
+      ok: boolean;
+      /** @description Why the harness is unavailable (e.g. "harness_too_old: opencode 2.0.1 is below the minimum 2.0.19; upgrade opencode"), or, with ok, that it is newer than the last tested version; absent when there is nothing to say */
+      warning?: string;
     };
     AgentV1SlashCommand: {
       name: string;
