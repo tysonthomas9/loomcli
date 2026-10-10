@@ -67,6 +67,10 @@ type SlotSend struct {
 	// together; any other Send drops it, ending the episode. A retry changes
 	// neither.
 	LimitResume bool
+	// PRWatch is the PR watch a PR-watch wake reports (OR8): in the Send's
+	// transaction it saves the wake's cursor, or removes the watch, so a
+	// crash never tells the same news twice. A retry changes neither.
+	PRWatch *PRWatchWake
 }
 
 // ErrSlotBusy means the sender's slot holds a message this Send would lose:
@@ -137,6 +141,9 @@ func sendTx(ctx context.Context, tx *sql.Tx, in SlotSend) (r Receipt, saved []Ev
 			return err
 		}
 		if err = sendLimitResume(ctx, tx, in); err != nil {
+			return err
+		}
+		if err = sendPRWatch(ctx, tx, in.PRWatch); err != nil {
 			return err
 		}
 		saved, err = sendEvents(ctx, tx, in, rev)

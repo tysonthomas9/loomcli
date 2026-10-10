@@ -112,6 +112,7 @@ func Start(ctx context.Context, cfg Config) (*API, error) {
 		c := serviceConfig(st, ws, wt, cfg.Skills,
 			map[string]loomharness.Harness{"opencode": lazyFeed{Harness: oc, start: feed}})
 		c.RecoverFirst = true              // writes wait for the dispatcher's start-up Reconcile
+		c.PRWatchHost = cfg.PRWatchHost    // OR8: the dispatcher sweeps the agents' PR watches
 		c.CatalogWarmUp = 45 * time.Second // MC1: OpenCode lists only some models ~20s after boot
 		c.Bridge, c.Launch, c.Retire = bridge(a.APIBase, cfg.GitHubRead != nil), launch(a.APIBase, ws, tokens, cfg.GitHubRead != nil), retire(oc)
 		svc = loomagent.New(c)

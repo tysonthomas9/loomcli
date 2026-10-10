@@ -36,6 +36,9 @@ type SendRequest struct {
 	Delivery string
 	// Actor is the sender, set by the entry point. Empty means the local user.
 	Actor ActorRef `json:"-"`
+	// prWatch is the PR watch a PR-watch wake reports (OR8), saved in the
+	// Send's transaction.
+	prWatch *loomstore.PRWatchWake
 }
 
 // SendResult is what Send returns, and what its receipt stores.
@@ -180,7 +183,8 @@ func decideSend(in sendInput) (sendDecision, error) {
 		d.Events[i].Time = in.Now
 	}
 	d.Slot = loomstore.SlotSend{AgentID: a.AgentID, Sender: sender, RequestID: req.RequestID, Body: req.Text,
-		Source: req.Source, Reopen: reopen, First: in.Interrupted != nil && *in.Interrupted, LimitResume: sender == limitResumeSender}
+		Source: req.Source, Reopen: reopen, First: in.Interrupted != nil && *in.Interrupted, LimitResume: sender == limitResumeSender,
+		PRWatch: req.prWatch}
 	return d, nil
 }
 

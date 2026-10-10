@@ -11,6 +11,7 @@ import (
 
 	"github.com/tysonthomas9/loomcli/internal/loomharness"
 	"github.com/tysonthomas9/loomcli/internal/loomstore"
+	"github.com/tysonthomas9/loomcli/internal/prwatch"
 )
 
 // Agent states (design v2 §5.1).
@@ -102,6 +103,9 @@ type ServiceConfig struct {
 	// first Reconcile of each wired harness has finished (a serve start,
 	// design v2 §4.14).
 	RecoverFirst bool
+	// PRWatchHost is the host GitHub connector the dispatcher reads watched
+	// PRs through (OR8); nil sweeps none.
+	PRWatchHost prwatch.Host
 }
 
 // Backend is a workspace default harness and model.
@@ -157,8 +161,13 @@ type Service struct {
 	// backoff timer: time's own, or a test's.
 	tick  ticker
 	after func(time.Duration) <-chan time.Time
-	// now is the usage-limit resume clock (OR7): time's own, or a test's.
+	// now is the usage-limit resume and PR-watch clock (OR7, OR8): time's own, or a test's.
 	now func() time.Time
+	// prHost is the host GitHub connector PR watches read through (OR8);
+	// nil sweeps none. prDue is when the next sweep is due, read and set
+	// only by the dispatcher.
+	prHost prwatch.Host
+	prDue  time.Time
 	// queue is the reconcile queue by agent ID, under mu; queueWake tells
 	// the dispatcher it changed.
 	queue     map[string]*queued
@@ -170,7 +179,7 @@ func New(cfg ServiceConfig) *Service {
 	s := &Service{Bus: NewBus(), store: cfg.Store, events: cfg.Events, workspace: cfg.Workspace,
 		resolveRepo: cfg.ResolveRepo, prepare: cfg.PrepareWorktree, target: cfg.Target,
 		interrupt: cfg.Interrupt, purge: cfg.Purge, harnesses: cfg.Harnesses, launch: cfg.Launch,
-		retire: cfg.Retire, workspaceID: cfg.WorkspaceID, presets: cfg.Presets, backend: cfg.DefaultBackend, bridge: cfg.Bridge,
+		retire: cfg.Retire, prHost: cfg.PRWatchHost, workspaceID: cfg.WorkspaceID, presets: cfg.Presets, backend: cfg.DefaultBackend, bridge: cfg.Bridge,
 		inputKey: cfg.InputKey, catalogWait: 15 * time.Second, catalogPoll: 250 * time.Millisecond,
 		catalogWarmUp: cfg.CatalogWarmUp, listed: map[string]time.Time{}, tick: realTicker, after: time.After, now: time.Now,
 		queue: map[string]*queued{}, queueWake: make(chan struct{}, 1),

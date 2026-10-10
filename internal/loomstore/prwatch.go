@@ -16,7 +16,8 @@ type PRWatchKey struct {
 }
 
 // PRWatchCursor is what a watch last reported: the PR's head SHA, a digest
-// of its check runs, and its comment cursor (OR10).
+// of its check runs, and its comment cursor (OR10), which also notes
+// whether its branch conflicts (OR8).
 type PRWatchCursor struct {
 	Head     string
 	Checks   string
@@ -105,6 +106,13 @@ ORDER BY agent_id, owner, repo, number`, workspace)
 	return out, rows.Err()
 }
 
+// DropDeletedPRWatches deletes workspace's deleted agents' PR watches.
+func (s *Store) DropDeletedPRWatches(ctx context.Context, workspace string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM pr_watches WHERE workspace_id = ?
+  AND agent_id IN (SELECT agent_id FROM agents WHERE deleted_at IS NOT NULL)`, workspace)
+	return err
+}
+
 // UnregisterPRWatch deletes the watch k, reporting whether there was one.
 func (s *Store) UnregisterPRWatch(ctx context.Context, k PRWatchKey) (bool, error) {
 	res, err := s.db.ExecContext(ctx, `DELETE FROM pr_watches WHERE agent_id = ? AND owner = ? AND repo = ? AND number = ?`,
@@ -138,4 +146,37 @@ func advancePRWatch(ctx context.Context, tx *sql.Tx, k PRWatchKey, viewer string
 		return err
 	}
 	return nil
+}
+
+// PRWatchWake is a PR-watch wake's change to its watch (OR8): what the wake
+// reports, as viewer, its watch's comment-only wake count and text; End
+// removes the watch instead.
+type PRWatchWake struct {
+	PRWatchKey
+	Viewer    string
+	Cursor    PRWatchCursor
+	WakeCount int
+	LastTold  string
+	End       bool
+}
+
+// ErrPRWatchGone means a PR-watch wake's Send found its watch removed; then
+// nothing is stored.
+var ErrPRWatchGone = errors.New("loomstore: PR watch no longer exists")
+
+// sendPRWatch is a Send's change to the PR watch it reports, in tx, so the
+// wake's receipt and its cursor commit together.
+func sendPRWatch(ctx context.Context, tx *sql.Tx, w *PRWatchWake) error {
+	if w == nil {
+		return nil
+	}
+	err := advancePRWatch(ctx, tx, w.PRWatchKey, w.Viewer, w.Cursor, w.WakeCount, w.LastTold)
+	if err == nil && w.End {
+		_, err = tx.ExecContext(ctx, `DELETE FROM pr_watches WHERE agent_id = ? AND owner = ? AND repo = ? AND number = ?`,
+			w.AgentID, w.Owner, w.Repo, w.Number)
+	}
+	if errors.Is(err, ErrNotFound) {
+		return ErrPRWatchGone
+	}
+	return err
 }

@@ -117,7 +117,7 @@ func TestPRWatchRegistrationRestart(t *testing.T) {
 	if err != nil || !created {
 		t.Fatalf("Register = %+v, %v, %v", w, created, err)
 	}
-	if w.Viewer != "loom-host" || w.Cursor.Head != "sha-1" || w.Cursor.Checks == "" || w.Cursor.Comments != `{"issue":4,"review":2,"reviewComment":3}` {
+	if w.Viewer != "loom-host" || w.Cursor.Head != "sha-1" || w.Cursor.Checks == "" || w.Cursor.Comments != `{"conflict":0,"issue":4,"review":2,"reviewComment":3}` {
 		t.Fatalf("registered watch = %+v", w)
 	}
 	adv := loomstore.PRWatchCursor{Head: "sha-2", Checks: "c2", Comments: `{"issue":9,"review":2,"reviewComment":3}`}
@@ -228,7 +228,7 @@ func TestPRWatchPaginationBoundary(t *testing.T) {
 			issue++
 		}
 	}
-	if issue != 101 || snap.Cursor.Comments != `{"issue":101,"review":2,"reviewComment":3}` {
+	if issue != 101 || snap.Cursor.Comments != `{"conflict":0,"issue":101,"review":2,"reviewComment":3}` {
 		t.Fatalf("issue comments = %d, cursor %s; want 101 and issue 101", issue, snap.Cursor.Comments)
 	}
 

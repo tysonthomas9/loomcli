@@ -428,6 +428,7 @@ func (s *Service) follow(ctx context.Context, sub *BusSubscription, l *loop) {
 			s.resync(ctx, false)
 			s.reconcileDue(ctx)
 			s.sweepLimitResumes(ctx)
+			s.sweepPRWatches(ctx)
 		case <-s.queueWake:
 			l.took()
 			s.reconcileDue(ctx)

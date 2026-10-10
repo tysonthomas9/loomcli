@@ -46,8 +46,13 @@ type Snapshot struct {
 	Head      string
 	Checks    []map[string]any // the head's check runs
 	Status    string           // the head's combined commit status
-	Comments  []Comment
-	Cursor    loomstore.PRWatchCursor
+	// Total counts the head's check runs and commit statuses, Failed names
+	// those that failed, and Pending reports one still running (OR8).
+	Total    int
+	Failed   []string
+	Pending  bool
+	Comments []Comment
+	Cursor   loomstore.PRWatchCursor
 }
 
 // Observe reads PR number on owner/repo through host: the viewer, the PR,
@@ -77,7 +82,10 @@ func Observe(ctx context.Context, host Host, ws, owner, repo string, number int)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	cursor := map[string]int64{"issue": 0, "review": 0, "reviewComment": 0}
+	cursor := map[string]int64{"issue": 0, "review": 0, "reviewComment": 0, "conflict": 0}
+	if s.Mergeable == "dirty" { // the branch conflicts (OR8)
+		cursor["conflict"] = 1
+	}
 	for kind, op := range map[string]string{"issue": "issue_comments", "review": "pr_reviews", "reviewComment": "pr_review_comments"} {
 		items, err := readAll(ctx, host, ws, owner, repo, op, map[string]any{"number": number})
 		if err != nil {
@@ -117,6 +125,11 @@ func readChecks(ctx context.Context, host Host, ws, owner, repo string, s *Snaps
 		run, _ := r.(map[string]any)
 		s.Checks = append(s.Checks, run)
 		checks = append(checks, fmt.Sprint(id(run), ":", run["status"], ":", run["conclusion"]))
+		switch run["conclusion"] {
+		case "failure", "cancelled", "timed_out", "action_required", "startup_failure":
+			s.Failed = append(s.Failed, fmt.Sprint(run["name"]))
+		}
+		s.Pending = s.Pending || run["status"] != "completed"
 	}
 	for page := 1; ; page++ { // every page of the head's commit statuses
 		if page > maxPages {
@@ -133,12 +146,19 @@ func readChecks(ctx context.Context, host Host, ws, owner, repo string, s *Snaps
 		statuses, _ := status["statuses"].([]any)
 		for _, st := range statuses {
 			c, _ := st.(map[string]any)
-			checks = append(checks, fmt.Sprint("status:", c["context"], ":", c["state"]))
+			checks = append(checks, fmt.Sprint("status:", id(c), ":", c["context"], ":", c["state"]))
+			switch c["state"] {
+			case "failure", "error":
+				s.Failed = append(s.Failed, fmt.Sprint(c["context"]))
+			case "pending":
+				s.Pending = true
+			}
 		}
 		if next, _ := body["next"].(string); next == "" {
 			break
 		}
 	}
+	s.Total = len(checks)
 	sort.Strings(checks)
 	sum := sha256.Sum256([]byte(fmt.Sprint(checks)))
 	return hex.EncodeToString(sum[:16]), nil
