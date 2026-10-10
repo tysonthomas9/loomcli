@@ -93,4 +93,14 @@ func TestSettleAllAndSettleChangeReadTheJournal(t *testing.T) {
 	if got, err := SettleChange(ctx, filepath.Join(t.TempDir(), "none.db"), "W", changed.Change); err != nil || got != Wait {
 		t.Fatalf("no journal: %q %v, want nothing to settle", got, err)
 	}
+
+	// A close that fails leaves T1 in code review, so the next pass closes it.
+	sticky := &stickyIssues{status: "review", labels: []string{backend.CodeReviewLabel}, failCloses: 1}
+	issuesFor = func(ctx context.Context, _ string) (context.Context, backend.IssueBackend) { return ctx, sticky }
+	if err := SettleAll(ctx, journalPath); err == nil || sticky.status != "review" || !backend.HasCodeReviewLabel(sticky.labels) {
+		t.Fatalf("failed close: %v, task %s %v; want an error and T1 still in code review", err, sticky.status, sticky.labels)
+	}
+	if err := SettleAll(ctx, journalPath); err != nil || sticky.status != "closed" {
+		t.Fatalf("retry: %v, task %s; want T1 closed", err, sticky.status)
+	}
 }
