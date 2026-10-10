@@ -24,6 +24,8 @@
 #   LOOM_SLOT_STATE_DIR   lock/temp root (default ~/.cache/loom/slots)
 #   LOOM_SLOT_WAIT_SECS   give up waiting for a slot after this many seconds
 #                         (default 0 = wait forever)
+#   LOOM_SLOT_STOP_SECS   on INT/TERM, KILL the command's process group if it
+#                         has not exited after this many seconds (default 60)
 #   LOOM_AFT_INPUTS       durable AFT inputs (default ~/.cache/loom/aft-inputs,
 #                         holding fleet-db/ and testing-app/)
 #
@@ -35,12 +37,14 @@ SLOTS="${LOOM_SLOTS:-4}"
 PORT_BASE="${LOOM_SLOT_PORT_BASE:-18000}"
 STATE_DIR="${LOOM_SLOT_STATE_DIR:-$HOME/.cache/loom/slots}"
 WAIT_SECS="${LOOM_SLOT_WAIT_SECS:-0}"
+STOP_SECS="${LOOM_SLOT_STOP_SECS:-60}"
 AFT_INPUTS="${LOOM_AFT_INPUTS:-$HOME/.cache/loom/aft-inputs}"
 
 die() { echo "loom-slot: $*" >&2; exit 2; }
 
 [[ "$SLOTS" =~ ^[1-9][0-9]*$ ]] || die "LOOM_SLOTS must be a positive integer"
 [[ "$PORT_BASE" =~ ^[1-9][0-9]*$ ]] || die "LOOM_SLOT_PORT_BASE must be a positive integer"
+[[ "$STOP_SECS" =~ ^[1-9][0-9]*$ ]] || die "LOOM_SLOT_STOP_SECS must be a positive integer"
 (( PORT_BASE + SLOTS * 100 + 99 < 65536 )) || die "port block past 65535"
 
 check_slot() {
@@ -77,38 +81,74 @@ owner_alive() {
 	[[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null
 }
 
-# try_lock N → 0 if this process now holds slot N.
-try_lock() {
-	local d
-	d="$(lock_dir "$1")"
-	if mkdir "$d" 2>/dev/null; then
-		echo "$$" >"$d/pid"
-		printf '%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$PWD" "$CMD_TEXT" >"$d/info"
-		return 0
-	fi
-	# Reclaim a stale lock. The pid file is written right after mkdir, so a lock
-	# without one is only stale once it is older than a few seconds.
-	if ! owner_alive "$d"; then
-		if [[ -f "$d/pid" ]] || [[ -n "$(find "$d" -maxdepth 0 -mmin +1 2>/dev/null)" ]]; then
-			local stale="$d.stale.$$"
-			if mv "$d" "$stale" 2>/dev/null; then
-				rm -rf "$stale"
-				echo "loom-slot: reclaimed stale slot $1" >&2
-				if mkdir "$d" 2>/dev/null; then
-					echo "$$" >"$d/pid"
-					printf '%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$PWD" "$CMD_TEXT" >"$d/info"
-					return 0
-				fi
-			fi
-		fi
-	fi
-	return 1
+take_lock() {
+	mkdir "$1" 2>/dev/null || return 1
+	echo "$$" >"$1/pid"
+	printf '%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$PWD" "$CMD_TEXT" >"$1/info"
 }
 
+# try_lock N → 0 if this process now holds slot N.
+try_lock() {
+	local d m pid
+	d="$(lock_dir "$1")"
+	take_lock "$d" && return 0
+	owner_alive "$d" && return 1
+	# Reclaim a stale lock under a per-slot mutex, so two waiters cannot both
+	# reclaim and the second never removes the lock the first just took. The pid
+	# file is written right after mkdir, so a lock without one is only stale once
+	# it is older than a minute. A mutex left by a reclaimer that died is cleared
+	# after a minute too.
+	m="$d.reclaim"
+	[[ -z "$(find "$m" -maxdepth 0 -mmin +1 2>/dev/null)" ]] || rmdir "$m" 2>/dev/null || true
+	mkdir "$m" 2>/dev/null || return 1
+	pid="$(cat "$d/pid" 2>/dev/null || true)"
+	if [[ -d "$d" ]] && ! owner_alive "$d" &&
+		{ [[ -n "$pid" ]] || [[ -n "$(find "$d" -maxdepth 0 -mmin +1 2>/dev/null)" ]]; }; then
+		rm -rf "$d"
+		echo "loom-slot: reclaimed stale slot $1 (owner pid ${pid:-unknown})" >&2
+	fi
+	local rc=1
+	take_lock "$d" && rc=0
+	rmdir "$m" 2>/dev/null || true
+	return "$rc"
+}
+
+# release removes the lock only while this process still owns it.
+release() {
+	local d
+	[[ -n "${GOT:-}" ]] || return 0
+	d="$(lock_dir "$GOT")"
+	[[ "$(cat "$d/pid" 2>/dev/null || true)" == "$$" ]] && rm -rf "$d"
+	return 0
+}
+
+# group_alive: any live (non-zombie) process left in the command's process
+# group. Not `kill -0 -PGID`: the unreaped leader's zombie would count.
+group_alive() {
+	ps -A -o pgid=,stat= 2>/dev/null | awk -v g="$CHILD" '$1 == g && $2 !~ /^Z/ { found = 1 } END { exit !found }'
+}
+
+# stop_child SIG: signal the command's whole process group (make, compose,
+# grandchildren), wait for the group to empty (TERM after 5s if SIG was not
+# TERM), then KILL whatever is left after LOOM_SLOT_STOP_SECS.
 stop_child() {
 	[[ -n "${CHILD:-}" ]] || return 0
-	kill -TERM "$CHILD" 2>/dev/null || true
+	kill "-$1" -- "-$CHILD" 2>/dev/null || true
+	local waited=0
+	while group_alive && (( waited < STOP_SECS * 10 )); do
+		# Background jobs of a non-interactive shell ignore INT: follow with
+		# TERM after a 5s grace.
+		(( waited == 50 )) && [[ "$1" != TERM ]] && kill -TERM -- "-$CHILD" 2>/dev/null
+		sleep 0.1
+		waited=$((waited + 1))
+	done
+	if group_alive; then
+		echo "loom-slot: process group $CHILD still running after ${STOP_SECS}s; sending KILL" >&2
+		kill -KILL -- "-$CHILD" 2>/dev/null || true
+		while group_alive; do sleep 0.1; done
+	fi
 	wait "$CHILD" 2>/dev/null || true
+	CHILD=""
 }
 
 cmd_status() {
@@ -139,7 +179,7 @@ cmd_run() {
 	done
 	[[ $# -gt 0 ]] || die "run needs a command (scripts/loom-slot.sh run [--slot N] -- cmd...)"
 	[[ -z "$want" ]] || check_slot "$want"
-	CMD_TEXT="$*"
+	CMD_TEXT="$(printf '%s ' "$@" | tr '\n\t' '  ')"
 	mkdir -p "$STATE_DIR"
 
 	local start=$SECONDS n announced=""
@@ -166,18 +206,23 @@ cmd_run() {
 	done
 
 	# Release on any exit, and only after the command is gone: on INT/TERM the
-	# child is stopped first so a slot is never freed under a running job.
+	# command's whole process group is stopped first, so a slot is never freed
+	# under a running job.
 	CHILD=""
-	trap 'rm -rf "$(lock_dir "$GOT")"' EXIT
-	trap 'stop_child; exit 130' INT
-	trap 'stop_child; exit 143' TERM
+	trap 'release' EXIT
+	trap 'stop_child INT; exit 130' INT
+	trap 'stop_child TERM; exit 143' TERM
 
 	eval "$(slot_env "$GOT")"
 	mkdir -p "$TMPDIR"
 	echo "loom-slot: slot $GOT (project $LOCAL_MODE_COMPOSE_PROJECT, ports $LOCAL_MODE_FLEETDB_PORT/$LOCAL_MODE_API_PORT/$LOCAL_MODE_UI_PORT, e2e $E2E_PORT/$E2E_FRONTEND_PORT)" >&2
 	local rc=0
+	# Job control puts the command in its own process group, so the whole tree
+	# can be signalled. Keep stdin attached.
+	set -m
 	"$@" <&0 &
 	CHILD=$!
+	set +m
 	wait "$CHILD" || rc=$?
 	CHILD=""
 	return "$rc"

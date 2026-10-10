@@ -131,15 +131,15 @@ scripts/loom-slot.sh status                    # who holds which slot
 scripts/loom-slot.sh env 2                     # print slot 2's exports
 scripts/loom-slot.sh run -- make check-go      # first free slot; waits if all are busy
 scripts/loom-slot.sh run --slot 1 -- bash -c '
-  LOCAL_MODE_COMPOSE_UP_FLAGS="--build -d" make local-mode-up &&
-  make local-mode-verify; rc=$?; make local-mode-down; exit $rc'
+  trap "trap - EXIT; make local-mode-down" EXIT INT TERM
+  LOCAL_MODE_COMPOSE_UP_FLAGS="--build -d" make local-mode-up && make local-mode-verify'
 scripts/loom-slot.sh run -- env LOOM_HARNESS_EMU=1 \
   AFT_SUITES=tests/aft/suites/agents-v1-lead.test.yaml tests/aft/run-aft.sh --strict
 ```
 
 Slot N uses ports `B+80/82/83` (FleetDB/API/UI) and `B+90/91` (AFT `E2E_PORT`/`E2E_FRONTEND_PORT`), with `B = LOOM_SLOT_PORT_BASE (18000) + N*100`, so slot 1 is 18180/18182/18183 and 18190/18191. `LOCAL_MODE_API_URL` is set to the slot's API, so `make local-mode-verify` needs no flags. `FLEET_DB_REPO` and `AFT_DIR` default to `~/.cache/loom/aft-inputs/{fleet-db,testing-app}`; `LOCAL_MODE_FLEETDB_CONTEXT` points the compose fleet-db build at `FLEET_DB_REPO`. The Go build cache stays shared (it is safe for concurrent use).
 
-Run the whole up/verify/down sequence inside one `run` so the slot is held while the stack exists, and always tear down inside it. The lock is released when the command exits, including on INT/TERM (the command is stopped first), and a lock whose owner died is reclaimed. Compose selection is unchanged: Podman when installed, otherwise `docker compose`; set `LOCAL_MODE_COMPOSE` to force one.
+Run the whole up/verify/down sequence inside one `run` so the slot is held while the stack exists, and tear down from a trap inside it (as above) so an interrupted run still removes its stack. The command runs in its own process group: on INT/TERM the slot signals the whole group (INT is followed by TERM after 5s), waits for it to exit, sends KILL after `LOOM_SLOT_STOP_SECS` (default 60), and only then releases the lock. A lock whose owner died is reclaimed, one waiter at a time. If a stack was left behind anyway, remove it with `scripts/loom-slot.sh run --slot N -- make local-mode-down`. Compose selection is unchanged: Podman when installed, otherwise `docker compose`; set `LOCAL_MODE_COMPOSE` to force one.
 
 #### Gates on a Linux host
 
