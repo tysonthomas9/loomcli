@@ -23,10 +23,12 @@ type HarnessInfo struct {
 	Health                HarnessHealth  `json:"health"`
 }
 
-// HarnessHealth is the harness's version check and status.
+// HarnessHealth is the harness's status: Reason says why it is unavailable;
+// VersionWarning, apart, that its version is newer than tested.
 type HarnessHealth struct {
-	OK      bool   `json:"ok"`
-	Warning string `json:"warning,omitempty"`
+	OK             bool   `json:"ok"`
+	Reason         string `json:"reason,omitempty"`
+	VersionWarning string `json:"version_warning,omitempty"`
 }
 
 // SlashCommand is one command the harness offers.
@@ -47,7 +49,10 @@ func (h *Handler) getHarness(_ http.ResponseWriter, r *http.Request, s *loomagen
 		return 0, nil, err
 	}
 	out := HarnessInfo{Harness: harness, CapabilitiesSupported: supported, SlashCommands: []SlashCommand{},
-		Health: HarnessHealth{OK: health.OK, Warning: health.Warning}}
+		Health: HarnessHealth{OK: health.OK, VersionWarning: health.Version.Warning()}}
+	if !health.OK {
+		out.Health.Reason = health.Warning
+	}
 	if caps != nil {
 		out.AccountKind, out.AccountLabel, out.ProbedAt = caps.AccountKind, caps.AccountLabel, &caps.ProbedAt
 		for _, c := range caps.SlashCommands {

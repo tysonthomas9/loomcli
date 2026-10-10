@@ -259,8 +259,11 @@ export interface ModelCatalog {
   providers: ModelProvider[];
 }
 
-/** GET /v1/harnesses/{harness}: health says why the harness is unavailable, or warns (ok) that it is newer than tested. */
+/**
+ * GET /v1/harnesses/{harness}: health.reason says why the harness is
+ * unavailable; version_warning, apart, that it is newer than tested.
+ */
 export interface HarnessInfo {
   harness: string;
-  health: { ok: boolean; warning?: string };
+  health: { ok: boolean; reason?: string; version_warning?: string };
 }

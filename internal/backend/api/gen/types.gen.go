@@ -1897,13 +1897,16 @@ type AgentV1Expect struct {
 	SubjectVersion *string `json:"subject_version,omitempty"`
 }
 
-// AgentV1HarnessHealth The installed version's check and the harness's status, read on each request.
+// AgentV1HarnessHealth The harness's status and installed-version check, read on each request (bounded at 10s).
 type AgentV1HarnessHealth struct {
 	// Ok false when the harness is unavailable
 	Ok bool `json:"ok"`
 
-	// Warning Why the harness is unavailable (e.g. "harness_too_old: opencode 2.0.1 is below the minimum 2.0.19; upgrade opencode"), or, with ok, that it is newer than the last tested version; absent when there is nothing to say
-	Warning *string `json:"warning,omitempty"`
+	// Reason Why the harness is unavailable, absent with ok; e.g. "harness_too_old: opencode 2.0.1 is below the minimum 2.0.19; upgrade opencode"
+	Reason *string `json:"reason,omitempty"`
+
+	// VersionWarning e.g. "codex 0.158.0 is newer than the last tested 0.157.1"; absent unless newer than tested
+	VersionWarning *string `json:"version_warning,omitempty"`
 }
 
 // AgentV1HarnessInfo defines model for AgentV1HarnessInfo.
@@ -1918,7 +1921,7 @@ type AgentV1HarnessInfo struct {
 	CapabilitiesSupported bool   `json:"capabilities_supported"`
 	Harness               string `json:"harness"`
 
-	// Health The installed version's check and the harness's status, read on each request.
+	// Health The harness's status and installed-version check, read on each request (bounded at 10s).
 	Health AgentV1HarnessHealth `json:"health"`
 
 	// ProbedAt When the last good probe ran; absent before one

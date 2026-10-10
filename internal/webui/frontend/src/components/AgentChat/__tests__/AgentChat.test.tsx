@@ -1015,7 +1015,7 @@ describe("AgentChat lifecycle (1.8b)", () => {
     async (harness, reason) => {
       api.getHarness.mockResolvedValue({
         harness,
-        health: { ok: false, warning: `harness_too_old: ${reason}` },
+        health: { ok: false, reason: `harness_too_old: ${reason}` },
       });
       await mount(agent({ harness, attention_reason: "harness_unavailable" }));
       await waitFor(() =>
@@ -1033,7 +1033,7 @@ describe("AgentChat lifecycle (1.8b)", () => {
     const reason =
       "opencode 2.0.1 is below the minimum 2.0.19; upgrade opencode";
     api.getHarness.mockResolvedValue({
-      health: { ok: false, warning: `harness_too_old: ${reason}` },
+      health: { ok: false, reason: `harness_too_old: ${reason}` },
     });
     api.getAgent.mockResolvedValue(
       agent({ attention_reason: "harness_unavailable" }),
@@ -1055,7 +1055,7 @@ describe("AgentChat lifecycle (1.8b)", () => {
       api.getHarness.mockResolvedValue({
         health: {
           ok: false,
-          warning:
+          reason:
             "harness_too_old: opencode 2.0.1 is below the minimum 2.0.19; upgrade opencode",
         },
       });
@@ -1079,12 +1079,13 @@ describe("AgentChat lifecycle (1.8b)", () => {
     },
   );
 
-  it("names only a version reason, not another failure", async () => {
+  it("names only a version reason, not another failure, and still warns of a newer version", async () => {
     api.getHarness.mockResolvedValue({
       health: {
         ok: false,
-        warning:
+        reason:
           "harness_unavailable: codex app-server for /other failed 3 times in a row",
+        version_warning: "codex 0.158.0 is newer than the last tested 0.157.1",
       },
     });
     await mount(
@@ -1094,6 +1095,9 @@ describe("AgentChat lifecycle (1.8b)", () => {
     await act(() => Promise.resolve());
     expect(screen.getByTestId("agent-attention-banner")).toHaveTextContent(
       /^Needs attention: the harness is unavailable\.$/,
+    );
+    expect(screen.getByTestId("harness-version-warning")).toHaveTextContent(
+      "codex 0.158.0 is newer than the last tested 0.157.1.",
     );
   });
 
@@ -1106,7 +1110,7 @@ describe("AgentChat lifecycle (1.8b)", () => {
     async (harness, warning) => {
       api.getHarness.mockResolvedValue({
         harness,
-        health: { ok: true, warning },
+        health: { ok: true, version_warning: warning },
       });
       await mount(agent({ harness }));
       expect(

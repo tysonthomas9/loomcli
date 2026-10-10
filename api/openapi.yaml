@@ -4938,15 +4938,16 @@ components:
         health: {$ref: "#/components/schemas/AgentV1HarnessHealth"}
     AgentV1HarnessHealth:
       type: object
-      description: The installed version's check and the harness's status, read on each request.
+      description: The harness's status and installed-version check, read on each request (bounded at 10s).
       required: [ok]
       properties:
         ok: {type: boolean, description: false when the harness is unavailable}
-        warning:
+        reason:
           type: string
           description: >-
-            Why the harness is unavailable (e.g. "harness_too_old: opencode 2.0.1 is below the minimum 2.0.19; upgrade
-            opencode"), or, with ok, that it is newer than the last tested version; absent when there is nothing to say
+            Why the harness is unavailable, absent with ok; e.g. "harness_too_old: opencode 2.0.1 is below the
+            minimum 2.0.19; upgrade opencode"
+        version_warning: {type: string, description: "e.g. \"codex 0.158.0 is newer than the last tested 0.157.1\"; absent unless newer than tested"}
     AgentV1SlashCommand:
       type: object
       required: [name]

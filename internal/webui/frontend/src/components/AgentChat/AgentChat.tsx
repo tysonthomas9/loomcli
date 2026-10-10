@@ -337,19 +337,18 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
             >
               Needs attention: {attentionText(agent.attention_reason)}
               {agent.attention_reason === "harness_unavailable" &&
-                health?.ok === false &&
-                health.warning?.startsWith(TOO_OLD) &&
-                ` ${health.warning.slice(TOO_OLD.length)}.`}
+                health?.reason?.startsWith(TOO_OLD) &&
+                ` ${health.reason.slice(TOO_OLD.length)}.`}
             </div>
           )}
 
-          {health?.ok && health.warning && (
+          {health?.version_warning && (
             <div
               className={page.attention}
               role="note"
               data-testid="harness-version-warning"
             >
-              {health.warning}.
+              {health.version_warning}.
             </div>
           )}
 

@@ -118,10 +118,11 @@ func TestHarnessInfoRepoChecked(t *testing.T) {
 	}
 }
 
-// versioned is a fake harness whose Health is a real version check.
+// versioned is a fake harness whose Health is a real version check; failed
+// marks it unavailable for another reason, as codex does for a failed root.
 type versioned struct {
 	*fake.Harness
-	name, out string
+	name, out, failed string
 }
 
 func (v *versioned) Health(context.Context) (loomharness.Health, error) {
@@ -129,13 +130,16 @@ func (v *versioned) Health(context.Context) (loomharness.Health, error) {
 	if err != nil {
 		return loomharness.Health{Version: vc, Warning: err.Error()}, nil
 	}
+	if v.failed != "" {
+		return loomharness.Health{Version: vc, Warning: v.failed}, nil
+	}
 	return loomharness.Health{OK: true, Version: vc, Warning: vc.Warning()}, nil
 }
 
 // TestHarnessInfoHealth: the harness's health says why it is unavailable (a
-// version below the minimum, with the upgrade hint) or warns, still ok, of
-// one newer than tested; a current harness has no warning. Same for every
-// harness.
+// version below the minimum, with the upgrade hint) and, apart, warns of a
+// version newer than tested, even while another failure makes it
+// unavailable; a current harness has neither. Same for every harness.
 func TestHarnessInfoHealth(t *testing.T) {
 	for _, tc := range []struct{ harness, old, newer, cur string }{
 		{"opencode", "2.0.1", "2.0.20", "2.0.19"},
@@ -144,8 +148,8 @@ func TestHarnessInfoHealth(t *testing.T) {
 	} {
 		h := &versioned{Harness: fake.New(), name: tc.harness}
 		srv := harnessServer(t, map[string]loomharness.Harness{tc.harness: h})
-		get := func(out string) map[string]any {
-			h.out = out
+		get := func(out, failed string) map[string]any {
+			h.out, h.failed = out, failed
 			status, body := call(t, srv, "GET", "ws/v1/harnesses/"+tc.harness, "", "")
 			health, _ := body["health"].(map[string]any)
 			if status != 200 || health == nil {
@@ -155,16 +159,20 @@ func TestHarnessInfoHealth(t *testing.T) {
 		}
 		g := loomharness.Versions[tc.harness]
 		old, _ := loomharness.ParseVersion(tc.old)
-		if got := get(tc.old); got["ok"] != false || got["warning"] != fmt.Sprintf(
+		if got := get(tc.old, ""); got["ok"] != false || got["version_warning"] != nil || got["reason"] != fmt.Sprintf(
 			"harness_too_old: %s %s is below the minimum %s; upgrade %s", tc.harness, old, g.Minimum, tc.harness) {
 			t.Fatalf("%s too old = %v", tc.harness, got)
 		}
 		newer, _ := loomharness.ParseVersion(tc.newer)
-		if got := get(tc.newer); got["ok"] != true || got["warning"] != fmt.Sprintf(
-			"%s %s is newer than the last tested %s", tc.harness, newer, g.Tested) {
+		warn := fmt.Sprintf("%s %s is newer than the last tested %s", tc.harness, newer, g.Tested)
+		if got := get(tc.newer, ""); got["ok"] != true || got["reason"] != nil || got["version_warning"] != warn {
 			t.Fatalf("%s newer = %v", tc.harness, got)
 		}
-		if got := get(tc.cur); got["ok"] != true || got["warning"] != nil {
+		if got := get(tc.newer, "harness_unavailable: failed 3 times"); got["ok"] != false ||
+			got["reason"] != "harness_unavailable: failed 3 times" || got["version_warning"] != warn {
+			t.Fatalf("%s newer and failed = %v", tc.harness, got)
+		}
+		if got := get(tc.cur, ""); got["ok"] != true || got["reason"] != nil || got["version_warning"] != nil {
 			t.Fatalf("%s current = %v", tc.harness, got)
 		}
 	}

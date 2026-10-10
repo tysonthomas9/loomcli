@@ -2777,12 +2777,14 @@ export interface components {
       probed_at?: string;
       health: components["schemas"]["AgentV1HarnessHealth"];
     };
-    /** @description The installed version's check and the harness's status, read on each request. */
+    /** @description The harness's status and installed-version check, read on each request (bounded at 10s). */
     AgentV1HarnessHealth: {
       /** @description false when the harness is unavailable */
       ok: boolean;
-      /** @description Why the harness is unavailable (e.g. "harness_too_old: opencode 2.0.1 is below the minimum 2.0.19; upgrade opencode"), or, with ok, that it is newer than the last tested version; absent when there is nothing to say */
-      warning?: string;
+      /** @description Why the harness is unavailable, absent with ok; e.g. "harness_too_old: opencode 2.0.1 is below the minimum 2.0.19; upgrade opencode" */
+      reason?: string;
+      /** @description e.g. "codex 0.158.0 is newer than the last tested 0.157.1"; absent unless newer than tested */
+      version_warning?: string;
     };
     AgentV1SlashCommand: {
       name: string;

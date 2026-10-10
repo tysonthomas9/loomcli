@@ -299,7 +299,8 @@ func (s *Service) Capabilities(ctx context.Context, harness, repo string) (caps 
 	return nil, true, nil
 }
 
-// healthTimeout bounds a Health read, which runs the harness's --version.
+// healthTimeout bounds a Health read, which runs the harness's --version and
+// may wait on a lock a long service start holds.
 var healthTimeout = 10 * time.Second
 
 // Health is harness's version check and status: why it is unavailable, or a
@@ -311,5 +312,16 @@ func (s *Service) Health(ctx context.Context, harness string) (loomharness.Healt
 	}
 	ctx, cancel := context.WithTimeout(ctx, healthTimeout)
 	defer cancel()
-	return h.Health(ctx)
+	type read struct {
+		h   loomharness.Health
+		err error
+	}
+	done := make(chan read, 1)
+	go func() { r, err := h.Health(ctx); done <- read{r, err} }()
+	select {
+	case r := <-done:
+		return r.h, r.err
+	case <-ctx.Done():
+		return loomharness.Health{Warning: harness + " health check timed out"}, nil
+	}
 }
