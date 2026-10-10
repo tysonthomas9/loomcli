@@ -566,7 +566,7 @@ func (s *Service) openSession(ctx context.Context, a loomstore.Agent, cfg Config
 	ref, err := h.Open(hctx, loomharness.OpenSpec{Key: a.AgentID, Launch: launch, Preset: cfg.Open,
 		Dir: deref(a.WorktreePath), Model: cfg.Model, Rules: rules, Metadata: map[string]string{"agent_id": a.AgentID}})
 	if err != nil {
-		return loomharness.NativeRef{}, s.leftover(ctx, hctx, a.AgentID, a.Harness, ref, openErr(timedOut(hctx, err)))
+		return loomharness.NativeRef{}, s.leftover(ctx, hctx, a.AgentID, a.Harness, ref, timedOut(hctx, openErr(err)))
 	}
 	createCrash("recorded")
 	if err := s.owned(ctx, a.AgentID, a.Harness, ref); err != nil {
@@ -583,11 +583,12 @@ func (s *Service) openSession(ctx context.Context, a loomstore.Agent, cfg Config
 // server start bound (a minute), so a cold start is not cut short.
 var openWait = 90 * time.Second
 
-// timedOut adds why ctx ended, when openWait ran out, to the harness's
-// error, keeping only its text: a timeout is always retried, never permanent.
+// timedOut makes err, from a harness call that set up a session, a
+// harness_error that says openWait ran out, when it did: it keeps only err's
+// text, so a timeout is always retried, never permanent.
 func timedOut(ctx context.Context, err error) error {
 	if cause := context.Cause(ctx); err != nil && cause != nil && cause != ctx.Err() {
-		return fmt.Errorf("%w: %v", cause, err)
+		return harnessErr(fmt.Errorf("%w: %v", cause, err))
 	}
 	return err
 }

@@ -952,8 +952,9 @@ func TestOpenTimeoutNeverPermanent(t *testing.T) {
 	if err := openErr(timedOut(ctx, fmt.Errorf("opencode: %w", loomharness.ErrBadRequest))); isPermanent(err) {
 		t.Fatalf("%v is permanent; want retried", err)
 	}
-	if err := timedOut(ctx, openErr(loomharness.ErrBadRequest)); isPermanent(err) { // a late reapply
-		t.Fatalf("%v is permanent; want retried", err)
+	var e *Error
+	if err := timedOut(ctx, openErr(loomharness.ErrBadRequest)); isPermanent(err) || !errors.As(err, &e) || e.Code != CodeHarnessError { // a late reapply
+		t.Fatalf("%v: permanent %v; want a retried harness_error", err, isPermanent(err))
 	}
 	if err := timedOut(ctx, nil); err != nil {
 		t.Fatalf("timedOut(nil) = %v; want nil", err)
