@@ -271,6 +271,7 @@ CREATE TABLE IF NOT EXISTS agent_limit_resumes (
   agent_id TEXT PRIMARY KEY REFERENCES agents(agent_id),
   turn_id  TEXT NOT NULL,
   attempt  INTEGER NOT NULL,
+  session  TEXT NOT NULL,          -- the native session whose turn hit the limit
   due_at   TEXT NOT NULL
 );
 `}

@@ -69,7 +69,7 @@ func (s *Service) limitTurnEnded(ctx context.Context, a loomstore.Agent, e loomh
 		return s.store.DropLimitResume(ctx, a.AgentID)
 	}
 	return s.store.PutLimitResume(ctx, loomstore.LimitResume{AgentID: a.AgentID, TurnID: e.TurnID, Attempt: attempt,
-		DueAt: loomstore.Stamp(s.now().Add(limitResumeSchedule[attempt-1]))})
+		Session: deref(a.HarnessSessionID), DueAt: loomstore.Stamp(s.now().Add(limitResumeSchedule[attempt-1]))})
 }
 
 // sweepLimitResumes sends every usage-limit resume that is due. The
@@ -86,11 +86,12 @@ func (s *Service) sweepLimitResumes(ctx context.Context) {
 
 // limitResume sends agentID's due resume under its lock, after checking
 // again: the resume is still owed and due, the workspace still opts in, and
-// the agent is a persistent one not archived, stopping or deleted (else the
-// resume is dropped) with no turn running or message waiting (else that
+// the agent is a persistent one not archived, stopping or deleted, still on
+// the session whose turn hit the limit (else the resume is dropped) with no turn running or message waiting (else that
 // turn's end decides). The Send marks the resume sent in its own
-// transaction; its request ID names the agent, turn and attempt, so a
-// retry is answered by its receipt.
+// transaction, and checks again there that it is owed and opted in; its
+// request ID names the agent, turn and attempt, so a retry is answered by
+// its receipt.
 func (s *Service) limitResume(ctx context.Context, agentID string) error {
 	defer s.lock(agentID)()
 	r, err := s.store.GetLimitResume(ctx, agentID)
@@ -105,7 +106,7 @@ func (s *Service) limitResume(ctx context.Context, agentID string) error {
 	}
 	a, err := s.store.GetAgent(ctx, agentID)
 	if errors.Is(err, loomstore.ErrNotFound) || (err == nil && (!on || a.DeletedAt != nil || a.Mode == "single_task" ||
-		a.State == StateArchived || a.State == StateStopping)) {
+		a.State == StateArchived || a.State == StateStopping || deref(a.HarnessSessionID) != r.Session)) {
 		return s.store.DropLimitResume(ctx, agentID)
 	} else if err != nil {
 		return err
@@ -116,6 +117,9 @@ func (s *Service) limitResume(ctx context.Context, agentID string) error {
 	}
 	_, err = s.sendLocked(ctx, SendRequest{Envelope: Envelope{RequestID: "limit-resume:" + agentID + ":" + r.TurnID + ":" +
 		strconv.FormatInt(r.Attempt, 10)}, AgentID: agentID, Text: limitResumeText, Source: "system", Actor: limitResumeActor})
+	if errors.Is(err, loomstore.ErrLimitResumeGone) { // opted out, or resumed, since the checks above
+		return nil
+	}
 	return err
 }
 

@@ -268,6 +268,9 @@ func (s *Service) interruptTurn(ctx context.Context, a *loomstore.Agent, req Sen
 	if err != nil {
 		return SendResult{}, true, err
 	}
+	if err := s.store.DropLimitResume(ctx, a.AgentID); err != nil { // a Stop ends a usage-limit episode (OR7)
+		return SendResult{}, true, err
+	}
 	_, err = s.store.SaveReceipt(ctx, loomstore.Receipt{AgentID: a.AgentID, RequestID: req.RequestID, Sender: sender, ResultJSON: string(b)})
 	return res, true, err
 }

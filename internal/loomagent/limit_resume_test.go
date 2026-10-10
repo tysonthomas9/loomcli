@@ -349,3 +349,44 @@ func TestUsageLimitSameForAllHarnesses(t *testing.T) {
 		})
 	}
 }
+
+// TestUsageLimitStopEndsEpisode (OR7): a Stop with no message, which saves
+// only its receipt, also ends the episode: the resume is dropped.
+func TestUsageLimitStopEndsEpisode(t *testing.T) {
+	l := newLimitEnv(t, "opencode", true)
+	l.fh.Script(l.a.AgentID, limitFail)
+	l.userTurn("u1")
+	stop := sendReq(l.a.AgentID, "stop1", "", user)
+	stop.Delivery = DeliveryInterrupt
+	mustSendMsg(t, l.s, stop)
+	if r := l.owed(); r != nil {
+		t.Fatalf("owed after a Stop = %+v; want dropped", r)
+	}
+	l.advance(24 * time.Hour)
+	l.wantResumes("after a Stop", 0)
+}
+
+// TestUsageLimitHarnessSwitchDrops (OR7): a resume is owed to the session
+// whose turn hit the limit. After a harness switch the agent runs on a new
+// session, which has nothing to continue: the resume is dropped, not sent.
+func TestUsageLimitHarnessSwitchDrops(t *testing.T) {
+	ctx := context.Background()
+	e := newSwitchEnv(t, StateIdle)
+	if err := e.s.SetLimitResume(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.s.store.PutLimitResume(ctx, loomstore.LimitResume{AgentID: "a1", TurnID: "t1", Attempt: 1,
+		Session: e.old.NativeID, DueAt: loomstore.Stamp(time.Now().Add(-time.Second))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.s.Update(ctx, switchReq("sw", 1, "fb")); err != nil {
+		t.Fatal(err)
+	}
+	e.s.sweepLimitResumes(ctx)
+	if rs, err := e.s.store.SenderReceipts(ctx, "a1", limitResumeSender); err != nil || len(rs) != 0 {
+		t.Fatalf("resumes after a harness switch = %+v, %v; want none", rs, err)
+	}
+	if _, err := e.s.store.GetLimitResume(ctx, "a1"); !errors.Is(err, loomstore.ErrNotFound) {
+		t.Fatalf("owed after a harness switch: %v; want dropped", err)
+	}
+}

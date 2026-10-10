@@ -35,6 +35,9 @@ func TestLimitResumeOptInOffByDefault(t *testing.T) {
 func TestLimitResumeCrashAtSendCommit(t *testing.T) {
 	ctx := context.Background()
 	s, path := newSlotStore(t)
+	if err := s.SetLimitResumeOn(ctx, "ws", true); err != nil {
+		t.Fatal(err)
+	}
 	due := Stamp(time.Now().Add(-time.Second))
 	if err := s.PutLimitResume(ctx, LimitResume{AgentID: "a1", TurnID: "t1", Attempt: 1, DueAt: due}); err != nil {
 		t.Fatal(err)
@@ -97,4 +100,39 @@ func TestLimitResumeOtherSendDrops(t *testing.T) {
 func due0(t *testing.T) string {
 	t.Helper()
 	return Stamp(time.Now().Add(-time.Second))
+}
+
+// TestLimitResumeSendChecksInItsTransaction (OR7): a resume Send commits
+// only while its resume is owed and unsent and the workspace opts in, all
+// read in the Send's own transaction, so an opt-out or another resume that
+// commits first wins; nothing is stored then.
+func TestLimitResumeSendChecksInItsTransaction(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newSlotStore(t)
+	resume := func(req string) SlotSend {
+		in := send("loom:limit-resume", req, "Continue where you left off.")
+		in.LimitResume = true
+		return in
+	}
+	if err := s.PutLimitResume(ctx, LimitResume{AgentID: "a1", TurnID: "t1", Attempt: 1, DueAt: due0(t)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetLimitResumeOn(ctx, "ws", false); err != nil { // opted out after the resume was owed
+		t.Fatal(err)
+	}
+	if _, _, err := s.Send(ctx, resume("r-off")); !errors.Is(err, ErrLimitResumeGone) {
+		t.Fatalf("resume while opted out: %v; want ErrLimitResumeGone", err)
+	}
+	if err := s.SetLimitResumeOn(ctx, "ws", true); err != nil {
+		t.Fatal(err)
+	}
+	mustSend(t, s, resume("r1"))
+	if _, _, err := s.Send(ctx, resume("r2")); !errors.Is(err, ErrLimitResumeGone) {
+		t.Fatalf("second resume of one owed: %v; want ErrLimitResumeGone", err)
+	}
+	for _, req := range []string{"r-off", "r2"} {
+		if _, err := s.GetReceipt(ctx, "a1", req); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("refused resume %s left a receipt: %v", req, err)
+		}
+	}
 }
