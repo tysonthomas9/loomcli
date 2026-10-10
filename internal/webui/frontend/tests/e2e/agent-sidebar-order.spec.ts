@@ -44,7 +44,7 @@ const json = (route: Route, body: unknown, status = 200) =>
     body: JSON.stringify(body),
   });
 
-async function open(page: Page) {
+async function open(page: Page, query = "sidebar=1&w=800") {
   await page.route("**/api/config", (r) => json(r, { mode: "open" }));
   await page.route("**/api/workspaces/w1/events/token", (r) =>
     r.fulfill({ status: 404 }),
@@ -86,7 +86,7 @@ async function open(page: Page) {
       return a ? json(r, a) : r.fulfill({ status: 404 });
     },
   );
-  await page.goto("/test/agent-chat?sidebar=1&w=800");
+  await page.goto(`/test/agent-chat?${query}`);
   await expect(page.getByTestId("agent-list-name")).toHaveCount(3);
 }
 
@@ -202,5 +202,45 @@ for (const width of [390, 800]) {
     await link.focus();
     await page.keyboard.press("Enter");
     await page.waitForURL((url) => url.pathname !== "/test/agent-chat");
+  });
+}
+
+// SB7: the selected row's highlight spans the whole row, its archive button
+// and drag grip included, for a Lead and for a child.
+for (const [id, name] of [
+  ["a1", "lead1"],
+  ["kid", "kid"],
+]) {
+  test(`the selected ${name} row is highlighted across its full width`, async ({
+    page,
+  }) => {
+    await open(page, `sidebar=1&open=1&agent=${id}&w=800`);
+    const row = page
+      .getByTestId("sortable-agent-row")
+      .filter({ has: page.locator('[aria-current="page"]') });
+    await expect(row).toHaveCount(1);
+    await row.hover();
+    // The background painted at a point: the first non-transparent one
+    // from the element there up to the row, and that element's width.
+    const paint = (x: number, y: number) =>
+      row.evaluate(
+        (el, [px, py]) => {
+          let at = document.elementFromPoint(px!, py!);
+          for (; at && el.contains(at); at = at.parentElement) {
+            const bg = getComputedStyle(at).backgroundColor;
+            if (bg !== "rgba(0, 0, 0, 0)" && bg !== "transparent")
+              return { bg, width: at.getBoundingClientRect().width };
+          }
+          return null;
+        },
+        [x, y],
+      );
+    const box = await row.boundingBox();
+    if (!box) throw new Error("row not laid out");
+    const y = box.y + box.height / 2;
+    const left = await paint(box.x + 8, y);
+    const right = await paint(box.x + box.width - 2, y);
+    expect(left).not.toBeNull();
+    expect(right).toEqual({ bg: left!.bg, width: box.width });
   });
 }
