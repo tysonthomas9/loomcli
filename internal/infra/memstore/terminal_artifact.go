@@ -906,6 +906,11 @@ func (s *agentInboxMessageStore) Complete(_ context.Context, ws, inboxMessageID 
 	if !ok {
 		return nil, fmt.Errorf("agent inbox message %q in workspace %q: %w", inboxMessageID, ws, domain.ErrNotFound)
 	}
+	// Mirror fleet-db's owner guard (403 not-owner, surfaced by the HTTP
+	// client as ErrConflict): only the claim holder may complete a claim.
+	if msg.ClaimedBy != "" && msg.ClaimedBy != update.ClaimedBy {
+		return nil, fmt.Errorf("agent inbox message %q claimed by %q, not %q: %w", inboxMessageID, msg.ClaimedBy, update.ClaimedBy, domain.ErrConflict)
+	}
 	now := s.nowFunc()
 	switch update.Outcome {
 	case "delivered":

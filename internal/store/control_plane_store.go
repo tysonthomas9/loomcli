@@ -361,6 +361,10 @@ type AgentInboxMessageComplete struct {
 	DeliveredThreadID string `json:"delivered_thread_id,omitempty"`
 	ErrorClass        string `json:"error_class,omitempty"`
 	Error             string `json:"error,omitempty"`
+	// ClaimedBy must equal the claimed_by the message was claimed with:
+	// fleet-db lets only the live claim holder complete, retry or fail a
+	// message and answers 403 not-owner otherwise.
+	ClaimedBy string `json:"claimed_by,omitempty"`
 }
 
 type AgentInboxMessageStore interface {

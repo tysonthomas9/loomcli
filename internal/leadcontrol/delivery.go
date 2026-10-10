@@ -33,6 +33,9 @@ type DeliveryResult struct {
 	Thread         *CodexThread
 	SessionID      string
 	InboxMessageID string
+	// DeliveryError is set when the turn landed but finishing the inbox
+	// message failed; State stays delivered.
+	DeliveryError string
 }
 
 type LeadMessageDeliveryOptions struct {
@@ -53,6 +56,11 @@ const (
 	assignmentInboxSourceRefPrefix = "lead-assignment://"
 	leadMessageDrainInterval       = 2 * time.Second
 )
+
+// leadInboxLeaseTTL is how long a claimed lead inbox message stays leased
+// before another delivery attempt may reclaim it. A var so tests can let a
+// real lease lapse.
+var leadInboxLeaseTTL = 2 * time.Minute
 
 // leadTurnDeliverer is the per-provider strategy for injecting a queued inbox
 // message into a lead's live session. The codex implementation dials the
@@ -298,13 +306,7 @@ func deliverNextLeadInboxMessage(
 		result.Reason = "agent inbox store is not configured"
 		return result, nil
 	}
-	msg, err := st.AgentInboxMessages().ClaimNext(ctx, store.AgentInboxMessageClaim{
-		WorkspaceKey:  workspace,
-		TargetAgentID: leadName,
-		SessionID:     sessionID,
-		ClaimedBy:     d.claimedBy(sessionID),
-		LeaseTTL:      2 * time.Minute,
-	})
+	msg, err := claimLeadInboxMessage(ctx, st, workspace, leadName, sessionID, d.claimedBy(sessionID))
 	if errors.Is(err, domain.ErrNotFound) {
 		result.State = DeliveryStateNone
 		result.Reason = ""
@@ -314,6 +316,13 @@ func deliverNextLeadInboxMessage(
 		return nil, err
 	}
 	result.InboxMessageID = msg.InboxMessageID
+	if assignmentAlreadyDelivered(session, msg) {
+		// An earlier turn landed but its inbox completion did not: finish
+		// the message without injecting the same turn again.
+		result.State = DeliveryStateDelivered
+		result.Reason = ""
+		return completeLeadInboxDelivered(ctx, st, workspace, sessionID, d, msg, result)
+	}
 	closeReason := "lead message delivery complete"
 	if isAssignmentInboxMessage(msg) {
 		closeReason = "assignment delivery complete"
@@ -329,6 +338,30 @@ func deliverNextLeadInboxMessage(
 		return completeLeadInboxRetry(ctx, st, workspace, sessionID, d, msg, delivered)
 	}
 	return completeLeadInboxDelivered(ctx, st, workspace, sessionID, d, msg, delivered)
+}
+
+// claimLeadInboxMessage leases the lead's next queued inbox message. The
+// returned message always carries the claimant, which fleet-db requires on
+// every later completion of the claim.
+func claimLeadInboxMessage(ctx context.Context, st store.Store, workspace, leadName, sessionID, claimant string) (*domain.AgentInboxMessage, error) {
+	msg, err := st.AgentInboxMessages().ClaimNext(ctx, store.AgentInboxMessageClaim{
+		WorkspaceKey:  workspace,
+		TargetAgentID: leadName,
+		SessionID:     sessionID,
+		ClaimedBy:     claimant,
+		LeaseTTL:      leadInboxLeaseTTL,
+	})
+	if err == nil && msg.ClaimedBy == "" {
+		msg.ClaimedBy = claimant
+	}
+	return msg, err
+}
+
+// assignmentAlreadyDelivered reports whether msg is an assignment whose
+// version the session already records as delivered.
+func assignmentAlreadyDelivered(session *domain.AgentSession, msg *domain.AgentInboxMessage) bool {
+	_, version, ok := assignmentFromInboxMessage(msg)
+	return ok && strings.TrimSpace(session.Metadata[MetadataDeliveryVersion]) == version
 }
 
 func materializeLeadTurnSkills(ctx context.Context, st store.Store, workspace string, session *domain.AgentSession) error {
@@ -394,14 +427,21 @@ func completeLeadInboxRetry(
 		Outcome:    "retry",
 		ErrorClass: d.provider() + "_delivery_pending",
 		Error:      delivered.Reason,
+		ClaimedBy:  msg.ClaimedBy,
 	}); err != nil {
-		return nil, err
+		slog.Warn("lead inbox message requeue failed; it stays claimed until its lease expires",
+			"workspace", workspace, "session", sessionID, "inbox_message", msg.InboxMessageID, "err", err)
+		return nil, fmt.Errorf("requeue lead inbox message %s: %w", msg.InboxMessageID, err)
 	}
 	return delivered, nil
 }
 
 // completeLeadInboxDelivered finalizes a delivered inbox message and, for
-// assignment messages, marks the assignment delivered on the session.
+// assignment messages, marks the assignment delivered on the session. The
+// turn has already landed, so an assignment whose inbox completion fails is
+// still marked delivered (a later claim of the same version is completed
+// without a second turn) and the failure is logged and recorded on the
+// session instead of leaving the assignment silently pending.
 func completeLeadInboxDelivered(
 	ctx context.Context,
 	st store.Store,
@@ -411,16 +451,28 @@ func completeLeadInboxDelivered(
 	msg *domain.AgentInboxMessage,
 	delivered *DeliveryResult,
 ) (*DeliveryResult, error) {
-	if _, err := st.AgentInboxMessages().Complete(ctx, workspace, msg.InboxMessageID, store.AgentInboxMessageComplete{
+	_, completeErr := st.AgentInboxMessages().Complete(ctx, workspace, msg.InboxMessageID, store.AgentInboxMessageComplete{
 		Outcome:           "delivered",
 		DeliveredThreadID: d.deliveredThreadID(),
-	}); err != nil {
+		ClaimedBy:         msg.ClaimedBy,
+	})
+	if completeErr != nil {
+		slog.Warn("lead inbox message delivered but completion failed",
+			"workspace", workspace, "session", sessionID, "inbox_message", msg.InboxMessageID, "err", completeErr)
+	}
+	epicID, version, ok := assignmentFromInboxMessage(msg)
+	if !ok {
+		if completeErr != nil {
+			return nil, fmt.Errorf("complete lead inbox message %s: %w", msg.InboxMessageID, completeErr)
+		}
+		return delivered, nil
+	}
+	if err := MarkAssignmentDelivered(ctx, st, workspace, sessionID, epicID, version); err != nil {
 		return nil, err
 	}
-	if epicID, version, ok := assignmentFromInboxMessage(msg); ok {
-		if err := MarkAssignmentDelivered(ctx, st, workspace, sessionID, epicID, version); err != nil {
-			return nil, err
-		}
+	if completeErr != nil {
+		delivered.DeliveryError = "inbox completion failed: " + completeErr.Error()
+		_ = MarkAssignmentDeliveryAttempt(ctx, st, workspace, sessionID, delivered.DeliveryError)
 	}
 	return delivered, nil
 }

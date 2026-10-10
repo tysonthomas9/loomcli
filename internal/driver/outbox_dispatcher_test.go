@@ -332,3 +332,13 @@ func TestOutboxDispatcherTerminalRowsAreNotRetried(t *testing.T) {
 		t.Fatalf("attempts = %d, want 1 (unsupported is terminal)", attempts)
 	}
 }
+
+func TestAgentMessageDeliveryResultCarriesDeliveryError(t *testing.T) {
+	got := NewAgentMessageDeliveryResult("nova", &leadcontrol.DeliveryResult{
+		State:         leadcontrol.DeliveryStateDelivered,
+		DeliveryError: "inbox completion failed: HTTP 403",
+	})
+	if got.State != string(leadcontrol.DeliveryStateDelivered) || got.DeliveryError != "inbox completion failed: HTTP 403" {
+		t.Fatalf("result = %+v, want delivered with the delivery error", got)
+	}
+}

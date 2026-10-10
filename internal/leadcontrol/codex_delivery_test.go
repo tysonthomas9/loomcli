@@ -440,6 +440,7 @@ func setCodexRuntimeMetadata(t *testing.T, st store.Store, workspace, sessionID,
 type fakeCodexClient struct {
 	status   CodexThreadStatus
 	turnText string
+	turns    int
 }
 
 func installFakeCodexClient(t *testing.T, status CodexThreadStatus) *fakeCodexClient {
@@ -465,5 +466,6 @@ func (f *fakeCodexClient) ReadThread(context.Context, string) (*CodexThread, err
 
 func (f *fakeCodexClient) StartTurn(_ context.Context, _ string, text string) error {
 	f.turnText = text
+	f.turns++
 	return nil
 }
