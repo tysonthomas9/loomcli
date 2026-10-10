@@ -568,7 +568,9 @@ lead-do)
   # Loom's own refusal text, never a bare status or exit code: an unknown
   # command, a wrong flag or a 400 must not count as a refusal.
   case "$action" in
-    approve | cli-approve) refusal='lead approval policy is off' ;;
+    # The verdict API's 409 body carries only Loom's error code, not the reason.
+    approve) refusal='review_required' ;;
+    cli-approve) refusal='lead approval policy is off' ;;
     merge) refusal='only a human can approve a merge' ;;
     set-approve | set-merge) refusal='only a human can change workspace policy' ;;
     *) refusal='' ;;
