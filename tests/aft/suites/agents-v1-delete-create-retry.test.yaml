@@ -1,0 +1,248 @@
+# Delete of OpenCode Leads (DEL1, OR4a), on the real OpenCode
+# build with the model scripted by 2.0d's fake model (see agents-v1-lead), or
+# on the emulator with LOOM_HARNESS_EMU=1.
+#
+# The two Delete cases need no model turn. Each stops OpenCode first, so
+# the new OpenCode that Loom starts for the Delete never loaded the Lead's
+# location; the second leaves the Delete half done and restarts serve with
+# OpenCode still down, so only the restarted serve can finish it. That is DEL1's path:
+# the pinned OpenCode 2.0.19 answers the Delete's unbridge with 500 for such
+# a location once the working copy is gone. The emulator does not reproduce
+# that 500, so only a run on the real OpenCode build covers DEL1's fix; on
+# the emulator these cases check the Delete journey alone.
+#
+# C2 (Create retry) follows in its own change: a refused or stopped OpenCode
+# makes Create answer 503 harness_unavailable before it writes a row (by
+# design), so it needs an emulator knob that fails the session start.
+suite: agents-v1-delete-create-retry
+classification: { area: agents, feature: agent-api-lifecycle, surface: mixed, purpose: journey }
+baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
+setup: |
+  set -e
+  curl -sf -X POST "$AFT_FAKE_MODEL_URL/__reset" >/dev/null
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-DELRETRY" >/dev/null || true
+  repo="$AFT_WORK_DIR/agv1-delretry-repo"
+  mkdir -p "$repo"
+  git -C "$repo" init -q -b main
+  echo "agents-v1 delete and create retry ${RUN_ID:-local}" > "$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" -c user.email=e2e@x -c user.name=e2e commit -q -m init
+  printf '{"name":"e2e-agv1-delretry","type":"empty","repos":["%s"]}' "$repo" |
+    curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H "Content-Type: application/json" -d @- >/dev/null
+  # A control Lead that stays, so every case can show the sidebar and rail loaded.
+  printf '{"preset":"lead","name":"agv1-delctl-%s","repo":"%s","base_ref":"main","overrides":{"harness":"opencode"}}' "${RUN_ID:-local}" "$repo" |
+    curl -sf -X POST "$AFT_BASE_URL/api/workspaces/E2E-AGV1-DELRETRY/v1/agents" -H "Content-Type: application/json" \
+      -H "Idempotency-Key: agv1-delctl-${RUN_ID:-local}" -d @- |
+    python3 -c 'import json,sys; print(json.load(sys.stdin)["agent_id"], end="")' > "$AFT_WORK_DIR/agv1DelCtlId"
+teardown: |
+  set +e
+  # A case that failed mid-outage leaves the refused registration in place;
+  # put the AFT service's own back so later suites have OpenCode.
+  saved="$AFT_WORK_DIR/agv1-delrestart-opencode-service.json"
+  if [ -f "$saved" ] && grep -q '"aft-old"' "$AFT_OPENCODE_SERVICE" 2>/dev/null; then cp "$saved" "$AFT_OPENCODE_SERVICE"; fi
+  curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-AGV1-DELRETRY" >/dev/null
+
+tests:
+  - name: an idle Lead deleted from the sidebar reads deleted right away
+    intent: An idle Lead with a clean worktree, whose location a restarted OpenCode never loaded, is deleted from the sidebar and reads deleted with its history purged within 5 s; its worktree is gone and it is absent from the list, the sidebar and the collapsed rail
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-DELRETRY/v1/agents
+          headers: { Idempotency-Key: "agv1-del-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-del-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-delretry-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1DelId
+            - from: worktree_path
+              as: agv1DelWorktree
+        intent: "Create an OpenCode Lead through the Agent API, with no message"
+      - api:
+          method: GET
+          path: "/api/workspaces/E2E-AGV1-DELRETRY/v1/agents/${var:agv1DelId}"
+          assert:
+            - path: state
+              equals: idle
+        intent: "Check that the Lead is idle"
+      - run: |
+          set -e
+          wt="$(cat "$AFT_WORK_DIR/agv1DelWorktree")"
+          [ -d "$wt" ] && [ -z "$(git -C "$wt" status --porcelain)" ]
+          pid="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$AFT_OPENCODE_SERVICE")"
+          echo "$pid" > "$AFT_WORK_DIR/agv1-del-oc-pid"
+          kill "$pid"
+          for i in $(seq 1 40); do kill -0 "$pid" 2>/dev/null || break; sleep 0.25; done
+          ! kill -0 "$pid" 2>/dev/null
+        intent: "Check that the worktree is there and clean, then stop the OpenCode server so its locations are unloaded"
+      - run: |
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-DELRETRY/chat/$(cat "$AFT_WORK_DIR/agv1DelId")"
+        intent: "Open the Lead's chat"
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('nav[aria-label=Agents] a')).some((a) => a.textContent.includes('agv1-del-${RUN_ID:-local}'))
+        intent: "Wait until the Lead's row shows in the sidebar"
+      - click: { role: button, name: "Collapse workspace tree" }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=collapsed-agent-rail] [data-agent-id]')
+        intent: "Wait until the collapsed rail shows an Agent API avatar"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1DelId")"
+          agent-browser --session "$AFT_SESSION" eval "document.querySelectorAll('[data-testid=collapsed-agent-rail] [data-agent-id=\"$id\"]').length === 1" | grep -qx true
+        intent: "Check that the collapsed rail shows the Lead's avatar once before the Delete"
+      - click: { role: button, name: "Expand workspace tree" }
+      - wait:
+          fn: >-
+            Array.from(document.querySelectorAll('nav[aria-label=Agents] a')).some((a) => a.textContent.includes('agv1-del-${RUN_ID:-local}'))
+        intent: "Wait until the expanded sidebar shows the Lead's row again"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1DelId")"
+          agent-browser --session "$AFT_SESSION" eval "(() => { const n=document.querySelector('nav[aria-label=Agents] a[href\$=\"/$id\"]'); if(!n) throw Error('row missing'); const r=n.getBoundingClientRect(); n.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:r.x+4,clientY:r.y+4})); return true; })()" >/dev/null
+        intent: "Open the Lead's sidebar menu"
+      - click: { testid: agent-context-menu-delete }
+      - wait:
+          fn: >-
+            (document.querySelector('[role=alertdialog]')?.textContent || '').includes('agv1-del-${RUN_ID:-local}')
+        intent: "Wait until the Delete dialog names the Lead"
+      - run: |
+          set -e
+          start="$(python3 -c 'import time; print(time.time())')"
+          agent-browser --session "$AFT_SESSION" eval "(() => { const b=Array.from(document.querySelectorAll('[role=alertdialog] button')).find((x) => x.textContent.trim() === 'Delete agent'); if(!b) throw Error('no Delete agent button'); b.click(); return true; })()" | grep -qx true
+          python3 "$AFT_TESTS_DIR/scripts/agv1-deleted-within.py" \
+            "$AFT_BASE_URL/api/workspaces/E2E-AGV1-DELRETRY/v1/agents/$(cat "$AFT_WORK_DIR/agv1DelId")" "$start" 5
+        budget: 20000
+        intent: "Confirm the Delete and check that within 5 s of the click the Lead reads deleted with deleted_at and history_purged_at, and no Attention"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1DelId")"
+          wt="$(cat "$AFT_WORK_DIR/agv1DelWorktree")"
+          [ ! -e "$wt" ] || { echo "the worktree $wt is still there" >&2; exit 1; }
+          curl -sf "$AFT_BASE_URL/api/workspaces/E2E-AGV1-DELRETRY/v1/agents?include_archived=true" |
+            python3 -c 'import json,sys; ids=[a["agent_id"] for a in json.load(sys.stdin)["agents"]]; sys.exit("the deleted Lead is still listed" if sys.argv[1] in ids else 0)' "$id"
+          old="$(cat "$AFT_WORK_DIR/agv1-del-oc-pid")"
+          new="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$AFT_OPENCODE_SERVICE")"
+          [ -n "$new" ] && [ "$new" != "$old" ] && kill -0 "$new" || { echo "the Delete did not run against a new OpenCode server (old $old, now $new)" >&2; exit 1; }
+          curl -sf "$AFT_FAKE_MODEL_URL/__requests" |
+            python3 -c 'import json,sys; n=len(json.load(sys.stdin)["requests"]); sys.exit(f"the model got {n} requests; want none" if n else 0)'
+        intent: "Check that the worktree is gone, the Lead is not listed, a new OpenCode server took the Delete, and no model turn ran"
+      - reload: true
+      - wait:
+          fn: >-
+            (() => { const nav = document.querySelector('nav[aria-label=Agents]'); const t = nav?.textContent || '';
+              return !!nav && t.includes('agv1-delctl-${RUN_ID:-local}') && !t.includes('agv1-del-${RUN_ID:-local}') && !nav.querySelector('[role=alert]'); })()
+        intent: "Wait until the reloaded sidebar lists the control Lead and no row for the deleted Lead"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1DelId")"
+          agent-browser --session "$AFT_SESSION" eval "!document.querySelector('nav[aria-label=Agents] a[href\$=\"/$id\"]')" | grep -qx true
+        intent: "Check that no sidebar link points at the deleted Lead"
+      - click: { role: button, name: "Collapse workspace tree" }
+      - wait:
+          fn: >-
+            !!document.querySelector('[data-testid=collapsed-agent-rail] [data-agent-id]')
+        intent: "Wait until the collapsed rail shows its Agent API avatars"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1DelId")"
+          ctl="$(cat "$AFT_WORK_DIR/agv1DelCtlId")"
+          agent-browser --session "$AFT_SESSION" eval "document.querySelectorAll('[data-testid=collapsed-agent-rail] [data-agent-id=\"$ctl\"]').length === 1 && !document.querySelector('[data-testid=collapsed-agent-rail] [data-agent-id=\"$id\"]')" | grep -qx true
+        intent: "Check that the collapsed rail shows the control Lead once and no avatar for the deleted Lead"
+      - click: { role: button, name: "Expand workspace tree" }
+        intent: "Expand the workspace tree again"
+
+  - name: a Delete left unfinished is finished by the restarted serve
+    intent: An idle Lead's Delete stops half done while OpenCode is unavailable and loom serve restarts with the outage still on, so the old serve cannot finish it; once OpenCode's registration is restored the new serve finishes the Delete on a new OpenCode that never loaded the location, and the Lead reads deleted with its history purged within 10 s and its worktree is gone
+    steps:
+      - api:
+          method: POST
+          path: /api/workspaces/E2E-AGV1-DELRETRY/v1/agents
+          headers: { Idempotency-Key: "agv1-delrestart-${RUN_ID:-local}" }
+          body: { preset: lead, name: "agv1-delrestart-${RUN_ID:-local}", repo: "${AFT_WORK_DIR}/agv1-delretry-repo", base_ref: main, overrides: { harness: opencode } }
+          save:
+            - from: agent_id
+              as: agv1DelRestartId
+            - from: worktree_path
+              as: agv1DelRestartWorktree
+          assert:
+            - path: state
+              equals: idle
+        intent: "Create an idle OpenCode Lead through the Agent API, with no message"
+      - run: |
+          set -e
+          [ -d "$(cat "$AFT_WORK_DIR/agv1DelRestartWorktree")" ]
+          # A real outage, through OpenCode's own registration (as in
+          # agents-v1-lifecycle): an older service (pid 1 is always alive) is
+          # registered in AFT's sandbox, which Loom refuses and never
+          # replaces (R22), and the AFT service is stopped.
+          svc="$AFT_OPENCODE_SERVICE"
+          cp "$svc" "$AFT_WORK_DIR/agv1-delrestart-opencode-service.json"
+          pid="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$svc")"
+          echo "$pid" > "$AFT_WORK_DIR/agv1-delrestart-oc-pid"
+          printf '{"id":"aft-old","version":"1.0.0","url":"http://127.0.0.1:9","pid":1,"password":"x"}' > "$svc"
+          kill "$pid"
+          for i in $(seq 1 40); do kill -0 "$pid" 2>/dev/null || break; sleep 0.25; done
+          ! kill -0 "$pid" 2>/dev/null
+        intent: "Make OpenCode unavailable by registering an older service Loom refuses and stopping the AFT service"
+      - run: |
+          set -e
+          id="$(cat "$AFT_WORK_DIR/agv1DelRestartId")"
+          code="$(curl -s -o "$AFT_WORK_DIR/agv1-delrestart-del.json" -w '%{http_code}' -X DELETE \
+            -H "Idempotency-Key: agv1-delrestart-del-${RUN_ID:-local}" "$AFT_API_URL/api/workspaces/E2E-AGV1-DELRETRY/v1/agents/$id")"
+          echo "Delete answered $code: $(cat "$AFT_WORK_DIR/agv1-delrestart-del.json")"
+          [ "$code" != 204 ] || { echo "the Delete finished while OpenCode was down" >&2; exit 1; }
+          curl -sf "$AFT_API_URL/api/workspaces/E2E-AGV1-DELRETRY/v1/agents/$id" > "$AFT_WORK_DIR/agv1-delrestart-before.json"
+          python3 - "$AFT_WORK_DIR/agv1-delrestart-before.json" <<'PY'
+          import json, sys
+          a = json.load(open(sys.argv[1]))
+          assert a.get("delete_requested") and not a.get("deleted_at") and a.get("state") != "deleted", \
+              f"want a half-done Delete: delete_requested {a.get('delete_requested')}, deleted_at {a.get('deleted_at')}, state {a.get('state')}"
+          PY
+        intent: "Delete the Lead while OpenCode is down and check that the Delete is requested but not finished"
+      - run: |
+          set -e
+          ws="$(dirname "$AFT_LOOM_CONFIG_DIR")"
+          old="$(cat "$ws/.serve.pid")"
+          touch "$ws/.restart-serve"
+          kill "$old"
+          new="$old"
+          for i in $(seq 1 120); do
+            new="$(cat "$ws/.serve.pid")"
+            [ "$new" != "$old" ] && curl -sf "$AFT_API_URL/health" >/dev/null && break
+            sleep 0.5
+          done
+          [ "$new" != "$old" ] && ! kill -0 "$old" 2>/dev/null && curl -sf "$AFT_API_URL/health" >/dev/null
+          id="$(cat "$AFT_WORK_DIR/agv1DelRestartId")"
+          curl -sf "$AFT_API_URL/api/workspaces/E2E-AGV1-DELRETRY/v1/agents/$id" > "$AFT_WORK_DIR/agv1-delrestart-after.json"
+          python3 - "$AFT_WORK_DIR/agv1-delrestart-after.json" <<'PY'
+          import json, sys
+          a = json.load(open(sys.argv[1]))
+          assert a.get("delete_requested") and not a.get("deleted_at") and a.get("state") != "deleted", \
+              f"want the Delete still unfinished after the restart: delete_requested {a.get('delete_requested')}, deleted_at {a.get('deleted_at')}, state {a.get('state')}"
+          PY
+        intent: "Restart loom serve with OpenCode still down, and check that the new serve sees the Delete requested but not finished"
+      - run: |
+          set -e
+          python3 -c 'import time; print(time.time())' > "$AFT_WORK_DIR/agv1-delrestart-up"
+          cp "$AFT_WORK_DIR/agv1-delrestart-opencode-service.json" "$AFT_OPENCODE_SERVICE"
+          python3 "$AFT_TESTS_DIR/scripts/agv1-deleted-within.py" \
+            "$AFT_API_URL/api/workspaces/E2E-AGV1-DELRETRY/v1/agents/$(cat "$AFT_WORK_DIR/agv1DelRestartId")" \
+            "$(cat "$AFT_WORK_DIR/agv1-delrestart-up")" 10
+          wt="$(cat "$AFT_WORK_DIR/agv1DelRestartWorktree")"
+          [ ! -e "$wt" ] || { echo "the worktree $wt is still there" >&2; exit 1; }
+          old="$(cat "$AFT_WORK_DIR/agv1-delrestart-oc-pid")"
+          new="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$AFT_OPENCODE_SERVICE")"
+          [ -n "$new" ] && [ "$new" != "$old" ] && [ "$new" != 1 ] && kill -0 "$new" || { echo "the Delete did not finish on a new OpenCode server (old $old, now $new)" >&2; exit 1; }
+          curl -sf "$AFT_FAKE_MODEL_URL/__requests" |
+            python3 -c 'import json,sys; n=len(json.load(sys.stdin)["requests"]); sys.exit(f"the model got {n} requests; want none" if n else 0)'
+        budget: 30000
+        intent: "Restore OpenCode's registration (Loom starts a new service) and check that within 10 s the restarted serve's reconcile finishes the Delete: the Lead reads deleted with its history purged and no Attention, its worktree is gone, a new OpenCode server took it, and no model turn ran"
+      - run: |
+          agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/E2E-AGV1-DELRETRY/home"
+        intent: "Open the workspace"
+      - wait:
+          fn: >-
+            (() => { const nav = document.querySelector('nav[aria-label=Agents]'); const t = nav?.textContent || '';
+              return !!nav && t.includes('agv1-delctl-${RUN_ID:-local}') && !t.includes('agv1-delrestart-${RUN_ID:-local}') && !nav.querySelector('[role=alert]'); })()
+        intent: "Wait until the sidebar lists the control Lead and no row for the deleted Lead"
