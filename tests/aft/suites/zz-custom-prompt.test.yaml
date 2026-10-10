@@ -423,7 +423,7 @@ tests:
       - wait:
           fn: *agentsPageReady
         intent: "Wait until the custom agent detail page is ready"
-      - click: { role: button, name: Info, exact: true }
+      - click: { role: tab, name: Info, exact: true }
       - wait: { ms: 250 }
       - wait:
           fn: >-

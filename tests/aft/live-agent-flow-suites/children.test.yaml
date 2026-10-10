@@ -139,7 +139,7 @@ tests:
             (() => { const h = document.querySelector('[aria-label="Agent chat"] header')?.textContent || '';
               return h.includes('aft-child-a-${RUN_ID}') && h.includes('finished'); })()
         intent: "Show child A's persisted finished state before its Diff review"
-      - click: { role: button, name: Diff, exact: true }
+      - click: { role: tab, name: Diff, exact: true }
         intent: "Open the completed child's Diff tab so it reads the committed HEAD"
       - wait:
           fn: >-

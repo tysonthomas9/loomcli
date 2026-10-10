@@ -1354,7 +1354,7 @@ tests:
           fn: >-
             !!document.querySelector('[data-testid=agent-editor-groups]')
         intent: "Wait until the lead agent editor tabs are ready"
-      # The editor strip renders plain draggable <button>s (no role=tab); a bare
+      # The editor strip renders draggable role=tab <button>s; a bare button
       # role/name click would hit the global left-nav Files icon instead.
       - run: |
           set -e
@@ -1434,7 +1434,7 @@ tests:
           fn: >-
             !!document.querySelector('[data-testid=agent-editor-groups]')
         intent: "Wait until the worker agent editor tabs are ready for the checkout contrast"
-      # The editor strip renders plain draggable <button>s (no role=tab); a bare
+      # The editor strip renders draggable role=tab <button>s; a bare button
       # role/name click would hit the global left-nav Files icon instead.
       - run: |
           set -e

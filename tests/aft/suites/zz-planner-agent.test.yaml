@@ -387,7 +387,7 @@ tests:
             })()
         intent: "Wait until the Planner card renders its Plan role and Idle status"
       - expect: { attr: { selector: "[aria-label='Agent: planner-${RUN_ID:-local}']", name: data-status, equals: "idle" } }
-      - click: { role: button, name: Info, exact: true }
+      - click: { role: tab, name: Info, exact: true }
       - wait:
           fn: >-
             (() => {
