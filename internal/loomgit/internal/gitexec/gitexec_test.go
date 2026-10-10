@@ -2,11 +2,16 @@ package gitexec
 
 import (
 	"context"
+	"encoding/pem"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -403,4 +408,80 @@ func TestGlobalSigningConfigSurvivesIsolation(t *testing.T) {
 	mustRun(t, r, "add", "signed")
 	mustRun(t, r, "commit", "-qm", "signed")
 	mustRun(t, r, "verify-commit", "HEAD")
+}
+
+// askpassRemote serves a dumb-HTTP ref list over TLS behind Basic auth, so a
+// real Git must ask GIT_ASKPASS for the token before it can read refs.
+func askpassRemote(t *testing.T, r *Runner, dir, token string) (string, *atomic.Int32) {
+	t.Helper()
+	var challenges atomic.Int32
+	const sha = "0123456789abcdef0123456789abcdef01234567"
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		user, password, ok := req.BasicAuth()
+		if !ok || user != "x-access-token" || password != token {
+			challenges.Add(1)
+			w.Header().Set("WWW-Authenticate", `Basic realm="loom-test"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if strings.HasSuffix(req.URL.Path, "/info/refs") {
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = io.WriteString(w, sha+"\trefs/heads/main\n")
+			return
+		}
+		http.NotFound(w, req)
+	}))
+	t.Cleanup(server.Close)
+	ca := filepath.Join(dir, "remote-ca.pem")
+	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
+	if err := os.WriteFile(ca, pemBytes, 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Trust only the test server; the runner's own credential config is unchanged.
+	r.config = append(r.config, "http.sslCAInfo="+ca)
+	return server.URL + "/owner/repo.git", &challenges
+}
+
+// Git 2.46+ treats credential.interactive=never as "never run askpass", which
+// broke every host push to GitHub. This drives the real host Git end to end.
+func TestRunWithCredentialRealGitConsultsAskpass(t *testing.T) {
+	r, dir, _ := fixture(t)
+	url, _ := askpassRemote(t, r, dir, "fixture-secret")
+	out, err := r.RunWithCredential(context.Background(), cred.New(url, "fixture-secret"), url, "ls-remote", url)
+	if err != nil {
+		t.Fatalf("real git did not authenticate through askpass: %v", err)
+	}
+	if !strings.Contains(string(out), "refs/heads/main") {
+		t.Fatalf("ls-remote output = %q, want refs/heads/main", out)
+	}
+}
+
+// Without a credential, and with a rejected credential, Git must fail at once
+// instead of prompting a human or retrying.
+func TestRealGitNeverPromptsWithoutUsableCredential(t *testing.T) {
+	r, dir, _ := fixture(t)
+	url, challenges := askpassRemote(t, r, dir, "fixture-secret")
+	r.timeout = 20 * time.Second
+	start := time.Now()
+	_, err := r.Run(context.Background(), "ls-remote", url)
+	var commandErr *CommandError
+	if !errors.As(err, &commandErr) {
+		t.Fatalf("anonymous ls-remote error = %v, want a fast Git failure", err)
+	}
+	if !strings.Contains(commandErr.Stderr, "terminal prompts disabled") {
+		t.Fatalf("anonymous ls-remote stderr = %q, want terminal prompts disabled", commandErr.Stderr)
+	}
+	_, err = r.RunWithCredential(context.Background(), cred.New(url, "wrong-token"), url, "ls-remote", url)
+	if !errors.As(err, &commandErr) {
+		t.Fatalf("rejected-token ls-remote error = %v, want a fast Git failure", err)
+	}
+	if strings.Contains(commandErr.Stderr, "wrong-token") {
+		t.Fatalf("token leaked into stderr: %s", commandErr.Stderr)
+	}
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Fatalf("Git took %s to fail; it may be waiting on a prompt", elapsed)
+	}
+	if n := challenges.Load(); n > 4 {
+		t.Fatalf("server saw %d auth challenges; Git is retrying credentials", n)
+	}
 }

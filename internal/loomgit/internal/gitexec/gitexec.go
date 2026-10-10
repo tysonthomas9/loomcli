@@ -427,7 +427,10 @@ func (r *Runner) runWithEnv(ctx context.Context, input io.Reader, env map[string
 	ctx, cancel := context.WithTimeout(ctx, r.timeout)
 	defer cancel()
 	config := append([]string{}, r.config...)
-	config = append(config, "core.hooksPath="+os.DevNull, "credential.helper=", "credential.interactive=never",
+	// No credential.interactive=never: Git 2.46+ then skips GIT_ASKPASS too, so
+	// RunWithCredential could never send its token. cleanEnv's
+	// GIT_TERMINAL_PROMPT=0 and GIT_ASKPASS=/dev/null already rule out prompts.
+	config = append(config, "core.hooksPath="+os.DevNull, "credential.helper=",
 		"user.name="+r.identity.Name, "user.email="+r.identity.Email,
 		"author.name="+r.identity.Name, "author.email="+r.identity.Email,
 		"committer.name="+r.identity.Name, "committer.email="+r.identity.Email)
