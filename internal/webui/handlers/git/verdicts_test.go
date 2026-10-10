@@ -247,3 +247,55 @@ func TestVerdictApproveAndMergeRecordsTheMergeAtTheApprovedHead(t *testing.T) {
 		t.Fatalf("plain approve recorded a merge: %v", merged)
 	}
 }
+
+// P2.21: an approval whose apply is held is still recorded. The response says
+// so and names the overlapping paths, and the revision list shows the verdict
+// with its held follow, so the panel can lock the buttons.
+func TestVerdictHeldApplyReportsTheRecordedApprovalAndPaths(t *testing.T) {
+	change, head, number := freezeTaskRevision(t)
+	previousFollow, previousArea, previousPublish := followApproved, hasWorkingArea, publishApproved
+	t.Cleanup(func() {
+		followApproved, hasWorkingArea, publishApproved = previousFollow, previousArea, previousPublish
+	})
+	hasWorkingArea = func(context.Context, *review.Local, string, string) (bool, error) { return true, nil }
+	followApproved = func(context.Context, string, string) (apply.FollowResult, error) {
+		return apply.FollowResult{Paths: []string{"held.txt"}}, loomgit.NewError(loomgit.ApplyPending, "held.txt", nil)
+	}
+	publishApproved = func(context.Context, string, string, publish.DeclaredStacks) ([]publish.ApprovalOutcome, error) {
+		t.Fatal("a held approval must not publish")
+		return nil, nil
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/workspaces/{ws}/issues/{id}/revisions", handleTaskRevisions)
+	mux.HandleFunc("POST /api/workspaces/{ws}/changes/{change}/revisions/{r}/verdict", handleVerdict)
+	recorder := httptest.NewRecorder()
+	body := `{"head_sha":"` + head + `","verdict":"approve","actor":{"kind":"human","id":"user"}}`
+	mux.ServeHTTP(recorder, httptest.NewRequest("POST", "/api/workspaces/W/changes/"+change+"/revisions/"+strconv.Itoa(number)+"/verdict", strings.NewReader(body)))
+	var response map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := response["data"].(map[string]any)
+	message, _ := response["message"].(string)
+	if recorder.Code != http.StatusConflict || response["error"] != "apply_pending" || response["status"] != "recorded" ||
+		data == nil || !strings.Contains(message, "held.txt") || !strings.Contains(message, "unsaved edits") {
+		t.Fatalf("held approve = %d %s", recorder.Code, recorder.Body.String())
+	}
+	get := httptest.NewRecorder()
+	mux.ServeHTTP(get, httptest.NewRequest("GET", "/api/workspaces/W/issues/T/revisions", nil))
+	if !strings.Contains(get.Body.String(), `"verdict":"approve"`) {
+		t.Fatalf("revision list lost the recorded approval: %s", get.Body.String())
+	}
+}
+
+func TestHeldMessageNamesWhyAndPaths(t *testing.T) {
+	for code, want := range map[string]string{
+		"apply_pending": "unsaved edits to the same files (a.txt, b.txt)",
+		"conflict":      "conflicts with the stack (a.txt, b.txt)",
+		"follow_failed": "could not be applied",
+	} {
+		if got := heldMessage(code, []string{"a.txt", "b.txt"}); !strings.Contains(got, want) || !strings.HasSuffix(got, "No PR until it applies.") {
+			t.Fatalf("heldMessage(%s) = %q", code, got)
+		}
+	}
+}

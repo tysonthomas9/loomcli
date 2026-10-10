@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/tysonthomas9/loomcli/internal/loomgit"
 	"github.com/tysonthomas9/loomcli/internal/loomgit/apply"
@@ -140,8 +141,11 @@ func followVerdict(w http.ResponseWriter, req *http.Request, store *review.Local
 			if errors.As(followErr, &coded) {
 				code = coded.Code()
 			}
+			// The verdict is recorded; only its apply is held. Say so, and
+			// name the paths, so the reviewer sees a decided revision.
 			handler.WriteJSON(w, http.StatusConflict, map[string]any{
 				"success": false, "error": code, "paths": followed.Paths,
+				"status": "recorded", "data": verdict, "message": heldMessage(code, followed.Paths),
 				"suggestion": "Create a fix-up task from the conflicting paths and approve its new revision.",
 			})
 			return
@@ -165,6 +169,22 @@ func followVerdict(w http.ResponseWriter, req *http.Request, store *review.Local
 		}
 	}
 	writeApprovalResponse(w, req, verdict, lead, status, reason, available)
+}
+
+// heldMessage explains an approval that was recorded but could not apply.
+func heldMessage(code string, paths []string) string {
+	why := "it could not be applied to the lead's working area"
+	switch code {
+	case string(loomgit.ApplyPending):
+		why = "the lead's working area has unsaved edits to the same files"
+	case string(loomgit.Conflict):
+		why = "it conflicts with the stack"
+	}
+	message := "Approved, not applied yet: " + why
+	if len(paths) > 0 {
+		message += " (" + strings.Join(paths, ", ") + ")"
+	}
+	return message + ". No PR until it applies."
 }
 
 // writeApprovalResponse opens the PR an Approve and create PR verdict asked

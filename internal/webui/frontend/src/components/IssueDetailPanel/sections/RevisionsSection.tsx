@@ -50,6 +50,9 @@ export function RevisionsSection({
   const [reason, setReason] = useState("");
   const [follow, setFollow] = useState<Record<string, string>>({});
   const [menu, setMenu] = useState("");
+  // Verdicts the server recorded although the request failed (held apply or
+  // PR), by revision: shown and locked until the reloaded list carries them.
+  const [recorded, setRecorded] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (snapshot) {
@@ -110,7 +113,19 @@ export function RevisionsSection({
       setOverride("");
       setReason("");
     } catch (err) {
-      setError(reviewErrorMessage(err, "Could not record verdict"));
+      setError(verdictErrorText(err));
+      const kept = recordedVerdict(err, verdict);
+      if (kept) setRecorded((prev) => ({ ...prev, [key]: kept }));
+      // The verdict may be recorded even though its apply or PR is held (a
+      // 409 naming the overlapping paths): show the server's revisions so the
+      // decided verdict locks the buttons now, as it does after a reload.
+      try {
+        if (!controlled)
+          setRevisions(await getTaskRevisions(workspaceId, taskId, lead));
+        onChanged?.();
+      } catch {
+        // Keep the verdict error on screen; a reload shows the server state.
+      }
     } finally {
       setBusy("");
     }
@@ -251,7 +266,12 @@ export function RevisionsSection({
         // change was unapplied first): show why and let the reviewer approve
         // again, which re-arms the follow.
         const spent = revision.follow_status === "spent";
-        const decided = Boolean(revision.verdict) && !spent;
+        // The server's list wins; until it arrives, show the verdict the
+        // server said it recorded for this exact revision.
+        const verdictKind = revision.verdict ?? recorded[key];
+        const decided = Boolean(verdictKind) && !spent;
+        // An approval whose apply is held stays decided: say why it waits.
+        const held = revision.applied ? "" : heldText(revision.follow_status);
         // The server reports an approved revision still waiting for a working
         // area, so Apply survives a reload. A follow status from this session
         // (e.g. a 404 from Apply clearing it) takes precedence.
@@ -287,7 +307,7 @@ export function RevisionsSection({
                 ? "Incomplete capture"
                 : revision.verdict === "feedback"
                   ? "Review fix-up (no Approve needed)"
-                  : (revision.verdict ?? "Awaiting review")}
+                  : (verdictKind ?? "Awaiting review")}
             </div>
             {revision.depends_on && !stale && !decided && (
               <div data-testid="revision-depends-on">
@@ -372,6 +392,11 @@ export function RevisionsSection({
                 >
                   Create PR
                 </button>
+              </div>
+            )}
+            {held && (
+              <div role="status" data-testid="revision-follow-held">
+                {held}
               </div>
             )}
             {/* A stale base says why once, with its rebuild, above. */}
@@ -508,6 +533,44 @@ function reviewErrorMessage(err: unknown, fallback: string): string {
     if (typeof body?.message === "string" && body.message) return body.message;
   }
   return err instanceof Error ? err.message : fallback;
+}
+
+/**
+ * Why a verdict request failed. A held approval's response carries a readable
+ * message (with the overlapping paths) next to its error code; prefer it.
+ */
+export function verdictErrorText(err: unknown): string {
+  if (err instanceof ApiError && err.body && typeof err.body === "object") {
+    const message = (err.body as { message?: unknown }).message;
+    if (typeof message === "string" && message) return message;
+  }
+  return err instanceof Error ? err.message : "Could not record verdict";
+}
+
+/**
+ * The verdict a failed request still recorded, when the server says so (its
+ * error carries a status): the recorded kind, else the one submitted.
+ */
+function recordedVerdict(err: unknown, submitted: string): string {
+  if (!(err instanceof ApiError)) return "";
+  const body = err.body as
+    | { status?: unknown; data?: { Kind?: unknown } }
+    | undefined;
+  if (typeof body?.status !== "string") return "";
+  const kind = body.data?.Kind;
+  return typeof kind === "string" && kind ? kind : submitted;
+}
+
+/** Why an approved revision is not applied yet, from its follow status. */
+export function heldText(followStatus: string | undefined): string {
+  switch (followStatus) {
+    case "apply_pending":
+      return "Approved, not applied yet: the lead's working area has unsaved edits to the same files. No PR until it applies.";
+    case "conflict":
+      return "Approved, not applied yet: it conflicts with the stack. No PR until it applies.";
+    default:
+      return "";
+  }
 }
 
 /** The newest revision of each change, in list order. */
