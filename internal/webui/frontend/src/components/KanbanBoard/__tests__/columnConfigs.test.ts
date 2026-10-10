@@ -130,6 +130,17 @@ describe("columnConfigs", () => {
       expect(blockedCol.filter(issue, notBlocked)).toBe(false);
     });
 
+    // P1.26: a task may start on its blocker's code while that code awaits
+    // review, so started work keeps its column with an open blocker.
+    it.each(["in_progress", "review"] as const)(
+      "places a %s task with an open blocker in its own column, not Blocked",
+      (status) => {
+        const issue = createMockIssue({ status, is_blocked: true });
+        const owner = DEFAULT_COLUMNS.find((col) => col.filter(issue, blocked));
+        expect(owner?.id).toBe(status);
+      },
+    );
+
     it("rejects deferred issues even when they have blockers (deferred goes to Backlog)", () => {
       const issue = createMockIssue({ status: "deferred" });
       expect(blockedCol.filter(issue, blocked)).toBe(false);
