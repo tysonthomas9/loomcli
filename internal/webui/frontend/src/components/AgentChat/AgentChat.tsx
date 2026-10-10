@@ -37,7 +37,7 @@ import {
   COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX,
   ComposerModelControls,
 } from "./ComposerModelControls";
-import { LONG_TEXT_LIMIT, LongText } from "./LongText";
+import { LongText } from "./LongText";
 import {
   clockTime,
   MessageActions,
@@ -198,7 +198,12 @@ export function AgentChat({ workspaceId, agentId }: AgentChatProps) {
               data-kind={rowKind(row)}
               data-enter={entering.has(row.id) || undefined}
             >
-              <Row row={row} workspaceId={workspaceId} onToggle={toggleGroup} />
+              <Row
+                row={row}
+                workspaceId={workspaceId}
+                onToggle={toggleGroup}
+                newlyLive={entering.has(row.id)}
+              />
             </li>
           ))}
           {working.mounted && (
@@ -713,14 +718,18 @@ function Row({
   row,
   workspaceId,
   onToggle,
+  newlyLive,
 }: {
   row: TimelineRow;
   workspaceId: string;
   onToggle: (groupId: string) => void;
+  newlyLive: boolean;
 }) {
   switch (row.kind) {
     case "item":
-      return <Item item={row.item} workspaceId={workspaceId} />;
+      return (
+        <Item item={row.item} workspaceId={workspaceId} newlyLive={newlyLive} />
+      );
     case "work":
       return (
         <WorkEntryRow
@@ -752,40 +761,42 @@ function Row({
   }
 }
 
-/**
- * An agent message as markdown, cut like LongText until the user expands
- * it, with a copy button once it is complete.
- */
+/** An agent message as full markdown, with a copy button once it is complete. */
 function AgentMessage({
   text,
   streaming,
   at,
+  newlyLive,
+  arrivals,
 }: {
   text: string;
   streaming: boolean;
   at?: string | undefined;
+  newlyLive: boolean;
+  arrivals?: readonly { end: number; at: number }[] | undefined;
 }) {
-  const [all, setAll] = useState(false);
-  const smooth = useSmoothText(text, streaming);
-  const cut = !all && smooth.text.length > LONG_TEXT_LIMIT;
+  const smooth = useSmoothText(text, streaming, newlyLive, arrivals);
   return (
     <div className={page.agentMessage}>
       <ChatMarkdown
-        text={cut ? smooth.text.slice(0, LONG_TEXT_LIMIT) + "…" : smooth.text}
+        text={smooth.text}
         streaming={streaming}
         fresh={smooth.fresh}
       />
-      {cut && (
-        <button className={styles.showAll} onClick={() => setAll(true)}>
-          Show all ({text.length.toLocaleString()} characters)
-        </button>
-      )}
       {!streaming && text.trim() && <MessageActions text={text} at={at} />}
     </div>
   );
 }
 
-function Item({ item, workspaceId }: { item: ChatItem; workspaceId: string }) {
+function Item({
+  item,
+  workspaceId,
+  newlyLive,
+}: {
+  item: ChatItem;
+  workspaceId: string;
+  newlyLive: boolean;
+}) {
   switch (item.kind) {
     // Started markers are their own rows (see deriveTimelineRows).
     case "started":
@@ -829,6 +840,8 @@ function Item({ item, workspaceId }: { item: ChatItem; workspaceId: string }) {
           text={item.text}
           streaming={!!item.streaming}
           at={item.at}
+          newlyLive={newlyLive}
+          arrivals={item.arrivals}
         />
       );
     case "user":

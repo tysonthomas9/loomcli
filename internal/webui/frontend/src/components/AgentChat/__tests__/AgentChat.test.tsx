@@ -61,7 +61,6 @@ vi.mock("@/api/agentsv1", () => ({
 }));
 
 import { AgentChat, daysLeftText } from "../AgentChat";
-import { LONG_TEXT_LIMIT } from "../LongText";
 
 function agent(over: Partial<Agent> = {}): Agent {
   return {
@@ -430,13 +429,42 @@ describe("AgentChat", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
-  it("cuts a very long message until the user expands it", async () => {
+  it("explains an empty saved reasoning event instead of offering an empty toggle", async () => {
     await mount(agent());
-    const long = "x".repeat(LONG_TEXT_LIMIT + 10);
-    deliver(ev("item.completed", { itemKind: "message", text: long }));
-    expect(screen.queryByText(long)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /Show all/ }));
+    deliver(ev("item.completed", { itemKind: "reasoning" }));
+    const row = screen.getByTestId("reasoning");
+    expect(row).toHaveTextContent("No reasoning text available");
+    expect(within(row).queryByRole("button")).toBeNull();
+  });
+
+  it("expands reasoning text when the saved event supplies it", async () => {
+    await mount(agent());
+    deliver(
+      ev("item.completed", {
+        itemKind: "reasoning",
+        text: "Plan the answer\nCheck the requested format.",
+      }),
+    );
+    const row = screen.getByTestId("reasoning");
+    fireEvent.click(within(row).getByRole("button"));
+    expect(
+      within(row).getByText(/Check the requested format/),
+    ).toBeInTheDocument();
+    expect(row).not.toHaveTextContent("No reasoning text available");
+  });
+
+  it("shows the full long reply without requiring expansion", async () => {
+    await mount(agent());
+    const long = "x".repeat(17000);
+    deliver(
+      ev("item.completed", {
+        itemKind: "message",
+        text: `${long}\n\n**End of reply**`,
+      }),
+    );
     expect(screen.getByText(long)).toBeInTheDocument();
+    expect(screen.getByText("End of reply").tagName).toBe("STRONG");
+    expect(screen.queryByRole("button", { name: /Show all/ })).toBeNull();
   });
 
   it("renders the same fixture for opencode, codex and claude except the label", async () => {
@@ -731,6 +759,122 @@ describe("AgentChat", () => {
     );
     expect(screen.queryByText("Hello")).toBeNull();
     expect(screen.getAllByText("Hello!")).toHaveLength(1);
+  });
+
+  it("smooths the first delta of a newly inserted live assistant row", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+    vi.stubGlobal("requestAnimationFrame", (frame: FrameRequestCallback) => {
+      frames.push(frame);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    try {
+      const { container } = await mount(agent());
+      const stream = api.streams[0];
+      await act(async () => stream.opts.onResync?.());
+      const firstChunk = Array.from({ length: 15 }, (_, i) => `word${i}`).join(
+        " ",
+      );
+      act(() =>
+        stream.opts.onNotice?.({
+          ...ev("delta", {
+            itemId: "m1",
+            itemKind: "message",
+            text: firstChunk,
+          }),
+          seq: 0,
+        }),
+      );
+      const row = container.querySelector('li[data-kind="agent"]');
+      expect(row).toHaveAttribute("data-enter");
+      const markdown = row?.querySelector('[data-testid="chat-markdown"]');
+      expect(markdown).not.toBeNull();
+      const words = () =>
+        markdown?.textContent?.trim().split(/\s+/).filter(Boolean).length ?? 0;
+      expect(words()).toBeLessThanOrEqual(2);
+      let previous = words();
+      for (let i = 1; i <= 24 && words() < 15; i++) {
+        const scheduled = frames.splice(0);
+        act(() => scheduled.forEach((frame) => frame((i * 1000) / 60)));
+        expect(words() - previous).toBeLessThanOrEqual(2);
+        previous = words();
+      }
+      expect(markdown).toHaveTextContent(firstChunk);
+      deliver(
+        ev("item.completed", {
+          itemId: "m1",
+          itemKind: "message",
+          text: firstChunk,
+        }),
+      );
+      expect(container.querySelectorAll('li[data-kind="agent"]')).toHaveLength(
+        1,
+      );
+      expect(
+        container.querySelector('li[data-kind="agent"]'),
+      ).toHaveTextContent(firstChunk);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("keeps the first painted frame of a synced 900-character delta to two words", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+    vi.stubGlobal("requestAnimationFrame", (frame: FrameRequestCallback) => {
+      frames.push(frame);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => {});
+    try {
+      const { container } = await mount(agent());
+      const stream = api.streams[0];
+      await act(async () => stream.opts.onResync?.());
+      const firstChunk = "word ".repeat(180);
+      act(() =>
+        stream.opts.onNotice?.({
+          ...ev("delta", {
+            itemId: "m1",
+            itemKind: "message",
+            text: firstChunk,
+          }),
+          seq: 0,
+        }),
+      );
+      const row = container.querySelector('li[data-kind="agent"]');
+      expect(row).toHaveAttribute("data-enter");
+      const markdown = row?.querySelector('[data-testid="chat-markdown"]');
+      expect(markdown).not.toBeNull();
+      const words = () =>
+        markdown?.textContent?.trim().split(/\s+/).filter(Boolean).length ?? 0;
+      expect(words()).toBe(0);
+      const scheduled = frames.splice(0);
+      expect(scheduled.length).toBeGreaterThan(0);
+      act(() => scheduled.forEach((frame) => frame(1000 / 60)));
+      expect(words()).toBeGreaterThan(0);
+      expect(words()).toBeLessThanOrEqual(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("shows preexisting unsynced midstream text immediately", async () => {
+    const { container } = await mount(agent());
+    const firstChunk = Array.from({ length: 15 }, (_, i) => `word${i}`).join(
+      " ",
+    );
+    act(() =>
+      api.streams[0].opts.onNotice?.({
+        ...ev("delta", { itemId: "m1", itemKind: "message", text: firstChunk }),
+        seq: 0,
+      }),
+    );
+    const row = container.querySelector('li[data-kind="agent"]');
+    expect(row).not.toHaveAttribute("data-enter");
+    expect(
+      row?.querySelector('[data-testid="chat-markdown"]'),
+    ).toHaveTextContent(firstChunk);
   });
 
   it.each([1, 2])(

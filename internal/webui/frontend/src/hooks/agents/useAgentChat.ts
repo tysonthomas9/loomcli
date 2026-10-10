@@ -160,7 +160,9 @@ export function useAgentChat(
       },
       onNotice: (n) => {
         if (n.kind === "feed.gap") setSynced(false);
-        setStreaming((s) => addDelta(s, n));
+        // Capture each native notice before React can combine state updates.
+        const observedAt = performance.now();
+        setStreaming((s) => addDelta(s, n, observedAt));
       },
       onStateChange: (state) => {
         if (state === "connecting" || state === "reconnecting")

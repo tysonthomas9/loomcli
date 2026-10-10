@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 /**
  * Favorite and recently used models, kept in this browser (T3 keeps
@@ -39,13 +39,14 @@ function save(p: ModelPickerPrefs) {
 
 export function useModelPickerPrefs() {
   const [prefs, setPrefs] = useState<ModelPickerPrefs>(load);
+  const prefsRef = useRef(prefs);
   const update = useCallback(
-    (fn: (p: ModelPickerPrefs) => ModelPickerPrefs) =>
-      setPrefs((p) => {
-        const next = fn(p);
-        save(next);
-        return next;
-      }),
+    (fn: (p: ModelPickerPrefs) => ModelPickerPrefs) => {
+      const next = fn(prefsRef.current);
+      prefsRef.current = next;
+      save(next);
+      setPrefs(next);
+    },
     [],
   );
   const toggleFavorite = useCallback(

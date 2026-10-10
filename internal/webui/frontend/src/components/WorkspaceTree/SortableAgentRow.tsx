@@ -116,11 +116,11 @@ export function SortableAgentRow(props: SortableAgentRowProps): JSX.Element {
           aria-label={`Drag to reorder ${label}`}
           onClick={(event) => event.stopPropagation()}
           onKeyDown={(event) => {
-            // Keep dnd-kit's keyboard sensor, and keep the key off the row.
+            // The sensor starts here, then listens on document while dragging.
             (listeners?.onKeyDown as React.KeyboardEventHandler | undefined)?.(
               event,
             );
-            event.stopPropagation();
+            if (!isDragging) event.stopPropagation();
           }}
         >
           <svg width="8" height="14" viewBox="0 0 8 14" fill="currentColor">

@@ -954,12 +954,13 @@ func (l *eventLog) wait(t *testing.T, what string, match func(loomharness.Event)
 // boot sweep resumed it).
 type fakeModel struct {
 	*httptest.Server
-	mu     sync.Mutex
-	bodies []string
+	mu        sync.Mutex
+	bodies    []string
+	requestCh chan struct{}
 }
 
 func newFakeModel(t *testing.T) *fakeModel {
-	m := &fakeModel{}
+	m := &fakeModel{requestCh: make(chan struct{}, 1)}
 	m.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
 		var req struct {
@@ -976,6 +977,10 @@ func newFakeModel(t *testing.T) *fakeModel {
 		m.mu.Lock()
 		m.bodies = append(m.bodies, string(raw))
 		m.mu.Unlock()
+		select {
+		case m.requestCh <- struct{}{}:
+		default:
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		chunk := func(delta map[string]string, finish any) {
 			b, _ := json.Marshal(map[string]any{"id": "c1", "object": "chat.completion.chunk", "created": 1, "model": "m",
@@ -997,6 +1002,17 @@ func newFakeModel(t *testing.T) *fakeModel {
 	}))
 	t.Cleanup(m.Close)
 	return m
+}
+
+func (m *fakeModel) awaitRequest(ctx context.Context, text string) error {
+	for m.requests(text) == 0 {
+		select {
+		case <-m.requestCh:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
 }
 
 // requests counts agent turns (not title requests) whose last message
@@ -1030,6 +1046,35 @@ func (m *fakeModel) sawSystem(text string) bool {
 		}
 	}
 	return false
+}
+
+// systemFor returns the system messages sent on the turn containing text.
+func (m *fakeModel) systemFor(text string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, body := range m.bodies {
+		if strings.Contains(body, "You are a title generator") {
+			continue
+		}
+		var req struct {
+			Messages []struct {
+				Role    string          `json:"role"`
+				Content json.RawMessage `json:"content"`
+			} `json:"messages"`
+		}
+		if json.Unmarshal([]byte(body), &req) != nil || len(req.Messages) == 0 ||
+			!strings.Contains(string(req.Messages[len(req.Messages)-1].Content), text) {
+			continue
+		}
+		var system strings.Builder
+		for _, msg := range req.Messages {
+			if msg.Role == "system" {
+				system.Write(msg.Content)
+			}
+		}
+		return system.String()
+	}
+	return ""
 }
 
 // saw counts agent turns (not title requests) whose request contains text

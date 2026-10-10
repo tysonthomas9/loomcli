@@ -16,7 +16,18 @@ vi.mock("react-markdown", async (orig) => {
   };
 });
 
-import { ChatMarkdown, splitBlocks } from "../ChatMarkdown";
+import { ChatMarkdown, countReplyWords, splitBlocks } from "../ChatMarkdown";
+
+describe("countReplyWords", () => {
+  it("counts message content without code headers or table controls", () => {
+    expect(countReplyWords("```json\n")).toBe(0);
+    expect(countReplyWords('```json\n{"ok": true}\n```')).toBe(2);
+    expect(
+      countReplyWords("| Name | Result |\n| --- | --- |\n| One | Passed |"),
+    ).toBe(4);
+    expect(countReplyWords("Hello **there**.\n\n- One\n- Two")).toBe(4);
+  });
+});
 
 describe("splitBlocks", () => {
   it("splits at blank lines between top-level blocks", () => {

@@ -124,6 +124,11 @@
   white-space: nowrap;
 }
 
+/* Keep the header fixed when a turn changes active to idle. */
+.statePill[data-state] {
+  min-width: 6rem;
+}
+
 .stateDot {
   width: 6px;
   height: 6px;
@@ -361,6 +366,13 @@
   position: relative;
   min-width: 0;
   padding: 2px 4px;
+}
+
+/* Keep reply hover actions at the end of even the longest response. */
+.agentMessage > .messageActions {
+  position: static;
+  width: max-content;
+  margin-top: 4px;
 }
 
 /* The waiting message: a user bubble that has not been delivered yet. */

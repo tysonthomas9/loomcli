@@ -73,6 +73,7 @@ describe("useSmoothText", () => {
   beforeEach(() => {
     frames = [];
     now = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
     vi.stubGlobal("requestAnimationFrame", (f: FrameRequestCallback) => {
       frames.push(f);
       return frames.length;
@@ -81,7 +82,10 @@ describe("useSmoothText", () => {
     vi.stubGlobal("matchMedia", (q: string) => ({ matches: false, media: q }));
   });
 
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
 
   it("starts from the text already there and reveals what arrives", () => {
     const { result, rerender } = renderHook(({ t, s }) => useSmoothText(t, s), {
@@ -94,6 +98,58 @@ describe("useSmoothText", () => {
     expect(result.current.text).toBe("Hello there");
     for (let i = 0; i < 60; i++) tick();
     expect(result.current.text).toBe("Hello there my friend");
+  });
+
+  it("reveals a new live row from zero and flushes its backlog at completion", () => {
+    const first = "word ".repeat(15).trim();
+    const { result, rerender } = renderHook(
+      ({ t, s }) => useSmoothText(t, s, true),
+      { initialProps: { t: first, s: true } },
+    );
+    expect(result.current.text).toBe("");
+    tick();
+    expect(result.current.text.trim().split(/\s+/)).toHaveLength(1);
+    rerender({ t: `${first} final`, s: false });
+    expect(result.current.text).toBe(`${first} final`);
+    expect(result.current.fresh).toEqual([]);
+  });
+
+  it("advances toward a later batched prefix when its deadline is more urgent", () => {
+    const text = "one two three four five";
+    const arrivals = [
+      { end: 4, at: 0 },
+      { end: text.length, at: 0 },
+    ];
+    const { result } = renderHook(() =>
+      useSmoothText(text, true, true, arrivals),
+    );
+    tick();
+    expect(result.current.text.trim().split(/\s+/).length).toBeLessThanOrEqual(
+      2,
+    );
+    tick();
+    expect(result.current.text.startsWith("one two")).toBe(true);
+  });
+
+  it("keeps an ordinary 36-word first packet to two words on its second frame", () => {
+    const packet = "word ".repeat(35) + "word";
+    const { result } = renderHook(() => useSmoothText(packet, true, true));
+    expect(result.current.text).toBe("");
+    tick();
+    const first = result.current.text.trim().split(/\s+/).length;
+    tick();
+    const second = result.current.text.trim().split(/\s+/).length;
+    expect(first).toBe(2);
+    expect(second - first).toBeLessThanOrEqual(2);
+  });
+
+  it("shows a new live row immediately under reduced motion", () => {
+    vi.stubGlobal("matchMedia", () => ({ matches: true }));
+    const first = "word ".repeat(15).trim();
+    const { result } = renderHook(() => useSmoothText(first, true, true));
+    expect(result.current.text).toBe(first);
+    expect(result.current.fresh).toEqual([]);
+    expect(frames).toHaveLength(0);
   });
 
   it("shows a 900-character burst within 300ms of its arrival", () => {

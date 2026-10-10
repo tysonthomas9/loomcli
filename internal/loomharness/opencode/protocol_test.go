@@ -26,43 +26,45 @@ import (
 // fakeServer is the OpenCode HTTP surface the adapter uses, kept in memory.
 // Its state lives in store so a second server can play a restarted OpenCode.
 type store struct {
-	mu       sync.Mutex
-	sessions map[string]map[string]any
-	messages map[string][]map[string]any
-	active   map[string]string
-	deleted  []string
-	streams  [][]string // one scripted /api/event stream per connection
-	conns    int
-	envs     map[string]map[string]string // in memory only in OpenCode: lost on restart
-	envFail  bool
-	bareRuns int // prompts accepted while the session had no environment
-	patchErr bool
-	delErr   bool                      // DELETE /api/session/{id} fails
-	patchLie int                       // the next n session PATCHes commit, then answer 500
-	hangLie  bool                      // a PATCH that commits (patchLie) never answers instead
-	stops    int                       // POST /interrupt calls
-	lateRuns int                       // prompts accepted after an interrupt
-	stopErr  bool                      // POST /interrupt answers 500
-	stopHang bool                      // POST /interrupt never answers
-	postErr  bool                      // POST /api/session creates the session, then fails
-	race     *openRace                 // pairs two concurrent session GETs, counts creates
-	perms    map[string]permReq        // pending permission asks by id, readable and answerable
-	replies  map[string]string         // permission ask id -> the decision Loom sent
-	agents   map[string]bool           // agent ids the service offers
-	agentDir []string                  // location[directory] of each agent lookup
-	loading  bool                      // the location lists no agents yet
-	asks     map[string][]string       // pending per_/frm_ ask ids, per session
-	forms    map[string]form           // pending forms by id, as GET form/{id} and the form list give them
-	answers  map[string]map[string]any // form id -> the answer Loom sent
-	mcp      string                    // a registered loom MCP server's /api/mcp status; "" is connected
-	bridges  map[string]map[string]any // location dir -> the loom MCP config PUT there
-	puts     int                       // PUT /api/experimental/mcp/loom calls
-	mcpDown  bool                      // DELETE /api/experimental/mcp/loom fails
+	mu         sync.Mutex
+	sessions   map[string]map[string]any
+	personas   map[string]string // native instruction entry, persisted per session
+	messages   map[string][]map[string]any
+	active     map[string]string
+	deleted    []string
+	streams    [][]string // one scripted /api/event stream per connection
+	conns      int
+	envs       map[string]map[string]string // in memory only in OpenCode: lost on restart
+	envFail    bool
+	bareRuns   int // prompts accepted while the session had no environment
+	patchErr   bool
+	personaErr bool
+	delErr     bool                      // DELETE /api/session/{id} fails
+	patchLie   int                       // the next n session PATCHes commit, then answer 500
+	hangLie    bool                      // a PATCH that commits (patchLie) never answers instead
+	stops      int                       // POST /interrupt calls
+	lateRuns   int                       // prompts accepted after an interrupt
+	stopErr    bool                      // POST /interrupt answers 500
+	stopHang   bool                      // POST /interrupt never answers
+	postErr    bool                      // POST /api/session creates the session, then fails
+	race       *openRace                 // pairs two concurrent session GETs, counts creates
+	perms      map[string]permReq        // pending permission asks by id, readable and answerable
+	replies    map[string]string         // permission ask id -> the decision Loom sent
+	agents     map[string]bool           // agent ids the service offers
+	agentDir   []string                  // location[directory] of each agent lookup
+	loading    bool                      // the location lists no agents yet
+	asks       map[string][]string       // pending per_/frm_ ask ids, per session
+	forms      map[string]form           // pending forms by id, as GET form/{id} and the form list give them
+	answers    map[string]map[string]any // form id -> the answer Loom sent
+	mcp        string                    // a registered loom MCP server's /api/mcp status; "" is connected
+	bridges    map[string]map[string]any // location dir -> the loom MCP config PUT there
+	puts       int                       // PUT /api/experimental/mcp/loom calls
+	mcpDown    bool                      // DELETE /api/experimental/mcp/loom fails
 }
 
 func newStore() *store {
 	return &store{sessions: map[string]map[string]any{}, messages: map[string][]map[string]any{}, active: map[string]string{},
-		envs: map[string]map[string]string{}, perms: map[string]permReq{}, replies: map[string]string{}}
+		envs: map[string]map[string]string{}, personas: map[string]string{}, perms: map[string]permReq{}, replies: map[string]string{}}
 }
 
 func fakeServer(t *testing.T, st *store) *Client {
@@ -229,6 +231,40 @@ func fakeServer(t *testing.T, st *store) *Client {
 			return
 		}
 		delete(st.sessions, id)
+		delete(st.personas, id)
+		w.WriteHeader(204)
+	})
+	mux.HandleFunc("PUT /api/experimental/session/{id}/instructions/entries/loom-persona", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Value string `json:"value"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			reply(w, 400, map[string]string{"_tag": "InvalidRequestError", "message": "bad instruction entry"})
+			return
+		}
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		id := r.PathValue("id")
+		if _, ok := st.sessions[id]; !ok {
+			missing(w, id)
+			return
+		}
+		if st.personaErr {
+			reply(w, 500, map[string]string{"_tag": "UnknownError", "message": "instruction entry failed"})
+			return
+		}
+		st.personas[id] = body.Value
+		w.WriteHeader(204)
+	})
+	mux.HandleFunc("DELETE /api/experimental/session/{id}/instructions/entries/loom-persona", func(w http.ResponseWriter, r *http.Request) {
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		id := r.PathValue("id")
+		if _, ok := st.sessions[id]; !ok {
+			missing(w, id)
+			return
+		}
+		delete(st.personas, id)
 		w.WriteHeader(204)
 	})
 	mux.HandleFunc("POST /api/session/{id}/prompt", func(w http.ResponseWriter, r *http.Request) {
@@ -864,6 +900,88 @@ func TestProtocolPresetFailsClosed(t *testing.T) {
 	n := len(st.messages[ref.NativeID])
 	if _, err := s.Resume(ctx, loomharness.Launch{}, nil); !isCode(err, "bad_request") || len(st.messages[ref.NativeID]) != n {
 		t.Fatalf("Resume of a session whose preset is gone = %v; want bad_request", err)
+	}
+}
+
+func TestProtocolPersonaIsSessionScopedInstruction(t *testing.T) {
+	ctx := context.Background()
+	st := newStore()
+	st.agents = map[string]bool{"loom-lead": true}
+	c := fakeServer(t, st)
+	c.presets = "/wt"
+	open := func(key, persona string) loomharness.NativeRef {
+		t.Helper()
+		ref, err := c.Open(ctx, loomharness.OpenSpec{Key: key, Dir: "/wt/repo/" + key,
+			Preset: loomharness.PresetConfig{Name: "lead", Persona: persona},
+			Rules:  []loomharness.PermissionRule{{Action: "read", Resource: "*", Effect: "allow"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ref
+	}
+	first := "PERSONA_FIRST literal {{.AgentName}}"
+	second := "PERSONA_SECOND"
+	defaultLead := "You are the default Lead"
+	a := open("agent-a", first)
+	b := open("agent-b", second)
+	d := open("agent-default", defaultLead)
+	for _, tc := range []struct {
+		ref     loomharness.NativeRef
+		persona string
+	}{{a, first}, {b, second}, {d, defaultLead}} {
+		if got := st.personas[tc.ref.NativeID]; got != tc.persona {
+			t.Fatalf("session %s persona = %q, want %q", tc.ref.NativeID, got, tc.persona)
+		}
+		if got := st.sessions[tc.ref.NativeID]["agent"]; got != "loom-lead" {
+			t.Fatalf("session %s agent = %v", tc.ref.NativeID, got)
+		}
+		if st.sessions[tc.ref.NativeID]["permissions"] == nil {
+			t.Fatalf("session %s lost permissions", tc.ref.NativeID)
+		}
+	}
+	if err := c.Session(a).Prompt(ctx, loomharness.Input{Key: "message-a", Text: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := st.messages[a.NativeID][0]["text"]; got != "hello" {
+		t.Fatalf("user message = %q; persona must use native instructions", got)
+	}
+
+	// Instruction entries survive a service restart, and a repeated Open
+	// updates only the matching session's saved persona.
+	restarted := fakeServer(t, st)
+	restarted.presets = c.presets
+	if _, err := restarted.Session(a).Resume(ctx, loomharness.Launch{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if st.personas[a.NativeID] != first {
+		t.Fatalf("persona lost after Resume: %q", st.personas[a.NativeID])
+	}
+	open("agent-a", "PERSONA_FIRST_UPDATED")
+	if st.personas[a.NativeID] != "PERSONA_FIRST_UPDATED" || st.personas[b.NativeID] != second || st.personas[d.NativeID] != defaultLead {
+		t.Fatalf("personas crossed sessions: %v", st.personas)
+	}
+	open("agent-a", "")
+	if _, ok := st.personas[a.NativeID]; ok {
+		t.Fatal("empty persona left a stale session instruction")
+	}
+	if st.personas[b.NativeID] != second || st.personas[d.NativeID] != defaultLead {
+		t.Fatalf("clearing one persona changed another: %v", st.personas)
+	}
+}
+
+func TestProtocolPersonaInstallFailsClosed(t *testing.T) {
+	st := newStore()
+	st.agents = map[string]bool{"loom-lead": true}
+	st.personaErr = true
+	c := fakeServer(t, st)
+	c.presets = "/wt"
+	ref, err := c.Open(context.Background(), loomharness.OpenSpec{Key: "agent-a", Dir: "/wt/repo/a",
+		Preset: loomharness.PresetConfig{Name: "lead", Persona: "custom"}})
+	if err == nil || !strings.Contains(err.Error(), "install session persona") || ref != (loomharness.NativeRef{}) {
+		t.Fatalf("Open with failed persona install = %+v, %v", ref, err)
+	}
+	if len(st.sessions) != 0 || len(st.personas) != 0 || len(st.deleted) != 1 {
+		t.Fatalf("failed Open left native state: sessions=%v personas=%v deleted=%v", st.sessions, st.personas, st.deleted)
 	}
 }
 

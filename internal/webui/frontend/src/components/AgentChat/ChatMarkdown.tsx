@@ -17,6 +17,7 @@ import {
   useRef,
   useState,
   type ComponentProps,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import Markdown, { type Components } from "react-markdown";
@@ -130,7 +131,10 @@ function MarkdownCodeBlock({
       data-wrap={wrapped ? "true" : "false"}
       data-testid="chat-codeblock"
     >
-      <div className={styles.codeblockHeader}>
+      <div
+        className={styles.codeblockHeader}
+        data-chat-renderer-chrome="code-header"
+      >
         <span className={styles.codeblockLanguage}>{language}</span>
         <span
           className={styles.toolbar}
@@ -227,6 +231,19 @@ export function serializeTableElementToCsv(table: Element): string {
     .join("\n");
 }
 
+function firstTableRowColumns(nodes: ReactNode): number {
+  for (const node of Children.toArray(nodes)) {
+    if (!isValidElement<{ children?: ReactNode }>(node)) continue;
+    if (node.type === "tr") {
+      return Children.toArray(node.props.children).filter(isValidElement)
+        .length;
+    }
+    const nested = firstTableRowColumns(node.props.children);
+    if (nested) return nested;
+  }
+  return 0;
+}
+
 function MarkdownTable({ children, ...props }: ComponentProps<"table">) {
   const tableRef = useRef<HTMLTableElement | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -245,13 +262,21 @@ function MarkdownTable({ children, ...props }: ComponentProps<"table">) {
     <div
       className={styles.tableContainer}
       data-expanded={expanded ? "true" : "false"}
+      style={
+        {
+          "--table-columns": Math.max(1, firstTableRowColumns(children)),
+        } as CSSProperties
+      }
     >
       <div className={styles.tableScroll}>
         <table ref={tableRef} {...props}>
           {children}
         </table>
       </div>
-      <div className={styles.tableActions}>
+      <div
+        className={styles.tableActions}
+        data-chat-renderer-chrome="table-actions"
+      >
         <button
           type="button"
           className={styles.chromeAction}
@@ -353,6 +378,53 @@ export function splitBlocks(text: string): string[] {
   }
   blocks.push(text.slice(start));
   return blocks;
+}
+
+/** Reply words as the same Markdown processor renders them, without toolbars. */
+export function countReplyWords(text: string): number {
+  // Plain deltas need no Markdown processor on every animation frame.
+  if (!/[\r\n`*_{}[\]()#+.!|>~<>-]/.test(text))
+    return text.trim().split(/\s+/).filter(Boolean).length;
+  const blocks = new Set([
+    "div",
+    "p",
+    "pre",
+    "ul",
+    "ol",
+    "li",
+    "blockquote",
+    "section",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "table",
+    "tr",
+  ]);
+  const visible = (node: ReactNode): string => {
+    if (typeof node === "string" || typeof node === "number")
+      return String(node);
+    if (Array.isArray(node)) return node.map(visible).join("");
+    if (!isValidElement<{ children?: ReactNode; alt?: string }>(node))
+      return "";
+    const tag = node.type;
+    if (tag === "input" || tag === "img" || tag === "svg") return "";
+    if (tag === "br") return "\n";
+    const children = Children.toArray(node.props.children);
+    const separator = tag === "tr" ? "\t" : tag === "table" ? "\n" : "";
+    const body = children.map(visible).join(separator);
+    return typeof tag === "string" && blocks.has(tag) ? `\n${body}\n` : body;
+  };
+  const rendered = splitBlocks(text).map((block) =>
+    Markdown({
+      children: block,
+      remarkPlugins: REMARK_PLUGINS,
+      rehypePlugins: REHYPE_PLUGINS,
+    }),
+  );
+  return visible(rendered).trim().split(/\s+/).filter(Boolean).length;
 }
 
 /**
@@ -466,7 +538,11 @@ export const ChatMarkdown = memo(function ChatMarkdown({
   const blocks = useMemo(() => splitBlocks(text), [text]);
   const lastStart = text.length - (blocks[blocks.length - 1] ?? "").length;
   return (
-    <div className={styles.markdown} data-testid="chat-markdown">
+    <div
+      className={styles.markdown}
+      data-testid="chat-markdown"
+      data-streaming={streaming ? "true" : undefined}
+    >
       {blocks.map((block, i) => (
         <MarkdownBlock
           key={i}

@@ -81,6 +81,7 @@ async function open(page: Page) {
       }
       if (path.endsWith("/events"))
         return json(r, { events: [], snapshot_seq: 0, next: 0, more: false });
+      if (path.endsWith("/archive")) return json(r, {});
       const a = AGENTS.find((x) => path.endsWith(`/${x.agent_id}`));
       return a ? json(r, a) : r.fulfill({ status: 404 });
     },
@@ -128,3 +129,78 @@ test("a Lead dragged above another keeps its child under it, and the order survi
   expect(await names(page)).toEqual(["lead2", "lead1", "kid"]);
   await expect(children.getByTestId("agent-list-name")).toHaveText(["kid"]);
 });
+
+for (const width of [390, 800]) {
+  test(`keyboard drag at ${width}px reorders a Lead, Escape cancels, and row actions stay isolated`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await open(page);
+    const handle = page.getByLabel("Drag to reorder lead2");
+    const item = page
+      .getByTestId("sortable-agent-item")
+      .filter({ has: page.getByRole("link", { name: "lead2 Lead opencode" }) });
+    const moveUp = async () => {
+      const first = await page
+        .getByTestId("sortable-agent-item")
+        .first()
+        .boundingBox();
+      if (!first) throw new Error("first Lead is not laid out");
+      await page.keyboard.press("ArrowUp");
+      await expect
+        .poll(async () => (await item.boundingBox())?.y)
+        .toBeLessThan(first.y + first.height / 2);
+    };
+    await expect(page.getByLabel("Drag to reorder kid")).toHaveCount(0);
+
+    await handle.focus();
+    await page.keyboard.press("Space");
+    await expect(item).toHaveAttribute("data-dragging", "true");
+    await moveUp();
+    await page.keyboard.press("Space");
+    await expect.poll(() => names(page)).toEqual(["lead2", "lead1", "kid"]);
+    await expect(
+      page
+        .getByRole("group", { name: "lead1 children" })
+        .getByTestId("agent-list-name"),
+    ).toHaveText(["kid"]);
+    await expect(handle).toBeFocused();
+
+    await page.reload();
+    await expect(page.getByTestId("agent-list-name")).toHaveCount(3);
+    expect(await names(page)).toEqual(["lead2", "lead1", "kid"]);
+    await handle.focus();
+    await page.keyboard.press("Space");
+    await expect(item).toHaveAttribute("data-dragging", "true");
+    await page.keyboard.press("ArrowDown");
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+    await page.keyboard.press("Escape");
+    await expect(item).not.toHaveAttribute("data-dragging", "true");
+    expect(await names(page)).toEqual(["lead2", "lead1", "kid"]);
+
+    const archiveRequest = page.waitForRequest(
+      (request) =>
+        request.url().endsWith("/v1/agents/lead2/archive") &&
+        request.method() === "POST",
+    );
+    await page.getByRole("button", { name: "Archive lead2" }).focus();
+    await page.keyboard.press("Enter");
+    await archiveRequest;
+    await expect(page.getByTestId("agent-list-name")).toHaveText([
+      "lead1",
+      "kid",
+    ]);
+    await expect(page).toHaveURL(/\/test\/agent-chat\?sidebar=1&w=800$/);
+
+    const link = page.getByRole("link", { name: "lead1 Lead opencode" });
+    await expect(link).toHaveAttribute("href", "/ws/w1/chat/a1");
+    await link.focus();
+    await page.keyboard.press("Enter");
+    await page.waitForURL((url) => url.pathname !== "/test/agent-chat");
+  });
+}
