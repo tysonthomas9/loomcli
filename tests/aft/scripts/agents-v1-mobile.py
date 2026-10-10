@@ -188,8 +188,11 @@ def pill():
                 browser("hover", sel)
                 time.sleep(0.15)
                 m = evaluate(PILL % row)
-                if m["shown"] and m["bubble"]["top"] >= 0 and m["bubble"]["bottom"] <= m["vh"]:
+                on_screen = all(m[k] and m[k]["top"] >= 0 and m[k]["bottom"] <= m["vh"] for k in ("bubble", "pill", "copy"))
+                if m["shown"] and on_screen:
                     break
+            else:
+                sys.exit(f"{row} row at {width}px: never on screen with its pill shown: {json.dumps(m)}")
             label = f"{row} row at {width}px"
             check(m["pill"] and m["copy"] and m["shown"], f"{label}: hover pill not shown", m)
             p, b, r, c = m["pill"], m["bubble"], m["row"], m["copy"]
