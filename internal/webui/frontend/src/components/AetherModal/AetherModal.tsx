@@ -2,8 +2,15 @@
  * AetherModal — shared app dialog shell rendered via portal.
  */
 
+import { useContext } from "react";
 import { createPortal } from "react-dom";
 import type { CSSProperties, ReactNode, RefObject } from "react";
+
+import {
+  EscapeRegistryContext,
+  LAYER_MODAL,
+  useRegisterEscapeLayer,
+} from "@/hooks/ui/useKeyboardShortcuts";
 
 import styles from "./AetherModal.module.css";
 
@@ -28,6 +35,8 @@ export interface AetherModalProps {
   showCloseButton?: boolean;
   /** Extra class names merged onto the dialog element (e.g. wide variant). */
   dialogClassName?: string | undefined;
+  /** Escape calls onClose (default true); set false while closing is blocked. */
+  closeOnEscape?: boolean;
 }
 
 export function AetherModal({
@@ -45,7 +54,11 @@ export function AetherModal({
   closeTestId,
   showCloseButton = true,
   dialogClassName,
+  closeOnEscape = true,
 }: AetherModalProps): JSX.Element | null {
+  // Escape goes through the app's Escape layers (topmost wins). Outside a
+  // KeyboardShortcutProvider (isolated tests) there is no registry.
+  const hasEscapeRegistry = useContext(EscapeRegistryContext) !== null;
   if (!isOpen) return null;
 
   const handleOverlayClick = disableOverlayDismiss
@@ -62,6 +75,7 @@ export function AetherModal({
       onClick={handleOverlayClick}
       data-testid={overlayTestId}
     >
+      {hasEscapeRegistry && closeOnEscape && <ModalEscape onClose={onClose} />}
       <div
         className={styles.dialogShell}
         style={dialogShellStyle}
@@ -95,6 +109,11 @@ export function AetherModal({
     </div>,
     document.body,
   );
+}
+
+function ModalEscape({ onClose }: { onClose: () => void }): null {
+  useRegisterEscapeLayer(LAYER_MODAL, onClose, true);
+  return null;
 }
 
 export { styles as aetherModalStyles };

@@ -721,8 +721,8 @@ test("agents drawer at 390px: lists the agents on Terminal", async ({
   ).toBeVisible();
 });
 
-// A dialog opened from the drawer (New Agent) is on top: Escape must not
-// close the drawer underneath it.
+// A dialog opened from the drawer (New Agent) is on top: the first Escape
+// closes only the dialog, the next one the drawer underneath it (ESC1).
 test("agents drawer at 390px: Escape in a dialog opened from it keeps it open", async ({
   page,
 }) => {
@@ -737,7 +737,25 @@ test("agents drawer at 390px: Escape in a dialog opened from it keeps it open", 
   await page.getByRole("button", { name: "+ Add agent" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
   await expect(row).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(row).toBeHidden();
+});
+
+// ESC1: on the desktop the New Agent dialog closes on Escape, also with the
+// focus in its Name field.
+test("new agent dialog at 1440px: Escape from the Name field closes it", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await open(page, [agent, other]);
+  await page.getByRole("button", { name: "+ Add agent" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel("Name").focus();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
 });
 
 // A row's context menu takes the first Escape, as on the desktop; the next
