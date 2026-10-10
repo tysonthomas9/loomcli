@@ -52,6 +52,8 @@ run_coder() {
 
   git add "$output_file"
   git commit -m "Local mode dogfood implementation (${task_id})" || true
+  # Tests that watch a running agent's committed work set this (default 0).
+  sleep "${LOOM_LOCAL_MODE_DONE_DELAY:-0}"
   loom data close "$task_id" --session "${LOOM_SESSION_ID:-}" --reason "Local mode dogfood implementation completed."
   write_transcript "Coder ${agent} committed ${output_file} and closed ${task_id}."
   loom complete
