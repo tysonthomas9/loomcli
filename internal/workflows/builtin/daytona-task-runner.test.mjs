@@ -275,6 +275,10 @@ describe("remote sandbox capture", () => {
     }
     fs.writeFileSync(path.join(task, "readme"), "edited\n");
     fs.writeFileSync(path.join(task, ".env"), "SECRET=fixture\n");
+    // Same names as capture.SecretPath: ".pub" counts only for SSH key names.
+    for (const name of ["id_ed25519.pub", ".npmrc", ".npmrc.pub", ".netrc.pub", "credentials.json.pub"]) {
+      fs.writeFileSync(path.join(task, name), "fixture\n");
+    }
     fs.writeFileSync(path.join(task, "scratch.log"), "ignored\n");
     fs.mkdirSync(path.join(task, "cache.log", "nested"), { recursive: true });
     fs.writeFileSync(path.join(task, "cache.log", "a"), "12345");
@@ -296,6 +300,15 @@ describe("remote sandbox capture", () => {
     assert.equal(git(task, "rev-list", "--count", `${base}..${capture.captureSha}`), "3");
     assert.equal(git(task, "show", `${capture.captureSha}:readme`), "edited");
     assert.ok(!git(task, "ls-tree", "-r", "--name-only", capture.captureSha).includes(".env"));
+    const captured = git(task, "ls-tree", "-r", "--name-only", capture.captureSha).split("\n");
+    for (const name of ["id_ed25519.pub", ".npmrc"]) {
+      assert.ok(capture.entries.some((entry) => entry.path === name && entry.class === "secret_suspect"), name);
+      assert.ok(!captured.includes(name), name);
+    }
+    for (const name of [".npmrc.pub", ".netrc.pub", "credentials.json.pub"]) {
+      assert.ok(!capture.entries.some((entry) => entry.path === name && entry.class === "secret_suspect"), name);
+      assert.ok(captured.includes(name), name);
+    }
     assert.equal(fs.existsSync(tokenPath), false);
   });
 

@@ -399,8 +399,10 @@ const value = (args, env) => git(args, env).toString("utf8").trim();
 const paths = (args) => git(args).toString("utf8").split("\0").filter(Boolean);
 const secret = (name) => name.split("/").some((part) => {
   const lower = part.toLowerCase();
+  // Mirrors capture.SecretPath: only SSH key names also match with ".pub".
   return lower.startsWith(".env") || lower.endsWith(".pem") || lower.endsWith(".key") ||
-    ["id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", ".npmrc", ".netrc", "credentials.json"].includes(lower.replace(/\.pub$/, ""));
+    ["id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"].includes(lower.replace(/\.pub$/, "")) ||
+    [".npmrc", ".netrc", "credentials.json"].includes(lower);
 });
 const head = value(["rev-parse", "HEAD"]);
 const tracked = new Set(paths(["ls-tree", "-r", "--name-only", "-z", "HEAD"]));
