@@ -12,11 +12,32 @@ export function RevisionsSection({
   workspaceId,
   taskId,
   lead,
+  onChanged,
+  changeId,
+  revisions: snapshot,
+  verdictsFor,
 }: {
   workspaceId: string;
   taskId: string;
   lead?: string | undefined;
+  /** Called after a verdict or Apply changes what the task's diff compares with. */
+  onChanged?: (() => void) | undefined;
+  /** Show only this change (one repo of a cross-repo task). */
+  changeId?: string | undefined;
+  /**
+   * Render this revisions list instead of fetching one. The caller reloads it
+   * (via onChanged) after a verdict, so the buttons and the diff the caller
+   * shows always come from the same snapshot.
+   */
+  revisions?: ReviewRevision[] | undefined;
+  /**
+   * The revision number whose diff is on screen: verdicts are enabled for that
+   * exact revision only, and for none while it is null (no diff shown yet).
+   * Undefined: no diff gating.
+   */
+  verdictsFor?: number | null | undefined;
 }): JSX.Element {
+  const controlled = snapshot !== undefined;
   const [revisions, setRevisions] = useState<ReviewRevision[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -26,6 +47,11 @@ export function RevisionsSection({
   const [follow, setFollow] = useState<Record<string, string>>({});
 
   useEffect(() => {
+    if (snapshot) {
+      setRevisions(snapshot);
+      setLoading(false);
+      return;
+    }
     let active = true;
     setLoading(true);
     getTaskRevisions(workspaceId, taskId, lead)
@@ -47,7 +73,7 @@ export function RevisionsSection({
     return () => {
       active = false;
     };
-  }, [workspaceId, taskId, lead]);
+  }, [workspaceId, taskId, lead, snapshot]);
 
   async function decide(
     revision: ReviewRevision,
@@ -66,7 +92,9 @@ export function RevisionsSection({
         lead,
       );
       if (status) setFollow((prev) => ({ ...prev, [key]: status }));
-      setRevisions(await getTaskRevisions(workspaceId, taskId, lead));
+      if (!controlled)
+        setRevisions(await getTaskRevisions(workspaceId, taskId, lead));
+      onChanged?.();
       setOverride("");
       setReason("");
     } catch (err) {
@@ -85,7 +113,9 @@ export function RevisionsSection({
       await applyRevision(workspaceId, revision, lead);
       setFollow((prev) => ({ ...prev, [key]: "" }));
       // Applied state comes from the server's applied log, never browser state.
-      setRevisions(await getTaskRevisions(workspaceId, taskId, lead));
+      if (!controlled)
+        setRevisions(await getTaskRevisions(workspaceId, taskId, lead));
+      onChanged?.();
     } catch (err) {
       // 404: the lead agent does not exist, so Apply cannot open its area.
       if (err instanceof ApiError && err.status === 404)
@@ -95,6 +125,12 @@ export function RevisionsSection({
       setBusy("");
     }
   }
+
+  // Review a task, not a revision: only each change's newest revision is
+  // reviewable here. Earlier ones are read-only under Changes → History.
+  const current = newestRevisions(revisions).filter(
+    (r) => !changeId || r.change_id === changeId,
+  );
 
   return (
     <section
@@ -106,9 +142,12 @@ export function RevisionsSection({
       {loading && <p>Loading revisions…</p>}
       {error && <p role="alert">{error}</p>}
       {!loading && revisions.length === 0 && <p>No revisions yet.</p>}
-      {revisions.map((revision) => {
+      {current.map((revision) => {
         const key = `${revision.change_id}:${revision.number}`;
-        const disabled = Boolean(busy) || revision.incomplete;
+        const disabled =
+          Boolean(busy) ||
+          revision.incomplete ||
+          (verdictsFor !== undefined && revision.number !== verdictsFor);
         // The list reports the verdict for this exact revision head, so a new
         // derived revision has none and offers the buttons again.
         const decided = Boolean(revision.verdict);
@@ -199,4 +238,12 @@ export function RevisionsSection({
       })}
     </section>
   );
+}
+
+/** The newest revision of each change, in list order. */
+export function newestRevisions(revisions: ReviewRevision[]): ReviewRevision[] {
+  const newest = new Map<string, number>();
+  for (const r of revisions)
+    newest.set(r.change_id, Math.max(newest.get(r.change_id) ?? 0, r.number));
+  return revisions.filter((r) => newest.get(r.change_id) === r.number);
 }

@@ -168,5 +168,11 @@ func handleTaskRevisions(w http.ResponseWriter, req *http.Request) {
 		writeReviewError(w, err)
 		return
 	}
+	if reader, closeReader, err := openRevisionReader(); err == nil {
+		for i := range revisions {
+			revisions[i].Date, _ = reader.CommitDate(req.Context(), req.PathValue("ws"), revisions[i].Repo, revisions[i].HeadSHA)
+		}
+		_ = closeReader()
+	}
 	handler.WriteJSON(w, http.StatusOK, map[string]any{"success": true, "data": revisions})
 }

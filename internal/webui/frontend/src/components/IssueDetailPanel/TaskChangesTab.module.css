@@ -1,0 +1,25 @@
+/* Changes tab: verdict area and read-only revision history above the diff. */
+.review {
+  padding: 0 18px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.history {
+  margin: 0;
+  padding: 8px 18px 12px 36px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.history li {
+  padding-block: 2px;
+}
+
+.repo {
+  margin: 12px 16px 0;
+  font-size: 13px;
+  font-weight: 600;
+}
