@@ -167,6 +167,10 @@ func publishIntent(ctx context.Context, store *journal.SQLite, stacks DeclaredSt
 	result, publishErr := approvalPublishChange(ctx, intent.Workspace, intent.Lead, intent.Change)
 	if publishErr != nil {
 		outcome.Status, outcome.Reason = "pending", publishErr.Error()
+		if reason := nativeStacksOffReason(publishErr); reason != "" {
+			// Retrying cannot help until the user turns native stacks on.
+			outcome.Status, outcome.Reason, publishErr = "not_published", reason, nil
+		}
 		if errors.Is(publishErr, loomgit.NewError(loomgit.LineageUnresolved, "", nil)) {
 			outcome.Status = "waiting"
 			publishErr = nil

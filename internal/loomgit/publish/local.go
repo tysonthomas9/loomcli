@@ -32,7 +32,6 @@ type Result struct {
 	PRNumber      int
 	AlreadyExists bool
 	Backend       string
-	StatusReason  string
 	// StackID is the Loom Git stack the PR is a layer of; a cross-repo lead
 	// has one per repository. Empty for a PR to trunk.
 	StackID string
@@ -339,16 +338,16 @@ func existingStackPRs(ctx context.Context, store *journal.SQLite, workspace stri
 
 func stackResults(ctx context.Context, store *journal.SQLite, workspace string, changes []string, revisions []loomgit.Revision, capabilities StackCapabilities, prior map[string]bool) ([]Result, error) {
 	results := make([]Result, 0, len(revisions))
-	backend, reason := "native", ""
+	backend := "native"
 	if !capabilities.NativeStacks {
-		backend, reason = "loom", "GitHub native stacks are unavailable for this repository"
+		backend = "loom"
 	}
 	for index, revision := range revisions {
 		publication, found, err := store.Publication(ctx, workspace, changes[index])
 		if err != nil || !found {
 			return nil, errors.New("stack publication record unavailable")
 		}
-		results = append(results, Result{Revision: revision, PRURL: publication.PRURL, PRNumber: publication.PRNumber, AlreadyExists: prior[changes[index]], Backend: backend, StatusReason: reason})
+		results = append(results, Result{Revision: revision, PRURL: publication.PRURL, PRNumber: publication.PRNumber, AlreadyExists: prior[changes[index]], Backend: backend})
 	}
 	return results, nil
 }

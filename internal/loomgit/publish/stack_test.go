@@ -488,14 +488,10 @@ func TestPublishStackRecordedEntryUsesConfiguredWorkingArea(t *testing.T) {
 	if selected, err := fixture.store.StackBackend(ctx, "W", "feature-1"); err != nil || selected != "loom" {
 		t.Fatalf("recorded backend = %q, %v", selected, err)
 	}
-	if result[0].Backend != "loom" || result[0].StatusReason == "" {
-		t.Fatalf("fallback status = %+v", result[0])
+	if result[0].Backend != "loom" {
+		t.Fatalf("non-GitHub backend = %+v", result[0])
 	}
 }
-
-type nativeCapableForge struct{ *fakeForge }
-
-func (nativeCapableForge) SupportsNativeStacks() bool { return true }
 
 type nativeBackend struct{ LoomStackBackend }
 
@@ -535,7 +531,7 @@ func TestPublishStackRecordedCreatesNativeStackAfterLeasedPush(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if results[0].Backend != "native" || results[0].StatusReason != "" {
+		if results[0].Backend != "native" {
 			t.Fatalf("native status = %+v", results[0])
 		}
 	}
@@ -954,7 +950,7 @@ func TestChooseStackBackendUsesForgeCapabilityAndRecordsChoice(t *testing.T) {
 	fixture := newFixture(t)
 	loom := LoomStackBackend{Store: fixture.store}
 	native := nativeBackend{loom}
-	selected, err := chooseStackBackend(context.Background(), fixture.store, "W", "native-stack", "owner/repo", nativeCapableForge{&fakeForge{}}, loom, native)
+	selected, err := chooseStackBackend(context.Background(), fixture.store, "W", "native-stack", "owner/repo", &fakeNativeForge{fakeForge: &fakeForge{}}, loom, native)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -964,15 +960,15 @@ func TestChooseStackBackendUsesForgeCapabilityAndRecordsChoice(t *testing.T) {
 	if recorded, err := fixture.store.StackBackend(context.Background(), "W", "native-stack"); err != nil || recorded != "native" {
 		t.Fatalf("native selection = %q, %v", recorded, err)
 	}
-	selected, err = chooseStackBackend(context.Background(), fixture.store, "W", "github-stack", "owner/repo", &fakeForge{}, loom, native)
+	selected, err = chooseStackBackend(context.Background(), fixture.store, "W", "other-stack", "owner/repo", &fakeForge{}, loom, native)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := selected.(LoomStackBackend); !ok {
 		t.Fatalf("selected %T, want Loom backend", selected)
 	}
-	if recorded, err := fixture.store.StackBackend(context.Background(), "W", "github-stack"); err != nil || recorded != "loom" {
-		t.Fatalf("GitHub selection = %q, %v", recorded, err)
+	if recorded, err := fixture.store.StackBackend(context.Background(), "W", "other-stack"); err != nil || recorded != "loom" {
+		t.Fatalf("non-GitHub selection = %q, %v", recorded, err)
 	}
 }
 

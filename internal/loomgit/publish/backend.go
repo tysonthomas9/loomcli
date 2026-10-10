@@ -164,23 +164,22 @@ func chooseStackBackend(ctx context.Context, recorder backendRecorder, workspace
 		return nil, err
 	}
 	backend, name := loom, "loom"
-	enabled := false
-	if capabilityForge, ok := forge.(interface {
+	// GitHub (the forge that reports native stack support) always publishes
+	// natively (D41); other providers and local mode use Loom's publisher.
+	if github, ok := forge.(interface {
 		NativeStacksEnabled(context.Context, string, string) (bool, error)
 	}); ok {
 		parts := strings.Split(slug, "/")
 		if len(parts) != 2 {
 			return nil, errors.New("native stack repository slug is invalid")
 		}
-		var err error
-		enabled, err = capabilityForge.NativeStacksEnabled(ctx, parts[0], parts[1])
+		enabled, err := github.NativeStacksEnabled(ctx, parts[0], parts[1])
 		if err != nil {
 			return nil, err
 		}
-	} else if capabilityForge, ok := forge.(interface{ SupportsNativeStacks() bool }); ok {
-		enabled = capabilityForge.SupportsNativeStacks()
-	}
-	if enabled {
+		if !enabled {
+			return nil, nativeStacksOff(slug)
+		}
 		if native == nil {
 			return nil, loomgit.NewError(loomgit.ProviderStackLimit, "native stack backend is unavailable", nil)
 		}
@@ -190,4 +189,23 @@ func chooseStackBackend(ctx context.Context, recorder backendRecorder, workspace
 		return nil, err
 	}
 	return backend, nil
+}
+
+// errNativeStacksOff marks a GitHub repository without native stacked pull
+// requests: nothing publishes until the user turns them on and retries.
+var errNativeStacksOff = errors.New("native stacks are off")
+
+func nativeStacksOff(slug string) error {
+	return loomgit.NewError(loomgit.AttentionRequired, "GitHub native stacks are off for "+slug+
+		". Turn on stacked pull requests for "+slug+" in GitHub, then retry", errNativeStacksOff)
+}
+
+// nativeStacksOffReason returns the user-facing text of a native-stacks-off
+// error, or "" for any other error.
+func nativeStacksOffReason(err error) string {
+	var coded *loomgit.Error
+	if errors.Is(err, errNativeStacksOff) && errors.As(err, &coded) {
+		return coded.Message
+	}
+	return ""
 }
