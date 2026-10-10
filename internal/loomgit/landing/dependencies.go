@@ -28,6 +28,18 @@ type DependencyStore interface {
 // only once every predecessor change in another repository has landed (P4.4
 // rule). found is false when the change's task has no such predecessor.
 func CrossRepoDependencies(ctx context.Context, store DependencyStore, workspace, change string, predecessors Predecessors) (stackpublish.DependencyStatus, bool, error) {
+	return dependencies(ctx, store, workspace, change, predecessors, false)
+}
+
+// TaskDependencies is CrossRepoDependencies over every predecessor change,
+// in this repository too: a PR to trunk (PR per task) has no stack below it,
+// so it merges only after each of its blockers has landed.
+func TaskDependencies(ctx context.Context, store DependencyStore, workspace, change string, predecessors Predecessors) (stackpublish.DependencyStatus, bool, error) {
+	return dependencies(ctx, store, workspace, change, predecessors, true)
+}
+
+func dependencies(ctx context.Context, store DependencyStore, workspace, change string, predecessors Predecessors,
+	sameRepo bool) (stackpublish.DependencyStatus, bool, error) {
 	task, err := store.TaskForChange(ctx, workspace, change)
 	if err != nil || task == "" {
 		return stackpublish.DependencyStatus{}, false, err
@@ -55,14 +67,7 @@ func CrossRepoDependencies(ctx context.Context, store DependencyStore, workspace
 			waiting = append(waiting, "task "+predecessor+" (no change recorded yet)")
 			continue
 		}
-		repos := make([]string, 0, len(changes))
-		for name := range changes {
-			if name != repo {
-				repos = append(repos, name)
-			}
-		}
-		sort.Strings(repos)
-		for _, name := range repos {
+		for _, name := range predecessorRepos(changes, repo, sameRepo) {
 			found = true
 			reason, err := predecessorWait(ctx, store, workspace, name, changes[name])
 			if err != nil {
@@ -77,9 +82,25 @@ func CrossRepoDependencies(ctx context.Context, store DependencyStore, workspace
 		return stackpublish.DependencyStatus{}, false, nil
 	}
 	if len(waiting) == 0 {
+		if sameRepo {
+			return stackpublish.DependencyStatus{State: "success", Description: "All predecessors landed"}, true, nil
+		}
 		return stackpublish.DependencyStatus{State: "success", Description: "All cross-repo predecessors landed"}, true, nil
 	}
 	return stackpublish.DependencyStatus{State: "pending", Description: "Waiting for " + strings.Join(waiting, "; ")}, true, nil
+}
+
+// predecessorRepos lists, sorted, the repos of a predecessor's changes that
+// count: other repos only, or every repo when sameRepo is set.
+func predecessorRepos(changes map[string]string, repo string, sameRepo bool) []string {
+	repos := make([]string, 0, len(changes))
+	for name := range changes {
+		if sameRepo || name != repo {
+			repos = append(repos, name)
+		}
+	}
+	sort.Strings(repos)
+	return repos
 }
 
 // predecessorWait names why a predecessor change has not landed, or "" once it has.
