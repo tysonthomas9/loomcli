@@ -3,7 +3,7 @@
 #
 # This runs inside the e2e Podman image and exercises:
 #   workspace create -> daemon node -> epic runner -> ephemeral task agents
-#   -> Codex backend CLI -> commit -> loom push -> close -> dependent unblock.
+#   -> Codex backend CLI -> commit -> close -> dependent unblock.
 
 set -euo pipefail
 

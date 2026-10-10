@@ -2691,7 +2691,7 @@ Push all agent worktree branches in this workspace to their target branches.
 
 ### `POST /api/workspaces/{ws}/agents/{name}/git/push`
 
-Merge the agent's worktree branch INTO the target branch (loom push semantics — not `git push`).
+Merge the agent's worktree branch INTO the target branch (not `git push`).
 
 - **Auth:** Required
 - **Path params:**

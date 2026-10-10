@@ -138,7 +138,7 @@ EPIC_ID="$(create_issue \
     --type epic \
     --status open)"
 
-DESIGN_A=$'Real Codex E2E task using the octocat/Hello-World repository content mirrored to a local writable remote.\nDo exactly this:\n1. Inspect README and Makefile.\n2. Create directory epic-runner-real.\n3. Create epic-runner-real/task-a.txt with one line containing this pre-assigned task ID and the phrase first real runner task.\n4. Create epic-runner-real/order.log with this pre-assigned task ID as the first line.\n5. Run make gate. It is acceptable that task-b.txt does not exist yet; the Makefile allows that for the first task.\n6. Commit, run loom push for your agent branch, close the task, and run loom complete as instructed by the workflow.'
+DESIGN_A=$'Real Codex E2E task using the octocat/Hello-World repository content mirrored to a local writable remote.\nDo exactly this:\n1. Inspect README and Makefile.\n2. Create directory epic-runner-real.\n3. Create epic-runner-real/task-a.txt with one line containing this pre-assigned task ID and the phrase first real runner task.\n4. Create epic-runner-real/order.log with this pre-assigned task ID as the first line.\n5. Run make gate. It is acceptable that task-b.txt does not exist yet; the Makefile allows that for the first task.\n6. Commit, close the task, and run loom complete as instructed by the workflow.'
 TASK_A="$(create_issue \
     --title "Create first real runner file" \
     --type task \
@@ -147,7 +147,7 @@ TASK_A="$(create_issue \
     --source-repo "$REPO_NAME" \
     --design "$DESIGN_A")"
 
-DESIGN_B=$'Real Codex E2E dependent task using the octocat/Hello-World repository content mirrored to a local writable remote.\nDo exactly this:\n1. Confirm epic-runner-real/task-a.txt exists in your checkout before editing.\n2. Create epic-runner-real/task-b.txt with one line containing this pre-assigned task ID and the phrase second real runner task.\n3. Append this pre-assigned task ID as the second line of epic-runner-real/order.log without removing the first line.\n4. Run make gate.\n5. Commit, run loom push for your agent branch, close the task, and run loom complete as instructed by the workflow.'
+DESIGN_B=$'Real Codex E2E dependent task using the octocat/Hello-World repository content mirrored to a local writable remote.\nDo exactly this:\n1. Confirm epic-runner-real/task-a.txt exists in your checkout before editing.\n2. Create epic-runner-real/task-b.txt with one line containing this pre-assigned task ID and the phrase second real runner task.\n3. Append this pre-assigned task ID as the second line of epic-runner-real/order.log without removing the first line.\n4. Run make gate.\n5. Commit, close the task, and run loom complete as instructed by the workflow.'
 TASK_B="$(create_issue \
     --title "Create dependent real runner file" \
     --type task \

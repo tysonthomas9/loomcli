@@ -63,7 +63,7 @@ type gitPushRequest struct {
 }
 
 // HandleGitPush handles POST /api/agents/{name}/git/push
-// Merges the agent's worktree branch INTO the target branch (loom push semantics).
+// Merges the agent's worktree branch INTO the target branch (not `git push`).
 func HandleGitPush(svc service.AgentService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentName := r.PathValue("name")
