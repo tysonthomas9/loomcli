@@ -57,7 +57,7 @@ func TestPrStackCommandCallsPublisherWithOrderedChanges(t *testing.T) {
 		if workspace != "W" || stack != "feature-1" || lead != "lead" || !reflect.DeepEqual(changes, []string{"A", "B"}) {
 			t.Fatalf("publisher arguments = %q %q %q %v", workspace, stack, lead, changes)
 		}
-		return []publish.Result{{PRURL: "https://example.test/1", Backend: "loom", StatusReason: "GitHub native stacks are unavailable for this repository"}}, nil
+		return []publish.Result{{PRURL: "https://example.test/1", Backend: "loom"}}, nil
 	}
 	var output, status bytes.Buffer
 	prStackCmd.SetOut(&output)
@@ -68,9 +68,6 @@ func TestPrStackCommandCallsPublisherWithOrderedChanges(t *testing.T) {
 	}
 	if !called || output.String() != "https://example.test/1\n" {
 		t.Fatalf("publisher called = %v, output = %q", called, output.String())
-	}
-	if !strings.Contains(status.String(), "GitHub native stacks are unavailable") {
-		t.Fatalf("fallback status = %q", status.String())
 	}
 }
 

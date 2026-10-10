@@ -310,11 +310,6 @@ func runPRStack(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if len(results) > 0 && results[0].StatusReason != "" {
-		if _, err := fmt.Fprintln(cmd.ErrOrStderr(), results[0].StatusReason); err != nil {
-			return err
-		}
-	}
 	for _, result := range results {
 		if _, err := fmt.Fprintln(cmd.OutOrStdout(), result.PRURL); err != nil {
 			return err
