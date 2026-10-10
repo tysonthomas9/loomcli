@@ -138,9 +138,23 @@ curl -fsS "$api/git/merge-queue" > "$case_dir/queue-done.json"
 python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))==[]' "$case_dir/queue-done.json"
 # The rows update live: three merged rows fold into the history line and
 # layer four stays open, without a reload.
-agent-browser --session "$AFT_SESSION" wait --fn "document.querySelector('[data-testid=stack-merged-summary]')?.textContent.startsWith('3 merged changes')" >/dev/null
-test "$(agent-browser --session "$AFT_SESSION" eval "document.querySelectorAll('[data-testid=stack-row]').length")" = 1
-test -z "$(agent-browser --session "$AFT_SESSION" eval "document.querySelector('[data-testid=stack-card]').dataset.merging || ''" | tr -d '"')"
+for attempt in $(seq 1 30); do
+  curl -fsS "$api/git/stacks" > "$case_dir/stacks-merged.json"
+  if python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); sys.exit(0 if [l["state"] for l in c[0]["layers"]].count("merged")==3 else 1)' "$case_dir/stacks-merged.json"; then break; fi
+  sleep 2
+done
+python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); sys.exit(0 if [l["state"] for l in c[0]["layers"]].count("merged")==3 else 1)' "$case_dir/stacks-merged.json" ||
+  { echo "stack card after the merge: $(cat "$case_dir/stacks-merged.json")"; exit 1; }
+ui_rows() { agent-browser --session "$AFT_SESSION" eval "[document.querySelector('[data-testid=stack-merged-summary]')?.textContent || '', document.querySelector('[data-testid=stack-card]')?.dataset.merging || '', ...[...document.querySelectorAll('[data-testid=stack-row]')].map(r => r.dataset.state)].join('|')" | tr -d '"'; }
+for attempt in $(seq 1 30); do
+  rows="$(ui_rows)"
+  # Three merged rows folded, no merge running, layer four the one open row.
+  open_row="${rows#3 merged changes · Show history||}"
+  [[ "$open_row" != "$rows" && -n "$open_row" && "$open_row" != *"|"* && "$open_row" != merg* ]] && break
+  sleep 2
+done
+[[ "$open_row" != "$rows" && -n "$open_row" && "$open_row" != *"|"* && "$open_row" != merg* ]] ||
+  { echo "stack view after the merge: $rows"; exit 1; }
 agent-browser --session "$AFT_SESSION" screenshot "$case_dir/stack-after.png" >/dev/null
 # A reload keeps every state.
 agent-browser --session "$AFT_SESSION" reload >/dev/null
