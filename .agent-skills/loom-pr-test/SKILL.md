@@ -122,6 +122,25 @@ make local-mode-down
 
 Use `127.0.0.1` in verifier/API commands if sandboxed `localhost` access is inconsistent with Podman-published ports.
 
+### Machine Slots (shared hosts)
+
+When several agents share one machine, run every heavy job (`make check-go`, race runs, AFT, local-mode stacks) through `scripts/loom-slot.sh` instead of picking ports by hand. It hands out `LOOM_SLOTS` slots (default 4); each slot gets its own compose project (`loomcli-slot-N`, so its own image tags and volumes), port block, `TMPDIR`, and the durable FleetDB/AFT inputs.
+
+```bash
+scripts/loom-slot.sh status                    # who holds which slot
+scripts/loom-slot.sh env 2                     # print slot 2's exports
+scripts/loom-slot.sh run -- make check-go      # first free slot; waits if all are busy
+scripts/loom-slot.sh run --slot 1 -- bash -c '
+  LOCAL_MODE_COMPOSE_UP_FLAGS="--build -d" make local-mode-up &&
+  make local-mode-verify; rc=$?; make local-mode-down; exit $rc'
+scripts/loom-slot.sh run -- env LOOM_HARNESS_EMU=1 \
+  AFT_SUITES=tests/aft/suites/agents-v1-lead.test.yaml tests/aft/run-aft.sh --strict
+```
+
+Slot N uses ports `B+80/82/83` (FleetDB/API/UI) and `B+90/91` (AFT `E2E_PORT`/`E2E_FRONTEND_PORT`), with `B = LOOM_SLOT_PORT_BASE (18000) + N*100`, so slot 1 is 18180/18182/18183 and 18190/18191. `LOCAL_MODE_API_URL` is set to the slot's API, so `make local-mode-verify` needs no flags. `FLEET_DB_REPO` and `AFT_DIR` default to `~/.cache/loom/aft-inputs/{fleet-db,testing-app}`; `LOCAL_MODE_FLEETDB_CONTEXT` points the compose fleet-db build at `FLEET_DB_REPO`. The Go build cache stays shared (it is safe for concurrent use).
+
+Run the whole up/verify/down sequence inside one `run` so the slot is held while the stack exists, and always tear down inside it. The lock is released when the command exits, including on INT/TERM (the command is stopped first), and a lock whose owner died is reclaimed. Compose selection is unchanged: Podman when installed, otherwise `docker compose`; set `LOCAL_MODE_COMPOSE` to force one.
+
 ## Compose Overrides
 
 Use `LOCAL_MODE_COMPOSE` to force the compose runner when auto-detection picks the wrong one. Use `LOCAL_MODE_COMPOSE_FILES` for real compatibility overrides, not for fabricated state.

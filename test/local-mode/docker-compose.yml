@@ -45,7 +45,9 @@ services:
   fleet-db:
     image: ${LOCAL_MODE_FLEETDB_IMAGE:-loomcli-local-mode-fleet-db:latest}
     build:
-      context: ../../../fleet-db
+      # Sibling checkout by default; LOCAL_MODE_FLEETDB_CONTEXT (an absolute
+      # path) points it elsewhere, e.g. scripts/loom-slot.sh sets FLEET_DB_REPO.
+      context: ${LOCAL_MODE_FLEETDB_CONTEXT:-../../../fleet-db}
       dockerfile: deploy/docker/Dockerfile
       # Per-project label: projects built from identical sources get distinct
       # image IDs, so removing one project's tag never removes another's.
