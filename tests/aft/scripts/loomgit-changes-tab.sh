@@ -53,6 +53,14 @@ PY
   done
   echo "rerun-coder never showed $output_file while task $task was in progress" >&2
   cat "$work-issue.json" "$work-diff.json" >&2 || true
+  curl -sS "$api/agents/rerun-coder/diff/commits" >&2 || true
+  curl -sS "$api/issues/$task/revisions" >&2 || true
+  ws_path="$(cat "$work-ws-path")"
+  find "$ws_path" -maxdepth 4 -type d -name '*rerun-coder*' 2>/dev/null | while read -r d; do
+    echo "== $d" >&2
+    git -C "$d" log --oneline --decorate -4 >&2 || true
+    git -C "$d" status --short >&2 || true
+  done
   exit 1
   ;;
 done)
