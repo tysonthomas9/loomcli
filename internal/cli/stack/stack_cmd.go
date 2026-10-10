@@ -463,7 +463,7 @@ func baseOrRoot(n sl.Node, root string) string {
 }
 
 // publishedStacks reads the Loom Git stacks Create PR and Approve recorded, so
-// a cross-repo lead's per-repo stack IDs are visible for merge-up-to.
+// a cross-repo lead's per-repo stack IDs are visible for loom merge.
 var publishedStacks = publish.PublishedStacksLocal
 
 // declaredStackEntry is a stack declared with `loom stack init` in `loom stack

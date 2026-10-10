@@ -115,7 +115,6 @@ run_epic_runner_task() {
     git status --short
     git add -- "$write_path" epic-runner-output/order.log
     git commit -m "Complete ${task_id}"
-    loom push "$agent_name"
     loom data close "$task_id" --reason "Completed by Codex E2E stub"
     loom complete
 

@@ -58,10 +58,14 @@ func recordLoomMerge(ctx context.Context, store *journal.SQLite, request StackRe
 		return loomgit.NewError(loomgit.ModeMismatch, "Loom merge requires a recorded Loom stack", nil)
 	}
 	approved, isApproval := request.MergeAuthority.(approvedMerge)
+	queued, isQueued := request.MergeAuthority.(queuedMerge)
 	if isApproval {
 		if started, err := approvalMergeStarted(ctx, store, request, approved); err != nil || started {
 			return err
 		}
+	} else if isQueued {
+		// QueueMergeUpTo checked for a running merge; BeginLoomMerge refuses
+		// to replace one that started since.
 	} else if resumed, err := resumeLoomMerge(ctx, store, request, target); err != nil || resumed {
 		return err
 	}
@@ -85,6 +89,10 @@ func recordLoomMerge(ctx context.Context, store *journal.SQLite, request StackRe
 	if isApproval {
 		merge.RequestID = approved.Approval.MergeRequestID
 		merge.Authority, merge.PolicySetBy = humanApprovalAuthority, approved.Approval.ActorID
+	}
+	if isQueued {
+		merge.RequestID = queued.RequestID
+		merge.Authority, merge.PolicySetBy = queued.recorded()
 	}
 	_, err = store.BeginLoomMerge(ctx, merge)
 	return err

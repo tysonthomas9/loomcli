@@ -632,30 +632,6 @@ func (e MergeActorKind) Valid() bool {
 	}
 }
 
-// Defines values for MergeRequestViewStatus.
-const (
-	MergeRequestViewStatusConfirmed MergeRequestViewStatus = "confirmed"
-	MergeRequestViewStatusExpired   MergeRequestViewStatus = "expired"
-	MergeRequestViewStatusPending   MergeRequestViewStatus = "pending"
-	MergeRequestViewStatusStale     MergeRequestViewStatus = "stale"
-)
-
-// Valid indicates whether the value is a known member of the MergeRequestViewStatus enum.
-func (e MergeRequestViewStatus) Valid() bool {
-	switch e {
-	case MergeRequestViewStatusConfirmed:
-		return true
-	case MergeRequestViewStatusExpired:
-		return true
-	case MergeRequestViewStatusPending:
-		return true
-	case MergeRequestViewStatusStale:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for MessageResponseSuccess.
 const (
 	True MessageResponseSuccess = true
@@ -928,25 +904,25 @@ func (e PullRequestReviewRequestEvent) Valid() bool {
 
 // Defines values for ReviewRevisionFeedbackStatus.
 const (
-	ReviewRevisionFeedbackStatusHeld       ReviewRevisionFeedbackStatus = "held"
-	ReviewRevisionFeedbackStatusNotPushed  ReviewRevisionFeedbackStatus = "not_pushed"
-	ReviewRevisionFeedbackStatusPushed     ReviewRevisionFeedbackStatus = "pushed"
-	ReviewRevisionFeedbackStatusPushing    ReviewRevisionFeedbackStatus = "pushing"
-	ReviewRevisionFeedbackStatusSuperseded ReviewRevisionFeedbackStatus = "superseded"
+	Held       ReviewRevisionFeedbackStatus = "held"
+	NotPushed  ReviewRevisionFeedbackStatus = "not_pushed"
+	Pushed     ReviewRevisionFeedbackStatus = "pushed"
+	Pushing    ReviewRevisionFeedbackStatus = "pushing"
+	Superseded ReviewRevisionFeedbackStatus = "superseded"
 )
 
 // Valid indicates whether the value is a known member of the ReviewRevisionFeedbackStatus enum.
 func (e ReviewRevisionFeedbackStatus) Valid() bool {
 	switch e {
-	case ReviewRevisionFeedbackStatusHeld:
+	case Held:
 		return true
-	case ReviewRevisionFeedbackStatusNotPushed:
+	case NotPushed:
 		return true
-	case ReviewRevisionFeedbackStatusPushed:
+	case Pushed:
 		return true
-	case ReviewRevisionFeedbackStatusPushing:
+	case Pushing:
 		return true
-	case ReviewRevisionFeedbackStatusSuperseded:
+	case Superseded:
 		return true
 	default:
 		return false
@@ -2662,30 +2638,6 @@ type MergeApprovalView struct {
 	Status string `json:"status"`
 }
 
-// MergeRequestView defines model for MergeRequestView.
-type MergeRequestView struct {
-	Audit       *string   `json:"audit,omitempty"`
-	ConfirmedBy *string   `json:"confirmed_by,omitempty"`
-	ExpiresAt   time.Time `json:"expires_at"`
-	Id          string    `json:"id"`
-	Layers      []struct {
-		Change string `json:"change"`
-		Checks string `json:"checks"`
-		Head   string `json:"head"`
-		PrUrl  string `json:"pr_url"`
-		Review string `json:"review"`
-	} `json:"layers"`
-	Lead          string                 `json:"lead"`
-	RequestedBy   string                 `json:"requested_by"`
-	RequestedKind string                 `json:"requested_kind"`
-	StackId       string                 `json:"stack_id"`
-	Status        MergeRequestViewStatus `json:"status"`
-	Target        string                 `json:"target"`
-}
-
-// MergeRequestViewStatus defines model for MergeRequestView.Status.
-type MergeRequestViewStatus string
-
 // MergeStackView defines model for MergeStackView.
 type MergeStackView struct {
 	Backend string `json:"backend"`
@@ -3093,6 +3045,22 @@ type PullRequestReviewRequestEvent string
 type PullRequestReviewResult struct {
 	ReviewId *int    `json:"review_id,omitempty"`
 	State    *string `json:"state,omitempty"`
+}
+
+// QueuedMerge defines model for QueuedMerge.
+type QueuedMerge struct {
+	Backend string `json:"backend"`
+
+	// Phase ready (queued, waiting for green), dispatching/sent/landing/restacking (merging) or blocked.
+	Phase    string  `json:"phase"`
+	PrNumber *int    `json:"pr_number,omitempty"`
+	PrUrl    *string `json:"pr_url,omitempty"`
+
+	// QueuedBy "lead" for the lead, otherwise the human who asked.
+	QueuedBy *string `json:"queued_by,omitempty"`
+	Reason   *string `json:"reason,omitempty"`
+	StackId  string  `json:"stack_id"`
+	Target   string  `json:"target"`
 }
 
 // ReviewRevision defines model for ReviewRevision.
@@ -3798,32 +3766,6 @@ type GetDiffFileParams struct {
 	Path string `form:"path" json:"path"`
 }
 
-// GitRequestMergeJSONBody defines parameters for GitRequestMerge.
-type GitRequestMergeJSONBody struct {
-	Actor   MergeActor `json:"actor"`
-	StackId string     `json:"stack_id"`
-	Target  string     `json:"target"`
-}
-
-// GitConfirmMergeRequestJSONBody defines parameters for GitConfirmMergeRequest.
-type GitConfirmMergeRequestJSONBody struct {
-	Actor MergeActor `json:"actor"`
-}
-
-// GitMergePreviewParams defines parameters for GitMergePreview.
-type GitMergePreviewParams struct {
-	StackId string `form:"stack_id" json:"stack_id"`
-	Target  string `form:"target" json:"target"`
-}
-
-// GitMergeUpToJSONBody defines parameters for GitMergeUpTo.
-type GitMergeUpToJSONBody struct {
-	Actor   MergeActor `json:"actor"`
-	Heads   []string   `json:"heads"`
-	StackId string     `json:"stack_id"`
-	Target  string     `json:"target"`
-}
-
 // GitCreatePRJSONBody defines parameters for GitCreatePR.
 type GitCreatePRJSONBody struct {
 	ChangeId string `json:"change_id"`
@@ -3908,6 +3850,11 @@ type ApproveMergeJSONBody struct {
 	} `json:"actor"`
 	HeadSha string `json:"head_sha"`
 	Lead    string `json:"lead"`
+}
+
+// QueueMergeUpToJSONBody defines parameters for QueueMergeUpTo.
+type QueueMergeUpToJSONBody struct {
+	Actor MergeActor `json:"actor"`
 }
 
 // GetRevisionDiffParams defines parameters for GetRevisionDiff.
@@ -4360,15 +4307,6 @@ type ReorderWorkspacesJSONRequestBody ReorderWorkspacesJSONBody
 // CreateAgentJSONRequestBody defines body for CreateAgent for application/json ContentType.
 type CreateAgentJSONRequestBody CreateAgentJSONBody
 
-// GitRequestMergeJSONRequestBody defines body for GitRequestMerge for application/json ContentType.
-type GitRequestMergeJSONRequestBody GitRequestMergeJSONBody
-
-// GitConfirmMergeRequestJSONRequestBody defines body for GitConfirmMergeRequest for application/json ContentType.
-type GitConfirmMergeRequestJSONRequestBody GitConfirmMergeRequestJSONBody
-
-// GitMergeUpToJSONRequestBody defines body for GitMergeUpTo for application/json ContentType.
-type GitMergeUpToJSONRequestBody GitMergeUpToJSONBody
-
 // GitCreatePRJSONRequestBody defines body for GitCreatePR for application/json ContentType.
 type GitCreatePRJSONRequestBody GitCreatePRJSONBody
 
@@ -4395,6 +4333,9 @@ type CancelMergeApprovalJSONRequestBody CancelMergeApprovalJSONBody
 
 // ApproveMergeJSONRequestBody defines body for ApproveMerge for application/json ContentType.
 type ApproveMergeJSONRequestBody ApproveMergeJSONBody
+
+// QueueMergeUpToJSONRequestBody defines body for QueueMergeUpTo for application/json ContentType.
+type QueueMergeUpToJSONRequestBody QueueMergeUpToJSONBody
 
 // SubmitRevisionVerdictJSONRequestBody defines body for SubmitRevisionVerdict for application/json ContentType.
 type SubmitRevisionVerdictJSONRequestBody SubmitRevisionVerdictJSONBody

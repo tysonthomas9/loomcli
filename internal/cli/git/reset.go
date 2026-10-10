@@ -21,6 +21,7 @@ var resetCmd = &cobra.Command{
 	Use:               "reset <worktree> [branch]",
 	Short:             "Hard reset worktree to a specific branch",
 	GroupID:           "git",
+	Hidden:            true, // plumbing for tests and repair (S3)
 	ValidArgsFunction: cli.WorktreeThenBranchCompletion,
 	Long: `Hard reset worktree(s) to a specific branch.
 

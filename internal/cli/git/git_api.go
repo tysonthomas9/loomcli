@@ -37,7 +37,7 @@ type PRResult struct {
 	AlreadyExists bool   `json:"already_exists"`
 	NoCommits     bool   `json:"no_commits"`
 	// StackID names the Loom Git stack the PR joined (per repository for a
-	// cross-repo lead), for loom git merge-up-to --stack.
+	// cross-repo lead), for loom merge.
 	StackID string `json:"stack_id,omitempty"`
 }
 

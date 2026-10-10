@@ -42,6 +42,11 @@ func (l *Local) TaskWorkspaces(ctx context.Context) ([]string, error) {
 	return l.store.TaskWorkspaces(ctx)
 }
 
+// Revision reads one recorded revision.
+func (l *Local) Revision(ctx context.Context, workspace, change string, number int) (loomgit.Revision, error) {
+	return l.store.GetRevision(ctx, workspace, change, number)
+}
+
 func (l *Local) Submit(ctx context.Context, workspace, change string, number int, headSHA, kind, reason string, actor Actor) (loomgit.Verdict, error) {
 	return Submit(ctx, l.store, workspace, change, number, headSHA, kind, reason, actor)
 }

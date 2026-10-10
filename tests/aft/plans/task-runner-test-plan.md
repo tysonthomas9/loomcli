@@ -373,8 +373,8 @@ Every element below is load-bearing for TSK-D9; see blocker **B1** for why each 
    `epic-runner-output/order.log` unconditionally (`:112`) but only creates
    `dirname "$write_path"` (`:103`) — so the directory must pre-exist *or* every
    `STUB_CODEX_WRITE` value must sit inside it. Do both; belt and braces.
-6. `git init --bare $AFT_WORK_DIR/task-remote-a`, added as `origin` on repo A — the stub runs
-   `loom push` (`:118`).
+6. (Removed with S3: the stub no longer runs `loom push`; the agent's commit is captured when it
+   exits, so repo A needs no `origin` remote.)
 7. `POST /api/workspaces {"name":"e2e-ws-task","type":"empty","repos":[<a>,<b>]}` → id
    `E2E-WS-TASK`.
 
@@ -1098,10 +1098,10 @@ agent. New cases below assume all of that and add only what is missing.
 It claims nothing and writes nothing — which is exactly right for path B, where the driver owns
 claiming, and exactly wrong for path A, where the *agent* is supposed to do the work. Its
 `STUB_CODEX_EPIC_RUNNER=1` mode (`:51-123`) does the full flow, but it also runs
-`make gate` (`:114`) and `loom push "$agent_name"` (`:118`) under `set -euo pipefail`, and the aft
-workspace repo (`scripts/start-e2e-server.sh:162-173`) has neither a Makefile nor a remote.
+`make gate` (`:114`) under `set -euo pipefail`, and the aft
+workspace repo (`scripts/start-e2e-server.sh:162-173`) has no Makefile.
 
-Reaching `make gate` at all requires **five** fixture facts, not the two Revision 1 listed. In
+Reaching `make gate` at all requires **four** fixture facts, not the two Revision 1 listed. In
 stub execution order:
 
 | # | Stub line | Requirement | Precedent |
@@ -1110,7 +1110,6 @@ stub execution order:
 | 2 | `:112` `>> epic-runner-output/order.log` | …`epic-runner-output/` must pre-exist — this append is **unconditional** and nothing creates that directory when `write_path` points elsewhere | — |
 | 3 | `:114` `make gate` | a `Makefile` with a no-op `gate:` target | — |
 | 4 | `:117` `git commit` | **repo-local git identity** (`user.name`/`user.email`) | `scripts/start-e2e-server.sh:170-171` |
-| 5 | `:118` `loom push "$agent_name"` | an `origin` remote (a local bare repo suffices) | — |
 
 Requirements 1/2 and 4 are the ones Revision 1 missed; each independently aborts the run under
 `set -euo pipefail` *before* anything observable happens, which would have read as an inscrutable
@@ -1118,13 +1117,12 @@ harness failure rather than a fixture gap.
 
 Two ways forward, in preference order:
 
-1. **Fixture-only (no product change).** The seven-step *Shared setup* covers all five requirements.
+1. **Fixture-only (no product change).** The seven-step *Shared setup* covers all four requirements.
    `STUB_CODEX_EPIC_RUNNER` is already on the env allowlist
    (`internal/cli/envfilter/envfilter.go:39`), so a `run:` step can export it plus
-   `LOOM_ASSIGNED_TASK_ID` and get the real flow. **Verify while authoring**: that `loom push
-   <agent>` succeeds against a bare local remote, and that the wrapper-backed
+   `LOOM_ASSIGNED_TASK_ID` and get the real flow. **Verify while authoring**: that the wrapper-backed
    `InvokeNonInteractive` path (`task.go:161` → `tsruntime.Invoker`) still invokes codex with
-   `exec --json …` so the stub's arg matcher (`e2e/stubs/codex:28-34`) fires. If either fails, use
+   `exec --json …` so the stub's arg matcher (`e2e/stubs/codex:28-34`) fires. If it fails, use
    option 2.
 **Two gaps the fixture route cannot close** (found in round 2, and the reason option 2 below is now
 the recommendation rather than a fallback):
@@ -1140,10 +1138,9 @@ the recommendation rather than a fallback):
 
 2. **New stub mode (now the recommended route).** Add `STUB_CODEX_TASK_AGENT=1` to `e2e/stubs/codex`:
    **`loom data claim`** (the atomic one — see TSK-D12) → read design → write the file → `git
-   add`/`commit` → `loom data close` → `loom complete`, **without** `make gate`, **without**
-   `loom push`, and with its own `mkdir -p` for whatever path it writes. Add the exact name to the
+   add`/`commit` → `loom data close` → `loom complete`, **without** `make gate`, and with its own `mkdir -p` for whatever path it writes. Add the exact name to the
    allowlist at `envfilter.go:38-39` (the comment there — "Exact matches keep arbitrary STUB_*
-   values out" — is the convention to follow). This drops four of the five fixture requirements,
+   values out" — is the convention to follow). This drops three of the four fixture requirements,
    and because it calls `loom data claim` it also unblocks the end-to-end half of TSK-D12 that the
    current stub structurally cannot reach.
 

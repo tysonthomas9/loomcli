@@ -69,10 +69,10 @@ COMMANDS
   lead         Interactive mode for reviewing plans and managing backlog
   monitor      Dashboard showing agent status and task progress
   recover      Recover agent from error state (clear stale locks, reset tasks)
-  push         Push worktree branches to target with AI conflict resolution
-  pull         Pull integration branch into worktrees with AI conflict resolution
-  sync         Full sync: push all completed work, then pull into all worktrees
-  reset        Hard reset worktrees to a specific branch
+  approve      Approve a task's code; reject sends it back for another attempt
+  merge        Lead: queue a merge of a task's PR and the approved PRs below it
+  sync         Restack all working areas onto their recorded trunks; never pushes
+  git-settings Show or change delivery, auto-merge and lead approval
   list         List all agents and their status
 
 GLOBAL FLAGS
@@ -87,9 +87,9 @@ EXAMPLES
   loom task falcon --auto       # Continuous implementation mode
   loom lead                     # Interactive backlog management
   loom monitor                  # Watch agent progress
-  loom push --all               # Push all worktrees to main
-  loom pull --all               # Pull main into all worktrees
-  loom sync                     # Full sync: push all + pull all`,
+  loom approve <task>           # Approve a task's work and apply it
+  loom sync                     # Restack all working areas; never push
+  loom git-settings             # Show delivery, auto-merge and lead approval`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if v, _ := cmd.Flags().GetBool("version"); v {
 			fmt.Printf("loom version %s (%s)\n", Version, Build)

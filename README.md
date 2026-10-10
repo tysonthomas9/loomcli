@@ -150,10 +150,11 @@ loom plan falcon -a -t 30     # Exit after 30 min idle
 loom lead                     # Default interactive terminal agent
 
 # Git operations
-loom push --all               # Push all worktrees to main
-loom pull --all               # Restack all working areas onto their trunks
+loom approve <task>           # Approve a task's work and apply it to the lead's working area
+loom reject <task>            # Send the work back to the task agent
 loom sync                     # Restack all working areas; never push
-loom pr falcon                # Create PR from falcon to main
+loom git-settings --delivery stack --auto-merge off   # Same three settings as the UI
+loom merge <task>             # Lead: queue "merge up to this task's PR" (needs auto-merge on)
 
 # Monitoring
 loom monitor                  # Live terminal dashboard

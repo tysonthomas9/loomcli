@@ -1,0 +1,19 @@
+.queue {
+  margin: 0 0 16px;
+  padding: 8px 14px;
+  font-size: 13px;
+  background: var(--color-bg-card);
+  border: 1px solid
+    color-mix(in srgb, var(--color-text-primary) 6%, transparent);
+  border-left: 3px solid var(--color-accent, var(--color-primary));
+  border-radius: 10px;
+}
+
+.entry {
+  margin: 4px 0;
+  color: var(--color-text-secondary);
+}
+
+.entry strong {
+  color: var(--color-text-primary);
+}

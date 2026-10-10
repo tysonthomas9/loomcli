@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/tysonthomas9/loomcli/internal/cli"
+	"github.com/tysonthomas9/loomcli/internal/cli/config"
 )
 
 // CheckStatus represents the outcome of a doctor check.
@@ -148,6 +150,9 @@ func collectDoctorChecks(cmd *cobra.Command) []checkFunc {
 		checkOrphanedTranscripts, checkAgentProfiles, checkOrphanedTmuxSessions, checkLoomDaemon, checkDaemonStuck, checkRedis,
 		func() CheckResult { return checkOrphanedFleetLocks(deps) })
 	checks = append(checks, func() CheckResult { return checkLoomGitInventory(cmd.Context(), doctorIntegrity) })
+	checks = append(checks, func() CheckResult {
+		return checkLoomGitRetention(cmd.Context(), filepath.Join(config.GetConfigDir(), "loomgit", "store.db"), doctorFix)
+	})
 	return checks
 }
 

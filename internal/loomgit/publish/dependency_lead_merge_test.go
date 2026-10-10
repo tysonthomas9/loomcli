@@ -5,17 +5,13 @@ import (
 	"testing"
 )
 
-// Both lead merge paths go through the same cross-repo gate as MergeUpTo.
-func TestConfirmedLeadMergeRequestWaitsForCrossRepoPredecessor(t *testing.T) {
+// Both the merge queue and the when-green lead merge go through the same
+// cross-repo gate as MergeUpTo.
+func TestQueuedMergeWaitsForCrossRepoPredecessor(t *testing.T) {
 	item, _ := leadMergeFixture(t, "loom")
 	var unused StackRequest
 	dependOnOtherRepo(t, item.store, "A", &unused)
-	ctx := context.Background()
-	request, err := RequestMergeLocal(ctx, "W", "L", "feature", "C", leadL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = ConfirmMergeRequestLocal(ctx, "W", "L", request.ID, tyson)
+	_, err := QueueMergeUpToLocal(context.Background(), "W", "C", tyson)
 	blockedOn(t, err, "owner/api#7")
 	requireNoMerge(t, item)
 }
