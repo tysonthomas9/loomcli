@@ -218,6 +218,7 @@ func (s *Service) HarnessEvent(ctx context.Context, agentID string, e loomharnes
 	if err != nil || e.Session != (loomharness.NativeRef{Root: deref(a.HarnessSessionRoot), NativeID: deref(a.HarnessSessionID)}) {
 		return err
 	}
+	s.trackCall(a, e)
 	switch e.Type {
 	case loomharness.EventMessageDelivered:
 		return s.delivered(ctx, a, e.InputKey)
@@ -287,8 +288,11 @@ func (s *Service) endTurn(ctx context.Context, a loomstore.Agent, e loomharness.
 	if err := s.endTurnAsks(ctx, a, e.TurnID); err != nil {
 		return a, false, err
 	}
-	a, err = s.setState(ctx, a, d.To)
-	return a, err == nil, err
+	if a, err = s.setState(ctx, a, d.To); err != nil {
+		return a, false, err
+	}
+	s.endCalls(a.AgentID)
+	return a, true, nil
 }
 
 // turnInput is what decideTurnCompleted decides from: the agent's row, its

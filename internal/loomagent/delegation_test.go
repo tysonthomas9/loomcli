@@ -312,6 +312,19 @@ func TestChildCreatedNamesItsCall(t *testing.T) {
 		return nil
 	}
 	byLead := ActorRef{Kind: "agent", ID: lead.AgentID}
+	// A tool start while no turn runs, or from another session, is no call.
+	tool(loomharness.EventItemStarted, "idle")
+	other := ref
+	other.NativeID += "-old"
+	if _, err := s.ingest(ctx, "opencode", loomharness.Event{Type: loomharness.EventItemStarted, Session: other,
+		TurnID: "T1", ItemID: "stale", ItemKind: "tool"}); err != nil {
+		t.Fatal(err)
+	}
+	to := s.get(t, lead.AgentID).StateOf()
+	to.State, to.RunningTurn = StateActive, sp("T1")
+	if _, err := s.setState(ctx, s.get(t, lead.AgentID), to); err != nil {
+		t.Fatal(err)
+	}
 	tool(loomharness.EventItemStarted, "call1")
 	if got := call(create("c1", byLead)); got != "call1" {
 		t.Fatalf("c1 call = %v, want call1", got)
@@ -331,11 +344,9 @@ func TestChildCreatedNamesItsCall(t *testing.T) {
 	if got := call(create("c5", byLead)); got != nil {
 		t.Fatalf("c5, no call running, call = %v", got)
 	}
+	// The running turn's end, live or by a replay, ends its calls.
 	tool(loomharness.EventItemStarted, "call3")
-	if _, err := s.ingest(ctx, "opencode", loomharness.Event{Type: loomharness.EventTurnCompleted, Session: ref,
-		TurnID: "T1", StopReason: "cancelled"}); err != nil {
-		t.Fatal(err)
-	}
+	finishTurn(t, s, lead.AgentID, "cancelled")
 	if got := call(create("c6", byLead)); got != nil {
 		t.Fatalf("c6, after the turn ended, call = %v", got)
 	}

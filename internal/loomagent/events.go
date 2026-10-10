@@ -484,7 +484,6 @@ func (s *Service) ingest(ctx context.Context, harness string, e loomharness.Even
 	} else if err != nil {
 		return false, err
 	}
-	s.trackCall(id, e)
 	if e, err = s.withText(ctx, id, e); err != nil {
 		return false, err
 	}
@@ -507,22 +506,27 @@ func (s *Service) ingest(ctx context.Context, harness string, e loomharness.Even
 	return true, s.HarnessEvent(ctx, id, e)
 }
 
-// trackCall notes agentID's tool call e starting, or its item completing, or
-// its turn ending, which ends all its calls.
-func (s *Service) trackCall(agentID string, e loomharness.Event) {
+// trackCall notes a's tool call e starting while a turn runs, or its item
+// completing; e is of a's current session. endTurn ends all a's calls.
+func (s *Service) trackCall(a loomstore.Agent, e loomharness.Event) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	switch {
-	case e.Type == loomharness.EventItemStarted && e.ItemKind == "tool" && e.ItemID != "":
-		if s.calls[agentID] == nil {
-			s.calls[agentID] = map[string]bool{}
+	case e.Type == loomharness.EventItemStarted && e.ItemKind == "tool" && e.ItemID != "" && a.RunningTurnID != nil:
+		if s.calls[a.AgentID] == nil {
+			s.calls[a.AgentID] = map[string]bool{}
 		}
-		s.calls[agentID][e.ItemID] = true
+		s.calls[a.AgentID][e.ItemID] = true
 	case e.Type == loomharness.EventItemCompleted:
-		delete(s.calls[agentID], e.ItemID)
-	case e.Type == loomharness.EventTurnCompleted:
-		delete(s.calls, agentID)
+		delete(s.calls[a.AgentID], e.ItemID)
 	}
+}
+
+// endCalls forgets agentID's running tool calls, as its turn ended.
+func (s *Service) endCalls(agentID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.calls, agentID)
 }
 
 // runningCall is agentID's one running tool call, or "" when it runs none

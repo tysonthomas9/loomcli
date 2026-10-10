@@ -545,6 +545,24 @@ describe("the call a child.created names (CL5)", () => {
     });
   });
 
+  it("folds the named call even when it failed after creating the child", () => {
+    const failed = cut("m/tool/1");
+    (failed.payload as { tool: { failed?: boolean } }).tool.failed = true;
+    const items = chatItems(
+      [
+        ev(1, "child.created", { child: "k1", name: "kid", call: "m/tool/1" }),
+        failed,
+      ],
+      new Map(),
+    );
+    const rows = deriveTimelineRows(items, new Set());
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      kind: "started",
+      calls: [{ key: "item.completed:2", status: "failed" }],
+    });
+  });
+
   it("leaves a cut call the marker does not name apart", () => {
     const items = chatItems(
       [

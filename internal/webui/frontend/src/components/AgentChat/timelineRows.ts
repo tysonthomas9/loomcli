@@ -363,18 +363,19 @@ export function bridgeLabel(
  * A finished agent_create call, which the Started marker next to it folds
  * in: one the bridge parses, or loom code naming agent_create another way,
  * such as search({namespace:'loom', query:'agent_create'}), or loom code
- * whose saved input was cut short before it (CL4), or the call a child of
- * started names, whatever its saved input holds (CL5).
+ * whose saved input was cut short before it (CL4); or, whatever its saved
+ * input holds and however it ended, the call a child of started names (CL5).
  */
 const isCreateCall = (i: ChatItem, started: StartedItem): i is ToolEntry =>
   i.kind === "tool" &&
-  i.status === "completed" &&
   (started.children.some((c) => !!c.call && c.call === i.itemId) ||
-    bridgeCalls(i).some((c) => c.tool === "agent_create") ||
-    (isExecute(i) &&
-      /["'`]loom\b|\bloom\./.test(i.tool.input ?? "") &&
-      (/\bagent_create\b/.test(i.tool.input ?? "") ||
-        (!jsonInput(i) && !/tools\.loom\.\w+\s*\(/.test(i.tool.input ?? "")))));
+    (i.status === "completed" &&
+      (bridgeCalls(i).some((c) => c.tool === "agent_create") ||
+        (isExecute(i) &&
+          /["'`]loom\b|\bloom\./.test(i.tool.input ?? "") &&
+          (/\bagent_create\b/.test(i.tool.input ?? "") ||
+            (!jsonInput(i) &&
+              !/tools\.loom\.\w+\s*\(/.test(i.tool.input ?? "")))))));
 
 type Unit =
   | ChatItem
