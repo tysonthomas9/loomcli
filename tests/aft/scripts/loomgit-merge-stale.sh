@@ -62,7 +62,7 @@ if [[ "$phase" == seed ]]; then
   grep -q '"status":"applied"' "$case_dir/approve.json"
   test "$(git -C "$repo" rev-parse refs/heads/loom/ws/$workspace/interactive/lead)" = "$head"
   loom pr-stack stale-card lead "$change" --workspace "$workspace" > "$case_dir/publish-before.txt"
-  curl -fsS "$api/agents/lead/git/merge-up-to?stack_id=stale-card&target=$change" > "$case_dir/preview-before.json"
+  curl -fsS "$api/changes/$change/merge-up-to" > "$case_dir/preview-before.json"
   python3 -c 'import json,sys; view=json.load(open(sys.argv[1])); assert view["backend"]=="loom" and not view["phase"] and len(view["layers"])==1, view' "$case_dir/preview-before.json"
   exit 0
 fi
@@ -81,22 +81,33 @@ if [[ "$phase" == advance ]]; then
   head="$(python3 -c 'import json,sys; item=json.load(open(sys.argv[1]))["data"][0]; assert item["verdict"]=="carried", item; print(item["head_sha"])' "$case_dir/revisions-after.json")"
   test "$head" != "$old_head"
   loom pr-stack stale-card lead "$change" --workspace "$workspace" > "$case_dir/publish-after.txt"
-  curl -fsS "$api/agents/lead/git/merge-up-to?stack_id=stale-card&target=$change" > "$case_dir/preview-after.json"
+  curl -fsS "$api/changes/$change/merge-up-to" > "$case_dir/preview-after.json"
   python3 -c 'import json,sys; before=json.load(open(sys.argv[1])); after=json.load(open(sys.argv[2])); assert before["layers"][0]["head"]!=after["layers"][0]["head"] and not after["phase"], (before,after)' "$case_dir/preview-before.json" "$case_dir/preview-after.json"
   test "$(git --git-dir="$remote" rev-parse "refs/heads/loom/ws/$workspace/change/$change")" = "$head"
+  printf '%s\n' "$head" > "$case_dir/head-after"
   exit 0
 fi
 
+# There is no confirmation step to go stale (D38): Merge up to here queues the
+# merge of the head now on the PR, and the old head never lands.
 if [[ "$phase" == verify ]]; then
   change="$(cat "$case_dir/change.id")"
   old_head="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["layers"][0]["head"])' "$case_dir/preview-before.json")"
-  status="$(curl -s -o "$case_dir/stale-response.json" -w '%{http_code}' -X POST "$api/agents/lead/git/merge-up-to" -H 'Content-Type: application/json' \
-    -d "{\"stack_id\":\"stale-card\",\"target\":\"$change\",\"heads\":[\"$old_head\"],\"actor\":{\"kind\":\"human\",\"id\":\"aft\"}}")"
-  test "$status" = 409
-  grep -q 'confirmed stack head changed' "$case_dir/stale-response.json"
-  test "$(git --git-dir="$remote" rev-parse refs/heads/main)" = "$(cat "$case_dir/trunk-after")"
-  curl -fsS "$api/agents/lead/git/merge-up-to?stack_id=stale-card&target=$change" > "$case_dir/preview-final.json"
-  python3 -c 'import json,sys; view=json.load(open(sys.argv[1])); assert not view["phase"], view' "$case_dir/preview-final.json"
+  new_head="$(cat "$case_dir/head-after")"
+  curl -sS --fail-with-body -X POST "$api/changes/$change/merge-up-to" -H 'Content-Type: application/json' \
+    -d '{"actor":{"kind":"human","id":"aft"}}' > "$case_dir/queued.json"
+  python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); assert v["layers"][0]["head"]==sys.argv[2], v' "$case_dir/queued.json" "$new_head"
+  for attempt in $(seq 1 60); do
+    curl -fsS "$api/changes/$change/merge-up-to" > "$case_dir/final.json"
+    python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))["phase"]=="done" else 1)' "$case_dir/final.json" && break
+    sleep 2
+  done
+  python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); assert v["phase"]=="done", v' "$case_dir/final.json"
+  git --git-dir="$remote" merge-base --is-ancestor "$(cat "$case_dir/trunk-after")" refs/heads/main
+  git --git-dir="$remote" show main:merge-stale.txt >/dev/null
+  git --git-dir="$remote" show main:foreign.txt >/dev/null
+  test "$(git --git-dir="$remote" rev-parse "main^{tree}")" = "$(git --git-dir="$remote" rev-parse "$new_head^{tree}")"
+  test "$(git --git-dir="$remote" rev-parse "main^{tree}")" != "$(git --git-dir="$remote" rev-parse "$old_head^{tree}")"
   exit 0
 fi
 

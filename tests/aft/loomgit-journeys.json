@@ -4645,7 +4645,7 @@
         {
           "suite": "loomgit-merge-up-to",
           "file": "tests/aft/suites/loomgit-merge-up-to.test.yaml",
-          "case": "native four-layer stack merges through layer three over HTTP",
+          "case": "native four-layer stack merges up to layer three with Merge up to here",
           "source_sha": "ea006c5b758b5bbb25617411954bef8b4448a99a",
           "source_status": "present_on_older_harness_not_imported_by_runner",
           "runtime_status": "not_run",
@@ -4661,7 +4661,7 @@
         {
           "suite": "loomgit-merge-up-to",
           "file": "tests/aft/suites/loomgit-merge-up-to.test.yaml",
-          "case": "Loom four-layer stack merges through layer three from CLI",
+          "case": "Loom four-layer stack merges up to layer three with Merge up to here",
           "source_sha": "ea006c5b758b5bbb25617411954bef8b4448a99a",
           "source_status": "present_on_older_harness_not_imported_by_runner",
           "runtime_status": "not_run",

@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Lead merge paths on a published stack (P3.11, P3.12, P3.13):
-#   request  lead requests a merge, an agent cannot confirm it, a human confirms it in the UI
+# Lead merge paths on a published stack (P3.11, P3.12, P3.13, P3.16):
+#   queue    the lead's loom merge is refused while Lead may merge is off (nothing
+#            queued); once a human turns it on, one loom merge queues the whole
+#            stack, the PR page shows it, and it lands bottom up once green (AFT-G2)
 #   green    when_green waits for required checks, stops below changes_requested, then continues
-#   later    Loom backend merges up to B, then a later request merges C
+#   later    a human's Merge up to here merges a Loom stack up to B, then a later one merges C
 #   deps     a cross-repo dependency keeps loom/dependencies pending until its predecessor lands
 set -euo pipefail
 source "$AFT_TESTS_DIR/scripts/loomgit-lib.sh"
@@ -17,7 +19,7 @@ export LOOM_CONNECTOR_GITHUB_BASE_URL="$AFT_FAKE_GH_BASE"
 export GITHUB_TOKEN=aft-fixture-token
 
 case "$case_name" in
-  request | green) backend=native ;;
+  queue | green) backend=native ;;
   *) backend=loom ;;
 esac
 # Each case has its own owner/<repo> so the fake forge routes every PR to the
@@ -58,7 +60,7 @@ if [[ "$phase" == setup ]]; then
 fi
 
 if [[ "$phase" == teardown ]]; then
-  loom lead-may-merge off >/dev/null 2>&1 || true
+  loom git-settings --auto-merge off >/dev/null 2>&1 || true
   AFT_WS="$workspace" "$AFT_TESTS_DIR/scripts/close-open-issues.sh"
   curl -s -X DELETE "$api/agents/lead" >/dev/null || true
   curl -s -X DELETE "$api" >/dev/null || true
@@ -66,7 +68,7 @@ if [[ "$phase" == teardown ]]; then
 fi
 
 # make_tasks <stack|none> <repo:file>... creates one real task per argument and
-# runs them through the epic runner until each has a reviewable revision.
+# starts them through the epic runner; approve_and_apply waits for each revision.
 make_tasks() {
   local stack="$1"
   shift
@@ -107,23 +109,29 @@ make_tasks() {
   fi
   curl -fsS -X POST "$api/workflows/epic-runner" -H 'Content-Type: application/json' \
     -d "{\"epicId\":\"$epic\",\"runner\":\"local-task-runner\"}" > "$case_dir/workflow.json"
-  for layer in $(seq 1 "$(cat "$case_dir/layers")"); do
-    task="$(cat "$case_dir/task-$layer.id")"
-    for _ in $(seq 1 90); do
-      curl -fsS "$api/issues/$task/revisions" > "$case_dir/revisions-$layer.json"
-      if grep -q '"head_sha"' "$case_dir/revisions-$layer.json"; then break; fi
-      sleep 2
-    done
-    grep -q '"head_sha"' "$case_dir/revisions-$layer.json"
-  done
 }
 
-# approve_and_apply approves each revision as a human, applies it into the lead
-# area and approves the Apply-derived head, as merge-up-to does.
+# wait_revision <layer>: the layer's task records a reviewable revision. A
+# stacked task runs only once the task below it is approved (P1.26).
+wait_revision() {
+  local task
+  task="$(cat "$case_dir/task-$1.id")"
+  for _ in $(seq 1 90); do
+    curl -fsS "$api/issues/$task/revisions" > "$case_dir/revisions-$1.json"
+    if grep -q '"head_sha"' "$case_dir/revisions-$1.json"; then return 0; fi
+    sleep 2
+  done
+  echo "task $task (layer $1) recorded no revision" >&2
+  return 1
+}
+
+# approve_and_apply waits for each layer's revision, approves it as a human, applies it into the lead
+# area and approves the Apply-derived head, as a stack merge requires.
 approve_and_apply() {
   local layer task change revision sha
   for layer in $(seq 1 "$(cat "$case_dir/layers")"); do
     task="$(cat "$case_dir/task-$layer.id")"
+    wait_revision "$layer"
     read -r change revision sha < <(json "$case_dir/revisions-$layer.json" 'i=v["data"][0]; print(i["change_id"],i["number"],i["head_sha"])')
     printf '%s\n' "$change" > "$case_dir/change-$layer.id"
     curl -sS --fail-with-body -X POST "$api/changes/$change/revisions/$revision/verdict" -H 'Content-Type: application/json' \
@@ -188,34 +196,106 @@ pr_status() { # pr_status <number> <json fields>
   curl -fsS -X POST "$AFT_FAKE_GH_BASE/__pr_status" -H 'Content-Type: application/json' -d "{\"number\":$1,$2}" >/dev/null
 }
 
+merge_queue() { # merge_queue <file>: the workspace's queued stack merges
+  curl -fsS "$api/git/merge-queue" > "$1"
+}
+
+# lead_merge <task>: the lead runs loom merge in its agent session.
+lead_merge() {
+  LOOM_AGENT_NAME=lead loom merge "$1"
+}
+
+# merge_up_to_here <change> <file>: a human presses Merge up to here on the
+# change's PR (the button's API); prints the HTTP status.
+merge_up_to_here() {
+  curl -sS -o "$2" -w '%{http_code}' -X POST "$api/changes/$1/merge-up-to" -H 'Content-Type: application/json' \
+    -d '{"actor":{"kind":"human","id":"aft-operator"}}'
+}
+
+# wait_merge_phase <change> <phase> <file>: the merge up to change reaches phase.
+wait_merge_phase() {
+  for _ in $(seq 1 60); do
+    curl -fsS "$api/changes/$1/merge-up-to" > "$3" 2>/dev/null || true
+    json "$3" 'sys.exit(0 if v.get("phase")==sys.argv[2] else 1)' "$2" 2>/dev/null && return 0
+    sleep 2
+  done
+  echo "merge up to $1 is not $2: $(cat "$3")" >&2
+  return 1
+}
+
 case "$case_name" in
-  request)
-    make_tasks merge-chain "$app_repo":lead-request-1.txt "$app_repo":lead-request-2.txt
+  queue)
+    make_tasks merge-chain "$app_repo":lead-queue-1.txt "$app_repo":lead-queue-2.txt
     approve_and_apply
     publish_stack
+    one="$(pull_number 1)"
+    two="$(pull_number 2)"
+    task="$(cat "$case_dir/task-2.id")"
     target="$(cat "$case_dir/change-2.id")"
-    curl -fsS -X POST "$api/agents/lead/git/merge-requests" -H 'Content-Type: application/json' \
-      -d "{\"stack_id\":\"merge-chain\",\"target\":\"$target\",\"actor\":{\"kind\":\"lead\",\"id\":\"lead\"}}" > "$case_dir/request.json"
-    json "$case_dir/request.json" 'assert v["status"]=="pending" and v["requested_kind"]=="lead" and len(v["layers"])==2, v'
-    request_id="$(json "$case_dir/request.json" 'print(v["id"])')"
-    hold_unmerged 6 "0 0" "lead request alone"
-    for actor in '{"kind":"lead","id":"lead"}' '{"kind":"agent","id":"impl-1"}'; do
-      code="$(curl -s -o "$case_dir/agent-confirm.json" -w '%{http_code}' -X POST "$api/agents/lead/git/merge-requests/$request_id/confirm" \
-        -H 'Content-Type: application/json' -d "{\"actor\":$actor}")"
-      test "$code" = 409
-      grep -q 'confirmed by a human' "$case_dir/agent-confirm.json"
-    done
-    hold_unmerged 4 "0 0" "agent confirmation"
-    test "$(merge_puts "$(pull_number 2)")" = 0
-    agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$workspace/agents/lead" >/dev/null
-    agent-browser --session "$AFT_SESSION" find role button click --name Git --exact >/dev/null
-    agent-browser --session "$AFT_SESSION" wait --text "asks to merge merge-chain up to $target" >/dev/null
-    agent-browser --session "$AFT_SESSION" screenshot "$case_dir/request-card.png" >/dev/null
-    agent-browser --session "$AFT_SESSION" find role button click --name "Confirm merge up to $target" >/dev/null
-    wait_merged "1 1" "human-confirmed merge"
-    curl -fsS "$api/agents/lead/git/merge-requests" > "$case_dir/requests-after.json"
-    json "$case_dir/requests-after.json" 'r=[x for x in v if x["id"]==sys.argv[2]][0]; assert r["status"]=="confirmed" and r["confirmed_by"] and r["requested_by"]=="lead", r; assert "requested by lead lead, confirmed by "+r["confirmed_by"] in r["audit"], r' "$request_id"
-    for layer in 1 2; do git --git-dir="$case_dir/$app_repo.git" show "main:lead-request-$layer.txt" >/dev/null; done
+    # Layer one's required check is still running, so a queued merge waits.
+    pr_status "$one" '"checks":"PENDING","merge_state":"BLOCKED"'
+
+    # Lead may merge is off: the lead's loom merge is refused and nothing is queued.
+    loom git-settings > "$case_dir/settings-off.txt"
+    grep -q '^auto-merge: off$' "$case_dir/settings-off.txt"
+    if lead_merge "$task" > "$case_dir/lead-merge-off.txt" 2>&1; then
+      cat "$case_dir/lead-merge-off.txt"; echo "the lead queued a merge while Lead may merge is off" >&2; exit 1
+    fi
+    cat "$case_dir/lead-merge-off.txt"
+    grep -q 'Lead may merge is off' "$case_dir/lead-merge-off.txt"
+    merge_queue "$case_dir/queue-off.json"
+    json "$case_dir/queue-off.json" 'assert v==[], v'
+    hold_unmerged 4 "0 0" "refused lead merge"
+    test "$(merge_puts "$one")" = 0
+    browser open "$AFT_BASE_URL/ws/$workspace/settings" >/dev/null
+    browser find role button click --name Git --exact >/dev/null
+    browser wait '[data-testid="git-lead-may-merge"]:not([disabled])' >/dev/null
+    test "$(browser eval "document.querySelector('[data-testid=\"git-lead-may-merge\"]').value" | tr -d '"')" = off
+    browser screenshot "$case_dir/lead-may-merge-off-settings.png" >/dev/null
+    browser open "$AFT_BASE_URL/ws/$workspace/prs" >/dev/null
+    browser wait 3000 >/dev/null
+    test "$(browser eval "document.querySelectorAll('[data-testid=merge-queue-entry]').length")" = 0
+    browser screenshot "$case_dir/lead-may-merge-off-prs.png" >/dev/null
+
+    # A task agent cannot use loom merge at all.
+    if LOOM_TASK_ID="$task" LOOM_TASK_RUN_ID=run-1 loom merge "$task" > "$case_dir/agent-merge.txt" 2>&1; then
+      echo "a task agent queued a merge" >&2; exit 1
+    fi
+    grep -q "lead's command" "$case_dir/agent-merge.txt"
+
+    # A human turns Lead may merge on; one loom merge queues the whole stack.
+    loom git-settings --auto-merge on > "$case_dir/settings-on.txt" 2> "$case_dir/settings-on-warning.txt"
+    grep -q '^auto-merge: on$' "$case_dir/settings-on.txt"
+    hold_unmerged 4 "0 0" "Lead may merge on, layer one pending"
+    merge_queue "$case_dir/queue-before.json"
+    json "$case_dir/queue-before.json" 'assert v==[], v'
+    lead_merge "$task" > "$case_dir/lead-merge-on.txt"
+    cat "$case_dir/lead-merge-on.txt"
+    grep -q "merge queued: stack merge-chain up to $target" "$case_dir/lead-merge-on.txt"
+    merge_queue "$case_dir/queue-on.json"
+    json "$case_dir/queue-on.json" 'assert len(v)==1 and v[0]["target"]==sys.argv[2] and v[0]["queued_by"]=="lead" and v[0]["pr_number"]==int(sys.argv[3]) and v[0]["stack_id"]=="merge-chain", v' "$target" "$two"
+    lead_merge "$task" > "$case_dir/lead-merge-again.txt"
+    merge_queue "$case_dir/queue-again.json"
+    json "$case_dir/queue-again.json" 'assert len(v)==1 and v[0]["target"]==sys.argv[2], v' "$target"
+    browser open "$AFT_BASE_URL/ws/$workspace/prs" >/dev/null
+    browser wait '[data-testid="merge-queue-entry"]' >/dev/null
+    browser get text '[data-testid="merge-queue"]' > "$case_dir/queue-ui.txt"
+    cat "$case_dir/queue-ui.txt"
+    grep -q "Merge up to $target" "$case_dir/queue-ui.txt"
+    grep -q "#$two" "$case_dir/queue-ui.txt"
+    grep -q 'Queued by the lead' "$case_dir/queue-ui.txt"
+    browser screenshot "$case_dir/lead-merge-queued-prs.png" >/dev/null
+    hold_unmerged 4 "0 0" "queued merge, layer one pending"
+    test "$(merge_puts "$one")" = 0
+
+    # Checks pass: the queue lands the stack bottom up.
+    pr_status "$one" '"checks":"SUCCESS","merge_state":"CLEAN"'
+    wait_merged "1 1" "lead's queued merge"
+    wait_merge_phase "$target" done "$case_dir/merge-done.json"
+    merge_queue "$case_dir/queue-done.json"
+    json "$case_dir/queue-done.json" 'assert v==[], v'
+    for layer in 1 2; do git --git-dir="$case_dir/$app_repo.git" show "main:lead-queue-$layer.txt" >/dev/null; done
+    loom git-settings --auto-merge off >/dev/null
     ;;
 
   green)
@@ -226,8 +306,8 @@ case "$case_name" in
     two="$(pull_number 2)"
     pr_status "$one" '"checks":"PENDING","merge_state":"BLOCKED"'
     pr_status "$two" '"review":"CHANGES_REQUESTED","merge_state":"BLOCKED"'
-    loom lead-may-merge when_green > "$case_dir/policy.txt" 2> "$case_dir/policy-warning.txt"
-    grep -q when_green "$case_dir/policy.txt"
+    loom git-settings --auto-merge on > "$case_dir/policy.txt" 2> "$case_dir/policy-warning.txt"
+    grep -q '^auto-merge: on$' "$case_dir/policy.txt"
     hold_unmerged 10 "0 0" "required check pending"
     test "$(merge_puts "$one")" = 0
     pr_status "$one" '"checks":"SUCCESS","merge_state":"CLEAN"'
@@ -236,7 +316,7 @@ case "$case_name" in
     test "$(merge_puts "$two")" = 0
     pr_status "$two" '"review":"APPROVED","merge_state":"CLEAN"'
     wait_merged "1 1" "layer two approved"
-    loom lead-may-merge off > "$case_dir/policy-off.txt"
+    loom git-settings --auto-merge off > "$case_dir/policy-off.txt"
     for layer in 1 2; do git --git-dir="$case_dir/$app_repo.git" show "main:lead-green-$layer.txt" >/dev/null; done
     ;;
 
@@ -246,21 +326,14 @@ case "$case_name" in
     publish_stack
     b="$(cat "$case_dir/change-2.id")"
     c="$(cat "$case_dir/change-3.id")"
-    printf 'merge %s\n' "$b" | loom merge-up-to merge-chain lead "$b" > "$case_dir/merge-b.txt"
+    test "$(merge_up_to_here "$b" "$case_dir/merge-b.json")" = 200 || { cat "$case_dir/merge-b.json"; exit 1; }
     wait_merged "1 1 0" "merge up to B"
-    for _ in $(seq 1 60); do
-      loom merge-up-to merge-chain lead "$b" --status > "$case_dir/status-b.txt" 2>&1 || true
-      grep -q '^merge: done' "$case_dir/status-b.txt" && break
-      sleep 2
-    done
-    grep -q '^merge: done' "$case_dir/status-b.txt"
-    set +e
-    printf 'merge %s\n' "$c" | loom merge-up-to merge-chain lead "$c" > "$case_dir/merge-c.txt" 2>&1
-    rc=$?
-    set -e
-    printf 'merge up to C after B exited %s:\n' "$rc"
-    cat "$case_dir/merge-c.txt"
-    test "$rc" = 0
+    wait_merge_phase "$b" done "$case_dir/status-b.json"
+    json "$case_dir/status-b.json" 's=[l["state"] for l in v["layers"]]; assert v["backend"]=="loom" and s[:2]==["done","done"] and s[2:]==["pending"], v'
+    rc="$(merge_up_to_here "$c" "$case_dir/merge-c.json")"
+    printf 'merge up to C after B returned %s:\n' "$rc"
+    cat "$case_dir/merge-c.json"
+    test "$rc" = 200
     wait_merged "1 1 1" "later merge up to C"
     git --git-dir="$case_dir/$app_repo.git" show main:lead-later-c.txt >/dev/null
     ;;
@@ -286,12 +359,9 @@ case "$case_name" in
     json "$case_dir/statuses-pending.json" 'p=[x for x in v if x["context"]=="loom/dependencies"]; assert p and p[-1]["state"]=="pending" and ("owner/"+sys.argv[3]+"#"+sys.argv[2]) in p[-1]["description"] and p[-1]["repo"]=="owner/"+sys.argv[4], v' "$api_number" "$api_repo" "$app_repo"
     # A human asks Loom to merge the app before the api PR has landed: Loom
     # refuses or holds the request, and the app PR must not merge.
-    set +e
-    printf 'merge %s\n' "$app_change" | loom merge-up-to deps-app lead "$app_change" > "$case_dir/merge-early.txt" 2>&1
-    early_rc=$?
-    set -e
-    printf 'app merge requested before owner/%s#%s landed exited %s:\n' "$api_repo" "$api_number" "$early_rc"
-    cat "$case_dir/merge-early.txt"
+    early_code="$(merge_up_to_here "$app_change" "$case_dir/merge-early.json")"
+    printf 'app merge requested before owner/%s#%s landed returned %s:\n' "$api_repo" "$api_number" "$early_code"
+    cat "$case_dir/merge-early.json"
     hold_seconds=10
     for _ in $(seq 1 "$hold_seconds"); do
       curl -fsS "$AFT_FAKE_GH_BASE/__statuses?sha=$app_head" > "$case_dir/statuses-hold.json"
@@ -319,8 +389,8 @@ case "$case_name" in
       exit 1
     fi
     # A refused early request is asked again now; a held one proceeds by itself.
-    if [[ "$early_rc" != 0 ]]; then
-      printf 'merge %s\n' "$app_change" | loom merge-up-to deps-app lead "$app_change" > "$case_dir/merge-app.txt" 2>&1 || { cat "$case_dir/merge-app.txt"; exit 1; }
+    if [[ "$early_code" != 200 ]]; then
+      test "$(merge_up_to_here "$app_change" "$case_dir/merge-app.json")" = 200 || { cat "$case_dir/merge-app.json"; exit 1; }
     fi
     for _ in $(seq 1 60); do
       pulls_now

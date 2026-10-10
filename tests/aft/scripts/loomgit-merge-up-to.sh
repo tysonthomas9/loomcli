@@ -61,6 +61,8 @@ done
 curl -fsS -X POST "$api/workflows/epic-runner" -H 'Content-Type: application/json' \
   -d "{\"epicId\":\"$epic\",\"runner\":\"local-task-runner\"}" > "$case_dir/workflow.json"
 
+# A stacked task runs only once the task below it is approved (P1.26), so
+# approve and apply each layer as its revision appears.
 for layer in 1 2 3 4; do
   task="$(cat "$case_dir/task-$layer.id")"
   for attempt in $(seq 1 90); do
@@ -69,10 +71,6 @@ for layer in 1 2 3 4; do
     sleep 2
   done
   grep -q '"head_sha"' "$case_dir/revisions-$layer.json"
-done
-
-for layer in 1 2 3 4; do
-  task="$(cat "$case_dir/task-$layer.id")"
   read -r change revision sha < <(python3 -c 'import json,sys; item=json.load(open(sys.argv[1]))["data"][0]; print(item["change_id"],item["number"],item["head_sha"])' "$case_dir/revisions-$layer.json")
   printf '%s\n' "$change" > "$case_dir/change-$layer.id"
   curl -sS --fail-with-body -X POST "$api/changes/$change/revisions/$revision/verdict" -H 'Content-Type: application/json' \
@@ -98,35 +96,28 @@ LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" pr-stack aft-chain lead \
 curl -fsS "$AFT_FAKE_GH_BASE/__pulls?workspace=$workspace" > "$case_dir/pulls-before.json"
 python3 -c 'import json,sys; p=json.load(open(sys.argv[1])); assert len(p)==4, p; assert [x["base"]["ref"] for x in p]==["main"]+[x["head"]["ref"] for x in p[:3]], p' "$case_dir/pulls-before.json"
 target="$(cat "$case_dir/change-3.id")"
-curl -fsS "$api/agents/lead/git/merge-up-to?stack_id=aft-chain&target=$target" > "$case_dir/preview.json"
+# The PR page's Merge up to here and the lead's loom merge share one queue
+# (P3.16): GET shows the merge, POST queues it for the human who pressed it.
+curl -fsS "$api/changes/$target/merge-up-to" > "$case_dir/preview.json"
 python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); assert len(v["layers"])==4 and v["backend"]==sys.argv[2], v' "$case_dir/preview.json" "$backend"
-
-if [[ "$backend" == native ]]; then
-  python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); print(json.dumps({"stack_id":"aft-chain","target":sys.argv[2],"heads":[x["head"] for x in v["layers"]],"actor":{"kind":"human","id":"aft"}}))' "$case_dir/preview.json" "$target" |
-    curl -fsS -X POST "$api/agents/lead/git/merge-up-to" -H 'Content-Type: application/json' -d @- > "$case_dir/request.json"
-else
-  printf 'merge %s\n' "$target" | LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" merge-up-to aft-chain lead "$target" --workspace "$workspace" > "$case_dir/request.txt"
-fi
+curl -sS --fail-with-body -X POST "$api/changes/$target/merge-up-to" -H 'Content-Type: application/json' \
+  -d '{"actor":{"kind":"human","id":"aft"}}' > "$case_dir/request.json"
+curl -fsS "$api/git/merge-queue" > "$case_dir/queue.json"
+python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); assert v==[] or (len(v)==1 and v[0]["target"]==sys.argv[2] and v[0]["queued_by"]=="aft"), v' "$case_dir/queue.json" "$target"
 
 for attempt in $(seq 1 90); do
-  curl -fsS "$api/agents/lead/git/merge-up-to?stack_id=aft-chain&target=$target" > "$case_dir/final.json"
+  curl -fsS "$api/changes/$target/merge-up-to" > "$case_dir/final.json"
   if python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); sys.exit(0 if v["phase"]=="done" else 1)' "$case_dir/final.json"; then break; fi
   sleep 2
 done
 printf 'merge status after %s polls: ' "$attempt"
 python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); assert v["phase"]=="done", v; assert [x["state"] for x in v["layers"][:3]]==["done"]*3, v' "$case_dir/final.json"
-agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$workspace/agents/lead" >/dev/null
-agent-browser --session "$AFT_SESSION" find role button click --name Git --exact >/dev/null
-agent-browser --session "$AFT_SESSION" find role button click --name 'Merge stack' >/dev/null
-agent-browser --session "$AFT_SESSION" find label 'Stack ID' fill aft-chain >/dev/null
-agent-browser --session "$AFT_SESSION" find label 'Up to layer' fill "$target" >/dev/null
-agent-browser --session "$AFT_SESSION" find role button click --name 'Show merge state' >/dev/null
-agent-browser --session "$AFT_SESSION" wait --text "$backend merge: done" >/dev/null
-agent-browser --session "$AFT_SESSION" get text body > "$case_dir/ui-state.txt"
-for layer in 1 2 3 4; do
-  change="$(cat "$case_dir/change-$layer.id")"
-  grep -q "$change:" "$case_dir/ui-state.txt"
-done
+# A finished merge leaves the queue; the Pull Requests page shows no queued merge.
+curl -fsS "$api/git/merge-queue" > "$case_dir/queue-done.json"
+python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))==[]' "$case_dir/queue-done.json"
+agent-browser --session "$AFT_SESSION" open "$AFT_BASE_URL/ws/$workspace/prs" >/dev/null
+agent-browser --session "$AFT_SESSION" wait 3000 >/dev/null
+test "$(agent-browser --session "$AFT_SESSION" eval "document.querySelectorAll('[data-testid=merge-queue-entry]').length")" = 0
 agent-browser --session "$AFT_SESSION" screenshot "$case_dir/merge-ui.png" >/dev/null
 curl -fsS "$AFT_FAKE_GH_BASE/__pulls?workspace=$workspace" > "$case_dir/pulls-after.json"
 python3 -c 'import json,sys; p=json.load(open(sys.argv[1])); assert all(x["merged_at"] for x in p[:3]), p; assert p[3]["state"]=="open" and p[3]["base"]["ref"]=="main", p' "$case_dir/pulls-after.json"

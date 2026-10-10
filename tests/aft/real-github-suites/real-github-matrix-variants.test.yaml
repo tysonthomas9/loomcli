@@ -173,7 +173,7 @@ tests:
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" pr n3 b a"
         intent: "PR of b opens on the forge based on a, and the task shows it"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" lead-do n3 request-merge b refused"
-        intent: "The lead (a real codex lead, told mid-session in its terminal, on the real tier) asks to merge its stack through B with Lead may merge off; Loom refuses with 'Lead may merge is off', queues no request and merges nothing (D38: no human Confirm step)"
+        intent: "The lead (a real codex lead, told mid-session in its terminal, on the real tier) runs loom merge for B with Lead may merge off; Loom refuses with 'Lead may merge is off', queues nothing and merges nothing (D38)"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" hold-open n3 6 a b"
         intent: "A and B stay open"
       - run: "bash \"$AFT_TESTS_DIR/scripts/loomgit-matrix.sh\" ui n3 b open"

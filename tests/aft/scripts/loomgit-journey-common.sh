@@ -61,7 +61,7 @@ PY
     journey_json_id < "$JOURNEY_STATE/workspace.json" > "$JOURNEY_STATE/workspace.id"
     journey_load "$key"
     # Public product configuration; no journal/session/ref records are seeded.
-    LOOM_WORKSPACE="$JOURNEY_WS" LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" delivery-mode "$mode" --workspace "$JOURNEY_WS" > "$JOURNEY_STATE/delivery-mode.txt"
+    LOOM_WORKSPACE="$JOURNEY_WS" LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" git-settings --delivery "$([[ $mode == trunk ]] && echo pr-per-task || echo stack)" --workspace "$JOURNEY_WS" > "$JOURNEY_STATE/git-settings.txt"
     curl -fsS -X POST "$JOURNEY_API/agents" -H 'Content-Type: application/json' \
         -d '{"name":"lead","role_name":"lead","auto":false,"cross_repo":true,"repos":[],"backend":"codex"}' > "$JOURNEY_STATE/lead.json"
     git -C "$JOURNEY_REPO" rev-parse HEAD > "$JOURNEY_STATE/base.sha"

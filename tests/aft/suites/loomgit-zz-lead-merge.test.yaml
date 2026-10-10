@@ -2,24 +2,24 @@ suite: loomgit-zz-lead-merge
 classification: { area: reviews, feature: lead-merge, surface: mixed, purpose: journey }
 baseUrl: "${AFT_BASE_URL:-http://127.0.0.1:3100}"
 teardown: >-
-  for c in request green later deps; do bash "$AFT_TESTS_DIR/scripts/loomgit-lead-merge.sh" teardown "$c" || true; done
+  for c in queue green later deps; do bash "$AFT_TESTS_DIR/scripts/loomgit-lead-merge.sh" teardown "$c" || true; done
 tests:
-  - name: lead merge request runs only after a human confirms it in the UI
-    intent: The lead agent requests a merge over HTTP; agent confirmations are refused and nothing merges until a human clicks the confirm card
+  - name: The lead queues a whole-stack merge with Lead may merge on
+    intent: With Lead may merge off the lead's loom merge is refused with "Lead may merge is off" and nothing is queued; once a human turns it on, one loom merge queues the whole stack, the Pull Requests page shows it, and it lands bottom up when checks pass (AFT-G2)
     steps:
-      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-lead-merge.sh" setup request
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-lead-merge.sh" setup queue
         intent: Create a disposable repository and workspace through the product API
-      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-lead-merge.sh" run request
-        intent: Publish a native stack from real TaskRuns, then drive lead request, refused agent confirmation and human UI confirmation
+      - run: bash "$AFT_TESTS_DIR/scripts/loomgit-lead-merge.sh" run queue
+        intent: Publish a native stack from real TaskRuns, see the lead's loom merge refused while Lead may merge is off, turn it on, queue the merge, see it on the Pull Requests page and watch it land
   - name: when_green merges after required checks pass and stops below changes requested
-    intent: A human turns on lead_may_merge with the CLI; Reconcile merges only layers whose provider checks and reviews pass
+    intent: A human turns auto-merge on with loom git-settings; Reconcile merges only layers whose provider checks and reviews pass
     steps:
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-lead-merge.sh" setup green
         intent: Create a disposable repository and workspace through the product API
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-lead-merge.sh" run green
         intent: Hold on a pending required check and a changes-requested review, then merge each layer once the provider shows it green
   - name: Loom backend merges up to B and later merges C
-    intent: A human merges a Loom stack up to B from the CLI, then asks again to merge up to C after B has landed
+    intent: A human presses Merge up to here on B's PR (the button's API), then again on C's after B has landed
     steps:
       - run: bash "$AFT_TESTS_DIR/scripts/loomgit-lead-merge.sh" setup later
         intent: Create a disposable repository and workspace through the product API

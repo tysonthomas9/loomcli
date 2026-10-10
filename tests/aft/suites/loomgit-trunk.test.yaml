@@ -17,7 +17,7 @@ setup: >-
   curl -sf -X POST "$AFT_FAKE_GH_BASE/__reset" >/dev/null;
   curl -sf -X POST "$AFT_BASE_URL/api/workspaces" -H 'Content-Type: application/json'
   -d "{\"name\":\"e2e-ws-trunk\",\"type\":\"empty\",\"repos\":[\"$repo\"]}" >/dev/null;
-  LOOM_WORKSPACE=E2E-WS-TRUNK LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" delivery-mode trunk --workspace E2E-WS-TRUNK >/dev/null
+  LOOM_WORKSPACE=E2E-WS-TRUNK LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" git-settings --delivery pr-per-task --workspace E2E-WS-TRUNK >/dev/null
 teardown: >-
   AFT_WS=E2E-WS-TRUNK "$AFT_TESTS_DIR/scripts/close-open-issues.sh";
   curl -s -X DELETE "$AFT_BASE_URL/api/workspaces/E2E-WS-TRUNK" >/dev/null || true

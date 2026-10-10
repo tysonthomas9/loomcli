@@ -261,7 +261,7 @@ diagnose() {
         stack="$(json "$case_dir/diag-approval-$name.json" 'print(v.get("data",{}).get("stack_id",""))' 2>/dev/null || true)"
         if [[ -n "$stack" ]]; then
           echo "== task $name merge machine"
-          curl -sS "$api/agents/lead/git/merge-up-to?stack_id=$stack&target=$change" || true
+          curl -sS "$api/changes/$change/merge-up-to" || true
           echo
         fi
       fi

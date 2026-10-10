@@ -54,7 +54,7 @@ setup)
   curl -fsS -X POST "$AFT_BASE_URL/api/workspaces" -H 'Content-Type: application/json' \
     -d "{\"name\":\"$lower\",\"type\":\"empty\",\"repos\":[\"$repo\"]}" >/dev/null
   if [[ "${3:-stack}" == trunk ]]; then
-    LOOM_WORKSPACE="$workspace" LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" delivery-mode trunk --workspace "$workspace" >/dev/null
+    LOOM_WORKSPACE="$workspace" LOOM_CONFIG_DIR="$AFT_LOOM_CONFIG_DIR" "$AFT_LOOM_BIN" git-settings --delivery pr-per-task --workspace "$workspace" >/dev/null
   fi
   ;;
 teardown)

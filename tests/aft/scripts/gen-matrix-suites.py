@@ -253,7 +253,7 @@ def variants(real=False):
     c = "n3"
     st = setup(c) + settings(c, "stack", "on", "off")
     st += build(c, [("a", "-", ""), ("b", "a", "")], {"a": lead_create_pr(c, "a", "main"), "b": lead_create_pr(c, "b", "a")})
-    st += lead(c, "request-merge", "b", "refused", "asks to merge its stack through B with Lead may merge off; Loom refuses with 'Lead may merge is off', queues no request and merges nothing (D38: no human Confirm step)") + \
+    st += lead(c, "request-merge", "b", "refused", "runs loom merge for B with Lead may merge off; Loom refuses with 'Lead may merge is off', queues nothing and merges nothing (D38)") + \
         run(f"hold-open {c} 6 a b", "A and B stay open") + run(f"ui {c} b open", "Task B shows its PR open")
     out += case("N3 The lead's merge request is refused when Lead may merge is off", "D38: with Lead may merge off, Loom refuses the lead's merge request outright; nothing waits for a human to confirm", st,
                 labels=[("P3.16", "today Loom queues the request for a human to confirm.")])
