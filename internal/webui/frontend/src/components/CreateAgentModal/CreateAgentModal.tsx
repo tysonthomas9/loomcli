@@ -247,13 +247,14 @@ export function CreateAgentModal({
     names.find(isReady);
   const defaultUnavailable =
     backends.length > 0 && !isReady(resolvedDefaultBackend);
-  const selected =
-    backend ||
-    (defaultUnavailable && firstReady(backends.map((b) => b.name))) ||
-    resolvedDefaultBackend;
   // A lead runs only on a harness this server has; until that list loads,
   // the chosen backend stands and the server explains a refusal.
   const leadOnly = isLead && leadHarnesses.length > 0;
+  const selected =
+    backend ||
+    (defaultUnavailable &&
+      firstReady(leadOnly ? leadHarnesses : backends.map((b) => b.name))) ||
+    resolvedDefaultBackend;
   const harness =
     leadOnly && !leadHarnesses.includes(selected)
       ? (firstReady(leadHarnesses) ?? leadHarnesses[0])

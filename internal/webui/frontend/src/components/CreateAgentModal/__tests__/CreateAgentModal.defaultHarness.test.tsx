@@ -148,4 +148,23 @@ describe("CreateAgentModal: default AI Backend skips unavailable harnesses", () 
     fireEvent.click(screen.getByTestId("create-agent-template-lead"));
     expect(picker()).toHaveValue("opencode");
   });
+
+  it("takes a lead's fallback in the lead harness order", async () => {
+    leadHarnesses = ["codex", "opencode", "claude"];
+    setBackends(["codex"]);
+    renderModal("codex");
+    fireEvent.change(screen.getByTestId("create-agent-name"), {
+      target: { value: "lead-a" },
+    });
+    fireEvent.click(screen.getByTestId("create-agent-template-lead"));
+    expect(picker()).toHaveValue("opencode");
+    expect(
+      screen.getByText("Codex is unavailable, so OpenCode is selected."),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /create agent/i }));
+    await waitFor(() => expect(mockCreateLead).toHaveBeenCalled());
+    expect(mockCreateLead.mock.calls[0][0]).toMatchObject({
+      overrides: { harness: "opencode" },
+    });
+  });
 });
