@@ -47,15 +47,15 @@ func TestGitCommandsSelectWorkspaceWithoutActiveWorkspace(t *testing.T) {
 		t.Fatalf("resolver without a selection: %v", err)
 	}
 
-	oldApply, oldApprove, oldPull, oldRestack, oldUnapply := pushApply, approveLocal, pullLocal, restackLocal, unapplyLocal
-	oldPR, oldPush, oldApproveWS, oldPull2, oldSync := prWorkspace, pushWorkspace, approveWorkspace, pullWorkspace, syncWorkspaceFlag
+	oldApply, oldApprove, oldPull, oldRestack, oldUnapply := applyRevision, approveLocal, pullLocal, restackLocal, unapplyLocal
+	oldPR, oldPush, oldApproveWS, oldPull2, oldSync := prWorkspace, applyWorkspace, approveWorkspace, pullWorkspace, syncWorkspaceFlag
 	t.Cleanup(func() {
-		pushApply, approveLocal, pullLocal, restackLocal, unapplyLocal = oldApply, oldApprove, oldPull, oldRestack, oldUnapply
-		prWorkspace, pushWorkspace, approveWorkspace, pullWorkspace, syncWorkspaceFlag = oldPR, oldPush, oldApproveWS, oldPull2, oldSync
+		applyRevision, approveLocal, pullLocal, restackLocal, unapplyLocal = oldApply, oldApprove, oldPull, oldRestack, oldUnapply
+		prWorkspace, applyWorkspace, approveWorkspace, pullWorkspace, syncWorkspaceFlag = oldPR, oldPush, oldApproveWS, oldPull2, oldSync
 	})
 
 	var got string
-	pushApply = func(_ context.Context, request apply.Request) (apply.Result, error) {
+	applyRevision = func(_ context.Context, request apply.Request) (apply.Result, error) {
 		got = request.Workspace
 		return apply.Result{}, nil
 	}
@@ -90,9 +90,9 @@ func TestGitCommandsSelectWorkspaceWithoutActiveWorkspace(t *testing.T) {
 		want string // value the command's backend must receive; "" = only check resolution
 		out  string
 	}{
-		{name: "delivery-mode", cmd: deliveryModeCmd, args: []string{"trunk"}, out: "trunk\n"},
+		{name: "git-settings", cmd: gitSettingsCmd, args: []string{"--delivery", "pr-per-task"}, out: "delivery: pr-per-task\nauto-merge: off\nlead-may-approve: on\n"},
 		{name: "pr", cmd: prCmd, args: []string{"lead", "change"}},
-		{name: "push", cmd: pushCmd, args: []string{"change", "2"}, want: "SELECTED"},
+		{name: "apply", cmd: applyCmd, args: []string{"change", "2"}, want: "SELECTED"},
 		{name: "approve", cmd: approveCmd, args: []string{"change", "2"}, want: "SELECTED"},
 		{name: "reject", cmd: rejectCmd, args: []string{"change", "2"}, want: "SELECTED"},
 		{name: "pull", cmd: pullCmd, args: []string{"repo"}, want: repoDir},
@@ -106,7 +106,7 @@ func TestGitCommandsSelectWorkspaceWithoutActiveWorkspace(t *testing.T) {
 			if position == "after" {
 				args = append(append([]string{}, tc.args...), "--workspace", "selected")
 			}
-			prWorkspace, pushWorkspace, approveWorkspace, pullWorkspace, syncWorkspaceFlag = "", "", "", "", ""
+			prWorkspace, applyWorkspace, approveWorkspace, pullWorkspace, syncWorkspaceFlag = "", "", "", "", ""
 			got = ""
 			var output bytes.Buffer
 			tc.cmd.SetArgs(args)

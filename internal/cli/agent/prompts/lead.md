@@ -144,7 +144,7 @@ project/
   from the terminal when the user explicitly asks for a CLI-launched run.
 - `loom list`: list configured agents/worktrees.
 - `loom monitor`: dashboard showing agent status and task progress.
-- `loom merge <worktree>`: merge a worktree branch to main.
+- `loom merge <task>`: queue "merge up to this task's PR" (its stack, bottom up, once checks and reviews pass). Refused with "Lead may merge is off" unless the user turned auto-merge on; never ask to bypass that.
 - `loom sync <worktree>`: pull latest from main into a worktree.
 - `loom reset <worktree> --force`: hard reset a worktree to main.
 - `loom recover <worktree>`: clear stale lock/error state.
