@@ -53,7 +53,17 @@ for t in podman opencode sqlite3 python3 jq curl make; do
   command -v "$t" >/dev/null 2>&1 || die "$t is required"
 done
 owned() { podman ps -a --filter "label=com.docker.compose.project=$project" --format '{{.Names}}'; }
-[ -z "$(owned)" ] || die "project $project already has containers; pick another name or tear yours down"
+# The project must be entirely new: teardown runs `down -v`, so refuse any
+# container, volume or network already labelled with it.
+leftovers() {
+  owned
+  podman volume ls -q --filter "label=com.docker.compose.project=$project"
+  podman network ls -q --filter "label=com.docker.compose.project=$project"
+}
+[ -z "$(leftovers 2>/dev/null)" ] || die "project $project already has containers, volumes or networks; pick another name"
+# Only this suite's compose override and no Claude login copy may apply.
+[ -z "${LOCAL_MODE_COMPOSE_FILES:-}" ] || die "unset LOCAL_MODE_COMPOSE_FILES; the suite brings its own override"
+unset LOCAL_MODE_CLAUDE_COPY
 
 model="${S15_MODEL:-anthropic/claude-sonnet-4-5}"
 api="http://127.0.0.1:${LOCAL_MODE_API_PORT}"
@@ -63,6 +73,7 @@ ctr="${project}-loom-local-1"
 state_dir="${LOCAL_MODE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/loom-local-mode}"
 [ -n "$state_dir" ] || die "could not resolve LOCAL_MODE_STATE_DIR"
 copy="$state_dir/$project/opencode.db"
+[ ! -e "$state_dir/$project" ] || die "$state_dir/$project already exists; it belongs to an earlier run of $project"
 fleet="${FLEET_DB_REPO:-}"
 if [ -z "$fleet" ] && [ ! -d "$repo/../fleet-db" ]; then
   die "set FLEET_DB_REPO to a fleet-db checkout (compose builds ../fleet-db by default)"
@@ -75,12 +86,14 @@ host="$T/host-opencode"
 # same list reaches make's up and down.
 if [ -n "$fleet" ]; then
   printf 'services:\n  fleet-db:\n    build:\n      context: %s\n' "$fleet" > "$T/fleet-db.yml"
-  export LOCAL_MODE_COMPOSE_FILES="${LOCAL_MODE_COMPOSE_FILES:+$LOCAL_MODE_COMPOSE_FILES }$T/fleet-db.yml"
+  export LOCAL_MODE_COMPOSE_FILES="$T/fleet-db.yml"
 fi
 # No real credentials: the REAL override's codex and Claude binds read
 # /dev/null instead of the host logins (OpenCode uses the fixture above).
 export LOCAL_MODE_CODEX_AUTH=/dev/null LOCAL_MODE_CLAUDE_AUTH=/dev/null LOCAL_MODE_CLAUDE_TOKEN_FILE=/dev/null
+brought_up=""
 down() {
+  [ -n "$brought_up" ] || return 0
   (cd "$repo" && LOCAL_MODE_AGENTS_REAL=1 make -s local-mode-agents-down >"$T/down.log" 2>&1) || true
 }
 # Image builds on this host are serialized by a shared mkdir lock (the AFT
@@ -158,7 +171,15 @@ while time.time() < end:
         for ch in b"sk-ant-s15-throwaway-not-a-real-key":
             os.write(fd, bytes([ch])); time.sleep(0.01)
         time.sleep(0.5); os.write(fd, b"\r"); typed = True
-_, st = os.waitpid(pid, 0)
+# Reap the child; at the deadline, kill it rather than wait forever.
+done, st = os.waitpid(pid, os.WNOHANG)
+if done == 0:
+    time.sleep(2)
+    done, st = os.waitpid(pid, os.WNOHANG)
+    if done == 0:
+        os.kill(pid, 9)
+        os.waitpid(pid, 0)
+        sys.exit(1)
 sys.exit(0 if typed and st == 0 and b"Connected" in buf else 1)
 PY
 mkdir -p "$host"
@@ -178,6 +199,7 @@ cp -p "$host/opencode.db-wal" "$T/good.wal"
 # --- K2a: a truncated -wal refuses the boot. ---------------------------------
 python3 -c 'import os, sys; os.truncate(sys.argv[1], 3)' "$host/opencode.db-wal"
 before="$(listing "$host")"
+brought_up=1
 out="$(up 2>&1)"; rc=$?
 printf '%s\n' "$out" > "$T/k2a-up.log"
 check "K2 truncated host WAL: make local-mode-agents-up fails" '[ "$rc" != 0 ]'
@@ -192,9 +214,12 @@ cp -p "$T/good.wal" "$host/opencode.db-wal"
 before="$(listing "$host")"
 boot="$T/boot.log"
 : > "$boot"
-# Follow loom-local's log as soon as the container exists; on the ready line,
-# list the catalog and send a Create at once, recording the timings. It waits
-# as long as the build takes; it is stopped below if the boot fails.
+# Follow loom-local's log as soon as the container runs; on the ready line,
+# list the catalog and send a Create at once. Timing is measured from the
+# line's EMISSION (podman's log timestamp, VM clock), not from when this
+# follower reads it: the VM-host clock offset is measured right after, and the
+# catalog request and the POST must each start within 1 s of emission.
+now() { if [ -n "${EPOCHREALTIME:-}" ]; then printf '%s\n' "$EPOCHREALTIME"; else python3 -c 'import time; print(repr(time.time()))'; fi; }
 (
   # Compose creates loom-local before it starts it, and `podman logs -f` on a
   # created container returns at once; attach only once it runs, and again if
@@ -202,16 +227,28 @@ boot="$T/boot.log"
   while [ ! -s "$T/k1-timing" ]; do
     until [ "$(podman inspect -f '{{.State.Running}}' "$ctr" 2>/dev/null)" = true ]; do sleep 0.25; done
     : > "$boot"
-    podman logs -f "$ctr" 2>&1 | while IFS= read -r line; do
+    podman logs -f --timestamps "$ctr" 2>&1 | while IFS= read -r raw; do
+      ts="${raw%% *}" line="${raw#* }"
       printf '%s\n' "$line" >> "$boot"
       if [ "$line" = "[local-mode] ready" ]; then
-        t0="$(python3 -c 'import time; print(time.time())')"
+        t_models="$(now)"
         code="$(curl -sS -o "$T/k1-models.json" -w '%{http_code}' --max-time 1 "$prefix/harnesses/opencode/models" 2>"$T/k1-models.err" || true)"
-        t1="$(python3 -c 'import time; print(time.time())')"
         body="$(jq -nc --arg m "$model" '{preset:"lead",name:"s15-wu1-first",repo:"source-repo",base_ref:"main",overrides:{harness:"opencode",model:$m}}')"
+        t_post="$(now)"
         ccode="$(curl -sS -o "$T/k1-create.json" -w '%{http_code}' --max-time 60 -X POST \
           -H 'Content-Type: application/json' -H "Idempotency-Key: s15-wu1-$$" -d "$body" "$prefix/agents" 2>"$T/k1-create.err" || true)"
-        printf '%s %s %s %s %s\n' "$t0" "$t1" "$code" "$ccode" "$(python3 -c "print($t1 - $t0)")" > "$T/k1-timing"
+        h0="$(now)"; vm="$(podman exec "$ctr" date +%s.%N 2>/dev/null)"; h1="$(now)"
+        python3 - "$ts" "$t_models" "$t_post" "$h0" "$vm" "$h1" "$code" "$ccode" > "$T/k1-timing" <<'PY2'
+import datetime, json, re, sys
+ts, t_models, t_post, h0, vm, h1, code, ccode = sys.argv[1:]
+m = re.match(r"(.*\.\d{1,6})\d*(.*)$", ts)
+emit_vm = datetime.datetime.fromisoformat(m.group(1) + m.group(2) if m else ts).timestamp()
+skew = (float(h0) + float(h1)) / 2 - float(vm)
+emit = emit_vm + skew
+print(json.dumps({"ready_ts": ts, "models_after_s": float(t_models) - emit, "post_after_s": float(t_post) - emit,
+                  "clock_offset_s": skew, "offset_rtt_s": float(h1) - float(h0),
+                  "models_http": code, "create_http": ccode}))
+PY2
         break
       fi
     done
@@ -250,10 +287,13 @@ ready_line="$(grep -n -x '\[local-mode\] ready' "$boot" | head -1 | cut -d: -f1)
 warm_line="$(grep -n "^\[local-mode\] OpenCode warm: [0-9][0-9]* models in [0-9][0-9]*s$" "$boot" | head -1 | cut -d: -f1)"
 check "K1 the boot log prints \"OpenCode warm\" before \"[local-mode] ready\", with no catalog warning" \
   '[ -n "$ready_line" ] && [ -n "$warm_line" ] && [ "$warm_line" -lt "$ready_line" ] && ! grep -q "WARNING: OpenCode catalog" "$boot"'
-read -r _ _ mcode ccode mdur < "$T/k1-timing" 2>/dev/null || { mcode=""; ccode=""; mdur=9; }
+tget() { jq -r ".$1 // empty" "$T/k1-timing" 2>/dev/null; }
+under1() { python3 -c 'import sys; sys.exit(0 if sys.argv[1] and float(sys.argv[1]) < 1 else 1)' "$1" 2>/dev/null; }
+mcode="$(tget models_http)" ccode="$(tget create_http)"
+check "K1 the catalog request starts within 1 s of the ready line's emission" 'under1 "$(tget models_after_s)"'
 check "K1 at ready, the catalog answers within 1 s and lists $model" \
   '[ "$mcode" = 200 ] && jq -e --arg m "$model" "any(.providers[].models[]; .id == \$m)" "$T/k1-models.json" >/dev/null 2>&1'
-check "K1 the first Create is sent within 1 s of ready" 'python3 -c "import sys; sys.exit(0 if float(sys.argv[1]) < 1 else 1)" "$mdur"'
+check "K1 the first Create is sent within 1 s of the ready line's emission" 'under1 "$(tget post_after_s)"'
 check "K1 the first Create returns 201 with no unknown-model or catalog error" \
   '[ "$ccode" = 201 ] && jq -e ".agent_id" "$T/k1-create.json" >/dev/null 2>&1 && ! grep -qiE "unknown model|preset_invalid|catalog|not ready" "$T/k1-create.json"'
 created="$(jq -r '.agent_id // empty' "$T/k1-create.json" 2>/dev/null)"
